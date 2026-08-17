@@ -246,6 +246,19 @@ the E2B Template SDK). Create it at the [E2B dashboard](https://e2b.dev) → API
    E2B_API_KEY=e2b_… E2B_TEMPLATE_ID=open-inspect-sandbox uv run python build-template.py
    ```
 
+For a self-hosted E2B-compatible runtime with an existing template, set
+`e2b_build_template = false`. Terraform will skip the official E2B Template SDK build and pass the
+configured `e2b_template_id` directly to the control plane.
+
+CubeSandbox starts the template launcher fresh for each sandbox and injects `envVars` during
+creation instead of returning an envd access token. Set `e2b_use_create_time_env = true` for
+CubeSandbox; keep the default `false` for managed E2B so session secrets continue through secure
+envd upload. If GitHub is the configured SCM provider, create-time-env sandboxes clone through the
+control plane's authenticated smart-HTTP endpoint. This supports sandbox networks that can reach a
+Cloudflare custom domain but cannot connect to `github.com` directly. Each request must present the
+session's sandbox capability; the control plane forwards the short-lived GitHub installation token
+only to `github.com`.
+
 The control plane calls the E2B REST API directly from Cloudflare Workers. Each session runs in a
 single long-lived sandbox: when its TTL (`e2b_sandbox_timeout_seconds`, default 7200) expires the
 sandbox is **paused** rather than killed (`e2b_auto_pause`, default true), so sessions survive idle
@@ -848,6 +861,16 @@ Cloudflare provisions the DNS record and edge certificate automatically. Notes:
   the new hostname, or sign-in will fail with a redirect URI mismatch.
 - The Cloudflare API token needs zone-level **Workers Routes: Edit** permission to attach the
   domain.
+
+If the sandbox network cannot reach `workers.dev`, also give the control-plane Worker a custom
+domain in the same zone:
+
+```hcl
+cloudflare_control_plane_custom_domain = "api.example.com"
+```
+
+The configured hostname becomes the canonical HTTP/WebSocket control-plane URL used by the web app
+and sandboxes. `cloudflare_zone_id` is required whenever this setting is non-empty.
 
 ### If using Vercel (`web_platform = "vercel"`)
 
