@@ -55,6 +55,7 @@ const ZEN_MODELS = [
 
 const DEEPSEEK_MODELS = ["deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-pro"] as const;
 const ZAI_CODING_PLAN_MODELS = ["zai-coding-plan/glm-5.2", "zai-coding-plan/glm-5.3"] as const;
+const XIAOMI_MODELS = ["xiaomi/mimo-v2.5", "xiaomi/mimo-v2.5-pro"] as const;
 
 describe("model utilities", () => {
   it("derives every public model view from the authoritative catalog", () => {
@@ -105,6 +106,7 @@ describe("model utilities", () => {
       ...ZEN_MODELS,
       ...ZAI_CODING_PLAN_MODELS,
       ...DEEPSEEK_MODELS,
+      ...XIAOMI_MODELS,
     ]) {
       expect(isValidModel(model)).toBe(true);
     }
@@ -348,8 +350,15 @@ describe("model utilities", () => {
     expect(
       MODEL_OPTIONS.find((group) => group.category === "DeepSeek")?.models.map((m) => m.id)
     ).toEqual(DEEPSEEK_MODELS);
+    expect(
+      MODEL_OPTIONS.find((group) => group.category === "Xiaomi MiMo")?.models.map((m) => m.id)
+    ).toEqual(XIAOMI_MODELS);
 
-    expect(DEFAULT_ENABLED_MODELS).toEqual([...ANTHROPIC_MODELS, ...OPENAI_MODELS]);
+    expect(DEFAULT_ENABLED_MODELS).toEqual([
+      ...ANTHROPIC_MODELS,
+      ...OPENAI_MODELS,
+      ...XIAOMI_MODELS,
+    ]);
     for (const optInModel of [
       ...XAI_MODELS,
       ...ZEN_MODELS,

@@ -34,6 +34,21 @@ variable "cloudflare_custom_domain" {
   }
 }
 
+variable "cloudflare_control_plane_custom_domain" {
+  description = "Custom domain (hostname) to attach to the Cloudflare control-plane Worker (optional). Requires cloudflare_zone_id. e.g. 'api.example.com'"
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.cloudflare_control_plane_custom_domain == null ||
+      trimspace(var.cloudflare_control_plane_custom_domain) == "" ||
+      can(regex("(?i)^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.cloudflare_control_plane_custom_domain))
+    )
+    error_message = "cloudflare_control_plane_custom_domain must be a bare hostname such as 'api.example.com' — no scheme, port, path, trailing dot, or whitespace."
+  }
+}
+
 variable "cloudflare_worker_subdomain" {
   description = "Cloudflare Workers account subdomain (e.g. 'myaccount' — .workers.dev is appended automatically)"
   type        = string
@@ -296,11 +311,29 @@ variable "anthropic_api_key" {
   type        = string
   sensitive   = true
   nullable    = false
+  default     = ""
 
   validation {
-    condition     = trimspace(var.anthropic_api_key) != ""
-    error_message = "anthropic_api_key must be non-blank."
+    condition = (
+      !contains(["modal", "opencomputer"], var.sandbox_provider) &&
+      !var.enable_slack_bot &&
+      !var.enable_linear_bot
+    ) || trimspace(var.anthropic_api_key) != ""
+    error_message = "anthropic_api_key must be non-blank when Modal, OpenComputer, Slack, or Linear execution is enabled."
   }
+}
+
+variable "xiaomi_api_key" {
+  description = "Xiaomi MiMo API key injected into E2B-compatible sandboxes"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "xiaomi_base_url" {
+  description = "OpenAI-compatible Xiaomi MiMo API base URL"
+  type        = string
+  default     = "https://token-plan-cn.xiaomimimo.com/v1"
 }
 
 # =============================================================================
@@ -486,6 +519,12 @@ variable "e2b_template_id" {
   }
 }
 
+variable "e2b_build_template" {
+  description = "Build the E2B template during terraform apply. Disable when using a compatible self-hosted API with a prebuilt template."
+  type        = bool
+  default     = true
+}
+
 variable "e2b_sandbox_timeout_seconds" {
   description = "Sandbox TTL in seconds. Default assumes a paid E2B plan. Hobby caps TTL at 3600 — set 3300."
   type        = number
@@ -496,6 +535,12 @@ variable "e2b_auto_pause" {
   description = "Pause (not kill) the sandbox when its TTL expires, so it stays resumable and auto-resumes on activity. Default true."
   type        = bool
   default     = true
+}
+
+variable "e2b_use_create_time_env" {
+  description = "Inject session env in POST /sandboxes for compatible self-hosted backends such as CubeSandbox"
+  type        = bool
+  default     = false
 }
 
 variable "nextauth_secret" {

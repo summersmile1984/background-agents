@@ -33,6 +33,7 @@ import sys
 import time
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, cast
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -131,7 +132,8 @@ def _is_authorized_request(input_lines: dict[str, str]) -> tuple[bool, str]:
     may clone sibling private repositories that the installation can access.
 
     * protocol must be ``https`` (never hand a token to a plaintext remote);
-    * host must equal the configured ``VCS_HOST``.
+    * host must equal the configured clone endpoint (or ``VCS_HOST`` when no
+      private clone endpoint is configured).
 
     Returns ``(authorized, reason)`` so the caller can log the rejection.
     """
@@ -142,7 +144,17 @@ def _is_authorized_request(input_lines: dict[str, str]) -> tuple[bool, str]:
     requested_host = input_lines.get("host", "").strip().lower()
     if not requested_host:
         return False, "no host provided"
-    expected_host = os.environ.get("VCS_HOST", "github.com").strip().lower()
+    clone_base_url = os.environ.get("VCS_CLONE_BASE_URL", "").strip()
+    parsed_clone_base = urlsplit(clone_base_url) if clone_base_url else None
+    expected_host = (
+        parsed_clone_base.netloc
+        if parsed_clone_base is not None
+        and parsed_clone_base.scheme.lower() == "https"
+        and parsed_clone_base.hostname
+        and parsed_clone_base.username is None
+        and parsed_clone_base.password is None
+        else os.environ.get("VCS_HOST", "github.com").strip()
+    ).lower()
     if requested_host != expected_host:
         return False, f"host={requested_host!r} (expected {expected_host!r})"
 
@@ -261,7 +273,13 @@ def _emit_response(input_lines: dict[str, str], credentials: dict[str, object]) 
         if key in {"username", "password"}:
             continue
         sys.stdout.write(f"{key}={value}\n")
-    sys.stdout.write(f"username={credentials['username']}\n")
+    # The private Git proxy uses HTTP Basic's username slot for the sandbox
+    # capability and forwards only the password (the GitHub installation token)
+    # upstream. GitHub ignores the username when a token is used as the password.
+    username = credentials["username"]
+    if os.environ.get("VCS_CLONE_BASE_URL", "").strip():
+        username = os.environ.get("SANDBOX_AUTH_TOKEN", "") or username
+    sys.stdout.write(f"username={username}\n")
     sys.stdout.write(f"password={credentials['password']}\n")
     sys.stdout.write("\n")
     sys.stdout.flush()

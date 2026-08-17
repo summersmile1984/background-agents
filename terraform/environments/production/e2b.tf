@@ -8,7 +8,7 @@
 # the e2b-infra builder, excluding only generated/cache dirs. Exclude-only policy,
 # mirroring the opencomputer builder, so a skill-only change still rebuilds the template.
 data "external" "e2b_source_hash" {
-  count = local.use_e2b_backend ? 1 : 0
+  count = local.use_e2b_backend && var.e2b_build_template ? 1 : 0
 
   program = ["bash", "-c", <<-EOF
     cd ${var.project_root}
@@ -33,7 +33,7 @@ data "external" "e2b_source_hash" {
 }
 
 module "e2b_infra" {
-  count  = local.use_e2b_backend ? 1 : 0
+  count  = local.use_e2b_backend && var.e2b_build_template ? 1 : 0
   source = "../../modules/e2b-infra"
 
   api_key     = var.e2b_api_key

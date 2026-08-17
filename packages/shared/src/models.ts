@@ -60,7 +60,6 @@ export const MODEL_CATALOG = [
         id: "anthropic/claude-sonnet-4-6",
         name: "Claude Sonnet 4.6",
         description: "Balanced, fast coding",
-        default: true,
         reasoning: { efforts: ["low", "medium", "high", "max"], default: "high" },
       },
       {
@@ -235,6 +234,25 @@ export const MODEL_CATALOG = [
     models: [
       { id: "deepseek/deepseek-v4-flash", name: "DeepSeek V4 Flash", description: "Fast model" },
       { id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", description: "Most capable" },
+    ],
+  },
+  {
+    category: "Xiaomi MiMo",
+    enabledByDefault: true,
+    models: [
+      {
+        id: "xiaomi/mimo-v2.5",
+        name: "MiMo V2.5",
+        description: "Xiaomi MiMo 2.5, 1M context",
+        default: true,
+        reasoning: { efforts: ["low", "medium", "high"], default: "high" },
+      },
+      {
+        id: "xiaomi/mimo-v2.5-pro",
+        name: "MiMo V2.5 Pro",
+        description: "Xiaomi MiMo 2.5 Pro",
+        reasoning: { efforts: ["low", "medium", "high"], default: "high" },
+      },
     ],
   },
 ] as const satisfies readonly ModelCatalogGroup[];

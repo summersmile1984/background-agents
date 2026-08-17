@@ -20,7 +20,7 @@ import {
 } from "../sandbox-env";
 import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
 import type { SourceControlProviderName } from "../../source-control";
-import type { E2BRestClient, E2BSandboxDetail } from "../e2b-rest-client";
+import type { E2BRestClient, E2BSandboxCreated, E2BSandboxDetail } from "../e2b-rest-client";
 import { E2BApiError, E2BConflictError, E2BNotFoundError } from "../e2b-rest-client";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -53,6 +53,13 @@ export interface E2BProviderConfig {
    * control-plane-driven (connectSandbox); provider-side auto-resume is not used.
    */
   autoPause: boolean;
+  /**
+   * Inject per-session env through POST /sandboxes for compatible self-hosted
+   * backends such as CubeSandbox, whose launcher starts fresh on each create.
+   */
+  useCreateTimeEnv?: boolean;
+  /** Provider-level LLM environment vars merged into every sandbox (e.g. API keys). */
+  llmEnvVars?: Record<string, string | undefined>;
 }
 
 export class E2BSandboxProvider implements SandboxProvider {
@@ -98,13 +105,24 @@ export class E2BSandboxProvider implements SandboxProvider {
           vncPassword,
         }
       );
+      for (const [key, value] of Object.entries(this.providerConfig.llmEnvVars ?? {})) {
+        if (value) envVars[key] = value;
+      }
       // E2B sandboxes run as a non-root user and /run is a root-owned tmpfs, so
       // the git credential helper can't create its default cache dir (/run/oi)
       // and fails before brokering a token. Point it at a user-writable path.
       envVars.OI_SCM_CRED_CACHE_DIR = "/tmp/oi";
+      const useCreateTimeEnv = this.providerConfig.useCreateTimeEnv ?? false;
+      if (useCreateTimeEnv) {
+        envVars.OI_USE_CREATE_TIME_ENV = "1";
+        if (this.providerConfig.scmProvider === "github") {
+          envVars.VCS_CLONE_BASE_URL = `${config.controlPlaneUrl.replace(/\/+$/, "")}/git/${encodeURIComponent(config.sessionId)}`;
+        }
+      }
       const metadata = this.buildMetadata(config);
       const sandbox = await this.client.createSandbox({
         templateID: this.client.config.templateId,
+        ...(useCreateTimeEnv ? { envVars, envVarsField: "envs" as const } : {}),
         metadata,
         timeoutSeconds,
         autoPause: this.providerConfig.autoPause,
@@ -119,6 +137,12 @@ export class E2BSandboxProvider implements SandboxProvider {
       });
 
       try {
+        if (useCreateTimeEnv) {
+          // CubeSandbox creates a fresh launcher process with these variables.
+          // No envd endpoint is exposed publicly and no anonymous secret write
+          // is needed when its E2B compatibility response omits an access token.
+          return this.createResult(config, sandbox, codeServerPassword, vncPassword);
+        }
         // Deliver per-session env to the supervisor. E2B's template start command
         // runs once at build and never sees create-time env vars, so the launcher
         // (oi-launch.py) waits for this file and execs the supervisor with it.
@@ -151,24 +175,7 @@ export class E2BSandboxProvider implements SandboxProvider {
         throw error;
       }
 
-      const { codeServerUrl, vncUrl, tunnelUrls } = this.buildTunnelUrls(
-        sandbox.sandboxID,
-        config.codeServerEnabled,
-        config.vncEnabled,
-        config.sandboxSettings,
-        sandbox.domain
-      );
-
-      return {
-        sandboxId: config.sandboxId,
-        providerObjectId: sandbox.sandboxID,
-        status: "running",
-        createdAt: Date.now(),
-        codeServerUrl,
-        codeServerPassword,
-        vncAccess: createVncAccess(vncUrl, vncPassword),
-        tunnelUrls,
-      };
+      return this.createResult(config, sandbox, codeServerPassword, vncPassword);
     } catch (error) {
       throw this.classifyError("Failed to create E2B sandbox", error, "create");
     }
@@ -293,6 +300,31 @@ export class E2BSandboxProvider implements SandboxProvider {
       metadata.openinspect_repo = `${config.repoOwner}/${config.repoName}`;
     }
     return metadata;
+  }
+
+  private createResult(
+    config: CreateSandboxConfig,
+    sandbox: E2BSandboxCreated,
+    codeServerPassword?: string,
+    vncPassword?: string
+  ): CreateSandboxResult {
+    const { codeServerUrl, vncUrl, tunnelUrls } = this.buildTunnelUrls(
+      sandbox.sandboxID,
+      config.codeServerEnabled,
+      config.vncEnabled,
+      config.sandboxSettings,
+      sandbox.domain
+    );
+    return {
+      sandboxId: config.sandboxId,
+      providerObjectId: sandbox.sandboxID,
+      status: "running",
+      createdAt: Date.now(),
+      codeServerUrl,
+      codeServerPassword,
+      vncAccess: createVncAccess(vncUrl, vncPassword),
+      tunnelUrls,
+    };
   }
 
   private buildTunnelUrls(

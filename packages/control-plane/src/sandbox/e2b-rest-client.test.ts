@@ -99,6 +99,19 @@ describe("E2BRestClient", () => {
     expect(body.autoResume).toEqual({ enabled: true });
   });
 
+  it("uses CubeSandbox's envs field when requested", async () => {
+    const client = new E2BRestClient(defaultConfig);
+    fetchSpy.mockResolvedValue(jsonResponse({ sandboxID: "sb-new", templateID: "tmpl-123" }));
+    await client.createSandbox({
+      templateID: "tmpl-123",
+      envVars: { FOO: "bar" },
+      envVarsField: "envs",
+    });
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.envs).toEqual({ FOO: "bar" });
+    expect(body.envVars).toBeUndefined();
+  });
+
   it("sends secure:true when requested", async () => {
     const client = new E2BRestClient(defaultConfig);
     fetchSpy.mockResolvedValue(jsonResponse({ sandboxID: "sb-new", templateID: "tmpl-123" }));

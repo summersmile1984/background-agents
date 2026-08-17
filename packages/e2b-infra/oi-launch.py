@@ -15,11 +15,15 @@ On pause/resume the supervisor process itself is frozen/thawed by E2B, so this
 launcher only runs for a fresh spawn.
 """
 
+import http.client
 import json
 import os
 import time
 
 SESSION_ENV_PATH = "/tmp/oi-session.env"
+CREATE_TIME_ENV_MARKER = "OI_USE_CREATE_TIME_ENV"
+ENVD_HOST = "127.0.0.1"
+ENVD_PORT = 49983
 POLL_INTERVAL_SECONDS = 0.3
 # Heartbeat log cadence while waiting for the session env file.
 HEARTBEAT_EVERY = 100  # iterations (~30s at 0.3s)
@@ -29,7 +33,7 @@ HEARTBEAT_EVERY = 100  # iterations (~30s at 0.3s)
 # `user`, so opencode/code-server must write under /home/user — otherwise they
 # hit EACCES on /root/.local. PYTHONPATH/NODE_PATH aren't propagated by E2B.
 STATIC_ENV = {
-    "HOME": "/home/user",
+    "HOME": "/home/user" if os.getuid() != 0 else "/root",
     "PYTHONPATH": "/app",
     "NODE_PATH": "/usr/lib/node_modules",
 }
@@ -39,20 +43,48 @@ def _log(msg: str) -> None:
     print(f"[oi-launch] {msg}", flush=True)
 
 
+def _load_create_time_env() -> dict[str, str] | None:
+    """Read CubeSandbox's create-time env after its snapshot has resumed."""
+    connection = http.client.HTTPConnection(ENVD_HOST, ENVD_PORT, timeout=0.5)
+    try:
+        connection.request("GET", "/envs")
+        response = connection.getresponse()
+        if response.status != 200:
+            return None
+        parsed = json.loads(response.read(1024 * 1024))
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    finally:
+        connection.close()
+    if not isinstance(parsed, dict) or str(parsed.get(CREATE_TIME_ENV_MARKER, "")) != "1":
+        return None
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
 def main() -> None:
     # Poll indefinitely. E2B runs this start command once at build, snapshots it
     # mid-poll, and resumes it on each create — so a wall-clock deadline measured
     # here would be relative to *build* time and expire before any create. The
     # real bounds are E2B's sandbox TTL and the control plane's connecting-timeout
     # (which stops the sandbox if the bridge never phones home).
-    _log(f"waiting for session env at {SESSION_ENV_PATH}")
+    if os.environ.get(CREATE_TIME_ENV_MARKER) == "1":
+        _log("using create-time session environment")
+        session_env = {}
+    else:
+        session_env = _load_create_time_env()
+        if session_env is not None:
+            _log(f"loaded {len(session_env)} create-time session vars from envd")
+        else:
+            _log(f"waiting for create-time env or session env at {SESSION_ENV_PATH}")
     i = 0
-    session_env = None
     while session_env is None:
         i += 1
         if i % HEARTBEAT_EVERY == 0:
             _log(f"still waiting for session env ({i} polls)")
-        if os.path.exists(SESSION_ENV_PATH):
+        session_env = _load_create_time_env()
+        if session_env is not None:
+            _log(f"loaded {len(session_env)} create-time session vars from envd")
+        elif os.path.exists(SESSION_ENV_PATH):
             # envd may materialize the upload non-atomically, so a read can race
             # the write and see a partial file. Treat any read/parse failure as
             # "not ready yet" and keep polling — the control plane's write is the

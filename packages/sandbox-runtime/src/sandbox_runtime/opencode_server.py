@@ -488,6 +488,30 @@ class OpenCodeServer:
             "permission": {"*": {"*": "allow"}},
         }
 
+        # Inject an OpenAI-compatible custom provider for Xiaomi MiMo when the
+        # control plane supplies its API key (OpenCode picks the provider up from
+        # config; the API key travels via env to avoid baking it into the JSON).
+        xiaomi_api_key = os.environ.get("XIAOMI_API_KEY", "")
+        xiaomi_base_url = (
+            os.environ.get("XIAOMI_BASE_URL", "") or "https://token-plan-cn.xiaomimimo.com/v1"
+        )
+        if xiaomi_api_key:
+            opencode_config["provider"] = {
+                "xiaomi": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "Xiaomi MiMo",
+                    "options": {
+                        "baseURL": xiaomi_base_url,
+                        "apiKey": xiaomi_api_key,
+                    },
+                    "models": {
+                        "mimo-v2.5": {"name": "MiMo V2.5"},
+                        "mimo-v2.5-pro": {"name": "MiMo V2.5 Pro"},
+                    },
+                }
+            }
+            self.log.info("xiaomi.provider_configured", base_url=xiaomi_base_url)
+
         # Inject MCP servers
         mcp_servers = self._resolve_mcp_servers()
         if mcp_servers:

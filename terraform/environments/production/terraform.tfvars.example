@@ -39,6 +39,11 @@ cloudflare_account_id = ""
 # OAuth callback URLs to the new hostname.
 # cloudflare_custom_domain = "" # e.g., "app.example.com"
 
+# Custom domain for the control-plane Worker (optional). Requires
+# cloudflare_zone_id. This is useful when sandbox networks cannot reach the
+# account's workers.dev hostname.
+# cloudflare_control_plane_custom_domain = "" # e.g., "api.example.com"
+
 # Cloudflare Workers subdomain (found in Workers & Pages -> Overview, bottom-right of panel)
 # This is the subdomain used for workers.dev URLs (e.g., "myaccount" in "worker.myaccount.workers.dev")
 cloudflare_worker_subdomain = ""
@@ -109,11 +114,15 @@ opencomputer_template = ""
 e2b_api_key = ""               # sensitive — runtime REST API key (also auths the build)
 e2b_template_id = ""           # e.g., "open-inspect-sandbox"
 # e2b_api_url = "https://api.e2b.app"
+# e2b_build_template = true      # set false for a self-hosted API with a prebuilt template
 # Sandbox TTL. Default 7200 (paid plans); on a plan with a ~1h cap, set 3300.
 # e2b_sandbox_timeout_seconds = 3300
 # Auto-pause makes a lapsed TTL recoverable (pause, not kill) and auto-resumes the
 # sandbox on inbound activity. Default true; set false to kill on timeout.
 # e2b_auto_pause = true
+# CubeSandbox starts a fresh launcher for each create and does not return an
+# envd access token. Keep false for managed E2B.
+# e2b_use_create_time_env = false
 
 # =============================================================================
 # GitHub App Credentials
@@ -221,6 +230,10 @@ linear_webhook_secret = ""   # Webhook Signing Secret from the application confi
 # Anthropic API key for Claude
 # From: https://console.anthropic.com/
 anthropic_api_key = ""
+
+# Optional Xiaomi MiMo provider for E2B-compatible sandboxes
+xiaomi_api_key = ""
+# xiaomi_base_url = "https://token-plan-cn.xiaomimimo.com/v1"
 
 # =============================================================================
 # Security Secrets

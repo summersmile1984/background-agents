@@ -9,6 +9,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
+import sandbox_runtime.repository_sync as repository_sync
 from sandbox_runtime.repository_sync import RepositorySyncResult
 from sandbox_runtime.runtime_config import BootMode
 from sandbox_runtime.supervisor import ImageBuildExecutionCancelled
@@ -23,6 +24,10 @@ def isolate_optional_runtime_services(monkeypatch):
     monkeypatch.delenv("IMAGE_BUILD_MODE", raising=False)
     monkeypatch.delenv("RESTORED_FROM_SNAPSHOT", raising=False)
     monkeypatch.delenv("FROM_REPO_IMAGE", raising=False)
+    # These boot-policy tests must not depend on whether the host happens to
+    # have /usr/bin/gh or permits writes to /usr/local/bin. Wrapper installation
+    # behavior is covered independently in test_gh_wrapper.py.
+    monkeypatch.setattr(repository_sync, "GH_WRAPPER_REAL_PATH", "/nonexistent/test-gh")
 
 
 def _repoint_primary(repository):

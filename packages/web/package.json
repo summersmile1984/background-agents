@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "build:cloudflare": "npx opennextjs-cloudflare build",
-    "deploy:cloudflare": "npx opennextjs-cloudflare deploy",
+    "build": "next build --webpack",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "deploy:cloudflare": "opennextjs-cloudflare deploy",
     "start": "next start",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",

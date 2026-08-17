@@ -69,6 +69,8 @@ const SESSION_ENV_PATH = "/tmp/oi-session.env";
 export interface E2BCreateSandboxParams {
   templateID: string;
   envVars?: Record<string, string>;
+  /** CubeSandbox's E2B-compatible API names the create-time env field `envs`. */
+  envVarsField?: "envVars" | "envs";
   metadata?: Record<string, string>;
   timeoutSeconds?: number;
   /** Pause (not kill) the sandbox when its timeout expires. */
@@ -128,7 +130,7 @@ export class E2BRestClient {
         {
           body: {
             templateID: params.templateID,
-            envVars: params.envVars,
+            ...(params.envVars ? { [params.envVarsField ?? "envVars"]: params.envVars } : {}),
             metadata: params.metadata,
             timeout: params.timeoutSeconds,
             secure: params.secure ?? false,

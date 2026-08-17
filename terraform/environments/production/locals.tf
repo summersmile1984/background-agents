@@ -21,10 +21,21 @@ locals {
   admission_allowlist_enabled = local.provider_neutral_admission_enabled || local.github_admission_enabled
   unsafe_allow_all_effective  = var.unsafe_allow_all_users && !local.admission_allowlist_enabled
 
-  # URLs for cross-service configuration
-  control_plane_host = "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
-  control_plane_url  = "https://${local.control_plane_host}"
-  ws_url             = "wss://${local.control_plane_host}"
+  # URLs for cross-service configuration. A custom domain also avoids sandbox
+  # networks that cannot reach workers.dev while ordinary Cloudflare-hosted
+  # domains remain available.
+  control_plane_custom_domain = var.cloudflare_control_plane_custom_domain == null ? "" : trimspace(var.cloudflare_control_plane_custom_domain)
+  control_plane_zone_id       = var.cloudflare_zone_id == null ? "" : trimspace(var.cloudflare_zone_id)
+  control_plane_custom_domain_enabled = (
+    local.control_plane_custom_domain != "" &&
+    local.control_plane_zone_id != ""
+  )
+  control_plane_host = (local.control_plane_custom_domain_enabled
+    ? local.control_plane_custom_domain
+    : "open-inspect-control-plane-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
+  )
+  control_plane_url = "https://${local.control_plane_host}"
+  ws_url            = "wss://${local.control_plane_host}"
 
   # Must match the deployed Worker's `name` and the custom-domain `service` binding.
   web_worker_name = "open-inspect-web-${local.name_suffix}"

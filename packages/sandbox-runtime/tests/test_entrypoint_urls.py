@@ -62,3 +62,27 @@ class TestBuildRepoUrl:
             sup.synchronizer._build_repo_url(sup.repositories[0])
             == "https://github.com/acme/app.git"
         )
+
+    def test_private_clone_base_url(self) -> None:
+        sup = _make_repository_boot(
+            {
+                "VCS_HOST": "github.com",
+                "VCS_CLONE_BASE_URL": "https://cp.example.com/git/session-1/",
+            }
+        )
+        assert (
+            sup.synchronizer._build_repo_url(sup.repositories[0])
+            == "https://cp.example.com/git/session-1/acme/app.git"
+        )
+
+    def test_invalid_clone_base_url_falls_back_to_vcs_host(self) -> None:
+        sup = _make_repository_boot(
+            {
+                "VCS_HOST": "github.com",
+                "VCS_CLONE_BASE_URL": "http://insecure.example/git/session-1",
+            }
+        )
+        assert (
+            sup.synchronizer._build_repo_url(sup.repositories[0])
+            == "https://github.com/acme/app.git"
+        )

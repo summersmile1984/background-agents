@@ -147,6 +147,43 @@ def test_get_returns_credentials_on_success(cache_dir: Path, env_set: None) -> N
     assert calls[0] == 1
 
 
+def test_proxy_request_uses_sandbox_capability_as_basic_username(
+    cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/sess-123")
+    transport = _mock_response(
+        {
+            "username": "x-access-token",
+            "password": "ghs_proxy",
+            "expires_at_epoch_ms": int((time.time() + DEFAULT_CREDENTIAL_TTL_SECONDS) * 1000),
+        }
+    )
+    calls = [0]
+    with _patch_httpx(transport, calls):
+        code, out, _err = _run(
+            "protocol=https\nhost=cp.example.com\npath=git/sess-123/acme/web.git\n\n"
+        )
+
+    assert code == 0
+    assert "username=sandbox-token-xyz" in out
+    assert "password=ghs_proxy" in out
+    assert calls[0] == 1
+
+
+def test_proxy_request_refuses_direct_github_host(
+    cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/sess-123")
+    calls = [0]
+    with _patch_httpx(_mock_response({"should": "not be called"}), calls):
+        code, out, err = _run(SESSION_REPO_REQUEST)
+
+    assert code == 0
+    assert "password=" not in out
+    assert calls[0] == 0
+    assert "refusing to serve credentials" in err
+
+
 def test_does_not_echo_input_username_or_password(cache_dir: Path, env_set: None) -> None:
     """Old credentialed remotes must not leak stale auth back into git."""
     transport = _mock_response(
