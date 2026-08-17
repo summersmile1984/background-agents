@@ -18,6 +18,7 @@ ARG OPENCODE_VERSION=1.18.18
 ARG CODEX_VERSION=0.147.0
 ARG CLAUDE_CODE_VERSION=2.1.233
 ARG CLAUDE_AGENT_SDK_VERSION=0.2.139
+ARG CODEWHALE_VERSION=0.9.8
 ARG CODE_SERVER_VERSION=4.109.5
 ARG AGENT_BROWSER_VERSION=0.21.2
 
@@ -50,7 +51,8 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
   && npm install -g "@opencode-ai/plugin@${OPENCODE_VERSION}" zod \
   && npm install -g "@openai/codex@${CODEX_VERSION}" \
   && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-  && codex --version && claude --version \
+  && npm install -g "codewhale@${CODEWHALE_VERSION}" \
+  && codex --version && claude --version && codewhale --version \
   && curl -fsSL -o /tmp/code-server.deb \
      "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_amd64.deb" \
   && dpkg -i /tmp/code-server.deb \
@@ -89,7 +91,7 @@ ENV HOME=/root \
     PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app \
     NODE_PATH=/usr/lib/node_modules \
-    SANDBOX_VERSION=e2b-v4-native-harnesses
+    SANDBOX_VERSION=e2b-v5-codewhale-harness
 
 # NOTE: file staging (sandbox_runtime, oi-launch.py), WORKDIR, and the start/ready
 # commands are applied by build-template.py via the E2B Template SDK

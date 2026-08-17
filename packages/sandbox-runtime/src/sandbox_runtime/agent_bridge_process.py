@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from .constants import OPENCODE_PORT
-from .harness_credentials import read_claude_token
+from .harness_credentials import read_claude_token, read_deepseek_token
 from .process_output import iter_process_lines
 
 if TYPE_CHECKING:
@@ -39,6 +39,9 @@ class AgentBridgeProcess:
         claude_token = read_claude_token(child_environment)
         if claude_token and self.agent_harness.value == "claude":
             child_environment["CLAUDE_CODE_OAUTH_TOKEN"] = claude_token
+        deepseek_token = read_deepseek_token(child_environment)
+        if deepseek_token and self.agent_harness.value == "deepseek":
+            child_environment["DEEPSEEK_API_KEY"] = deepseek_token
         self._process = await asyncio.create_subprocess_exec(
             "python",
             "-m",

@@ -46,6 +46,7 @@ from .git_signing import GitSigningError, GitSigningRuntime
 from .harness.base import HarnessDriver, HarnessPrompt
 from .harness.claude import ClaudeHarnessDriver
 from .harness.codex import CodexHarnessDriver
+from .harness.deepseek import DeepSeekHarnessDriver
 from .harness.mcp_config import load_session_mcp_servers
 from .log_config import configure_logging, get_logger
 from .opencode_client import OpenCodeClient
@@ -858,10 +859,15 @@ class AgentBridge:
                 log=self.log,
                 mcp_servers=mcp_servers,
             )
-        else:
-            raise RuntimeError(
-                f"Harness '{self.agent_harness.value}' is experimental and has no installed driver"
+        elif self.agent_harness == AgentHarness.DEEPSEEK:
+            self._harness_driver = DeepSeekHarnessDriver(
+                workspace_path=str(harness_workdir),
+                state_path=self.repo_path / ".openinspect" / "state" / "codewhale",
+                log=self.log,
+                mcp_servers=mcp_servers,
             )
+        else:
+            raise RuntimeError(f"Unsupported harness '{self.agent_harness.value}'")
         return self._harness_driver
 
     def _harness_workdir(self) -> Path:

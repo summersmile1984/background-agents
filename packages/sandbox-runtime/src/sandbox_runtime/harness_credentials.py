@@ -8,14 +8,19 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import MutableMapping
 
 CREDENTIAL_MEMORY_DIR = Path("/dev/shm/open-inspect-credentials")
 CLAUDE_TOKEN_FILE = CREDENTIAL_MEMORY_DIR / "claude-setup-token"
+DEEPSEEK_TOKEN_FILE = CREDENTIAL_MEMORY_DIR / "deepseek-api-key"
 SHELL_SANITIZER_FILE = CREDENTIAL_MEMORY_DIR / "sanitize-agent-shell-env.sh"
 CODEX_AUTH_PATH = CREDENTIAL_MEMORY_DIR / "codex-home" / "auth.json"
 CODEX_AUTH_MARKER = CREDENTIAL_MEMORY_DIR / "codex-auth-materialized"
 CLAUDE_TOKEN_FILE_ENV = "OPENINSPECT_CLAUDE_TOKEN_FILE"
+DEEPSEEK_TOKEN_FILE_ENV = "OPENINSPECT_DEEPSEEK_TOKEN_FILE"
 CODEX_HOME_ENV = "CODEX_HOME"
 EXPIRY_WARNING_SECONDS = 30 * 24 * 60 * 60
 
@@ -26,14 +31,18 @@ SENSITIVE_HARNESS_ENV_KEYS = {
     "CODEX_ACCESS_TOKEN",
     "CODEX_ACCESS_TOKEN_EXPIRES_AT",
 }
+IMAGE_BUILD_SENSITIVE_KEYS = SENSITIVE_HARNESS_ENV_KEYS | {"DEEPSEEK_API_KEY"}
 
 
 def materialize_harness_credentials(
-    environment: dict[str, str], log: Any, warn: Any, agent_harness: object | None = None
+    environment: MutableMapping[str, str],
+    log: Any,
+    warn: Any,
+    agent_harness: object | None = None,
 ) -> None:
     """Move secret values out of the supervisor environment before services start."""
     if environment.get("IMAGE_BUILD_MODE") == "true":
-        for key in SENSITIVE_HARNESS_ENV_KEYS:
+        for key in IMAGE_BUILD_SENSITIVE_KEYS:
             environment.pop(key, None)
         return
 
@@ -46,10 +55,22 @@ def materialize_harness_credentials(
         for key in SENSITIVE_HARNESS_ENV_KEYS:
             if allowed_prefix is None or not key.startswith(allowed_prefix):
                 environment.pop(key, None)
-        if allowed_prefix is None:
+        if selected_harness in {"claude", "codex"}:
+            environment.pop("DEEPSEEK_API_KEY", None)
+        if allowed_prefix is None and selected_harness != "deepseek":
             return
 
     CREDENTIAL_MEMORY_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if selected_harness == "deepseek":
+        deepseek_token = environment.pop("DEEPSEEK_API_KEY", "").strip()
+        if deepseek_token:
+            _write_secret(DEEPSEEK_TOKEN_FILE, deepseek_token)
+            environment[DEEPSEEK_TOKEN_FILE_ENV] = str(DEEPSEEK_TOKEN_FILE)
+            _write_shell_sanitizer()
+            environment["BASH_ENV"] = str(SHELL_SANITIZER_FILE)
+            log.info("harness.credentials_materialized", harness="deepseek", source="api_key")
+        return
+
     claude_token = environment.pop("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
     claude_expires_at = environment.pop("CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT", None)
     if claude_token:
@@ -118,6 +139,17 @@ def read_claude_token(environment: dict[str, str]) -> str | None:
     return token or None
 
 
+def read_deepseek_token(environment: dict[str, str]) -> str | None:
+    path_value = environment.get(DEEPSEEK_TOKEN_FILE_ENV)
+    if not path_value:
+        return None
+    try:
+        token = Path(path_value).read_text().strip()
+    except OSError:
+        return None
+    return token or None
+
+
 def _decode_codex_auth(value: str) -> dict[str, object]:
     candidates = [value]
     with contextlib.suppress(ValueError, UnicodeDecodeError):
@@ -147,7 +179,10 @@ def _write_shell_sanitizer() -> None:
         SHELL_SANITIZER_FILE,
         "unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT "
         "CODEX_ACCESS_TOKEN CODEX_ACCESS_TOKEN_EXPIRES_AT CODEX_AUTH_JSON "
-        "CODEX_HOME OPENINSPECT_CLAUDE_TOKEN_FILE SANDBOX_AUTH_TOKEN\n",
+        "DEEPSEEK_API_KEY CODEX_HOME CODEWHALE_HOME CODEWHALE_MCP_CONFIG "
+        "DEEPSEEK_MCP_CONFIG "
+        "OPENINSPECT_CLAUDE_TOKEN_FILE OPENINSPECT_DEEPSEEK_TOKEN_FILE "
+        "SANDBOX_AUTH_TOKEN\n",
     )
 
 

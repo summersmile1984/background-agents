@@ -6,7 +6,7 @@
 
 export const VERCEL_PYTHON_BIN = "/usr/bin/python3.12";
 export const DEFAULT_VERCEL_RUNTIME = "node24";
-export const VERCEL_SANDBOX_VERSION = "v60-native-harnesses";
+export const VERCEL_SANDBOX_VERSION = "v61-codewhale-harness";
 export const VERCEL_RUNTIME_WORKDIR = "/tmp/open-inspect-runtime";
 export const VERCEL_LOCAL_RUNTIME_EXTRACT_DIR = `${VERCEL_RUNTIME_WORKDIR}/packages`;
 
@@ -19,6 +19,7 @@ set -euo pipefail
 OPENCODE_VERSION="1.18.18"
 CODEX_VERSION="0.147.0"
 CLAUDE_CODE_VERSION="2.1.233"
+CODEWHALE_VERSION="0.9.8"
 CODE_SERVER_VERSION="4.109.5"
 AGENT_BROWSER_VERSION="0.21.2"
 TTYD_VERSION="1.7.7"
@@ -81,9 +82,10 @@ command -v x11vnc
 command -v websockify
 test -f /usr/share/novnc/vnc.html
 
-sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION" @openai/codex@"$CODEX_VERSION" @anthropic-ai/claude-code@"$CLAUDE_CODE_VERSION"
+sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION" @openai/codex@"$CODEX_VERSION" @anthropic-ai/claude-code@"$CLAUDE_CODE_VERSION" codewhale@"$CODEWHALE_VERSION"
 codex --version
 claude --version
+codewhale --version
 if [ ! -x /root/.bun/bin/bun ]; then
   curl -fsSL https://bun.sh/install | sudo -E bash || true
 fi

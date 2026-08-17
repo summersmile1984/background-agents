@@ -522,7 +522,7 @@ modal_environment_web_suffix = "your-modal-web-suffix" # Lowercase letters, digi
 
 # Sandbox provider: "modal" (default), "daytona", or "vercel"
 # sandbox_provider          = "modal"
-# Default harness: "opencode" (default), "codex", or "claude"
+# Default harness: "opencode" (default), "codex", "claude", or "deepseek"
 # default_agent_harness     = "opencode"
 
 # Daytona (only required when sandbox_provider = "daytona")

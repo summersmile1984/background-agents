@@ -159,10 +159,14 @@ Open-Inspect uses a three-tier architecture spanning multiple cloud providers:
 │                 Data Plane (Sandbox Backend)                              │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │                        Session Sandbox                              │ │
-│  │  ┌────────────┐    ┌────────────┐    ┌────────────┐               │ │
-│  │  │ Supervisor │───▶│  OpenCode  │───▶│   Bridge   │───────────────┼─┼──▶ Control Plane
-│  │  └────────────┘    └────────────┘    └────────────┘               │ │
-│  │                           │                                        │ │
+│  │  ┌────────────┐    ┌─────────────────┐                            │ │
+│  │  │ Supervisor │───▶│ Provider Bridge │────────────────────────────┼─┼──▶ Control Plane
+│  │  └────────────┘    └────────┬────────┘                            │ │
+│  │                             ▼                                     │ │
+│  │                    ┌─────────────────┐                            │ │
+│  │                    │  Agent Harness  │                            │ │
+│  │                    └─────────────────┘                            │ │
+│  │                             │                                     │ │
 │  │                    Full Dev Environment                            │ │
 │  │              (Node.js, Python, git, Playwright)                    │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
@@ -202,7 +206,7 @@ development environment.
 - Node.js 22, Python 3.12, git, curl
 - Package managers: npm, pnpm, pip, uv
 - agent-browser CLI + headless Chrome (for browser automation)
-- OpenCode (the coding agent)
+- OpenCode, Codex, Claude Code, and DeepSeek CodeWhale harness runtimes
 
 Open-Inspect supports these sandbox backends:
 
@@ -428,8 +432,15 @@ will not see `send-child-prompt` until it starts in a fresh sandbox built from t
 
 ## The Agent
 
-Open-Inspect uses [OpenCode](https://opencode.ai) as its coding agent. OpenCode is an open-source
-agent designed to run as a server, making it ideal for background execution.
+Open-Inspect keeps the upstream WebSocket event contract and selects a provider inside the sandbox
+bridge. OpenCode remains the default; native adapters translate Codex app-server, the Claude Agent
+SDK, and DeepSeek CodeWhale app-server events into the same client-facing stream. This keeps the web
+client and bot integrations independent of the selected harness.
+
+The adapter preserves every structured event its native API exposes. The pinned CodeWhale 0.9.8
+stdio stream currently provides assistant text and turn completion but not structured tool-call or
+token-usage events, so DeepSeek sessions still show live text and repository diffs while their
+tool-by-tool timeline and usage detail are less complete than Codex or Claude sessions.
 
 ### What the Agent Can Do
 
@@ -609,11 +620,12 @@ rotation is persisted back to the global, repository, or environment scope that 
 [Using Grok with a SuperGrok Subscription](./GROK_MODELS.md).
 
 Native Codex and Claude Code harness sessions may instead receive `CODEX_AUTH_JSON`,
-`CODEX_ACCESS_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`. The runtime materializes those only for the
-selected harness, excludes them from agent shell commands and image builds, and removes disk-backed
-login state before filesystem snapshots. Optional `*_EXPIRES_AT` metadata drives rotation warnings.
-The selected native harness process necessarily remains in the credential trust boundary; the
-runtime containment above is not a brokered, zero-access credential design.
+`CODEX_ACCESS_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`. The DeepSeek CodeWhale harness uses
+`DEEPSEEK_API_KEY`. The runtime materializes native-harness credentials only for the selected
+harness, excludes them from agent shell commands and image builds, and removes disk-backed login
+state before filesystem snapshots. Optional `*_EXPIRES_AT` metadata drives rotation warnings. The
+selected native harness process necessarily remains in the credential trust boundary; the runtime
+containment above is not a brokered, zero-access credential design.
 
 > **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
 > added as global secrets. Modal injects these automatically via its own secrets mechanism.

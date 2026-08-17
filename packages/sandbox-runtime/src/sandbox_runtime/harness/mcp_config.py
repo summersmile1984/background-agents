@@ -9,6 +9,17 @@ from typing import Any
 
 BUILTIN_MCP_NAME = "open_inspect"
 BUILTIN_MCP_COMMAND = ["python", "-m", "sandbox_runtime.native_mcp"]
+CODEWHALE_MCP_ENV_PREFIX = [
+    "env",
+    "-u",
+    "DEEPSEEK_API_KEY",
+    "-u",
+    "OPENINSPECT_DEEPSEEK_TOKEN_FILE",
+    "-u",
+    "CODEWHALE_HOME",
+    "-u",
+    "CODEWHALE_MCP_CONFIG",
+]
 
 
 def load_session_mcp_servers(environment: Mapping[str, str]) -> tuple[Mapping[str, Any], ...]:
@@ -77,6 +88,41 @@ def claude_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, dict[st
             entry["env"] = env
         config[name] = entry
     return config
+
+
+def codewhale_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Build CodeWhale's ~/.codewhale/mcp.json document."""
+    config: dict[str, dict[str, Any]] = {
+        BUILTIN_MCP_NAME: _codewhale_local(BUILTIN_MCP_COMMAND, {})
+    }
+    for index, server in enumerate(servers):
+        if server.get("enabled") is False:
+            continue
+        name = _unique_name(server, index, config)
+        if server.get("type") == "remote":
+            url = server.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            entry: dict[str, Any] = {"url": url}
+            headers = _string_map(server.get("headers") or server.get("env"))
+            if headers:
+                entry["headers"] = headers
+            config[name] = entry
+            continue
+        command = _command(server.get("command"))
+        if not command:
+            continue
+        env = _string_map(server.get("env"))
+        config[name] = _codewhale_local(command, env)
+    return {"servers": config}
+
+
+def _codewhale_local(command: list[str], environment: dict[str, str]) -> dict[str, Any]:
+    sanitized = [*CODEWHALE_MCP_ENV_PREFIX, *command]
+    entry: dict[str, Any] = {"command": sanitized[0], "args": sanitized[1:]}
+    if environment:
+        entry["env"] = environment
+    return entry
 
 
 def _codex_local(command: list[str], env: dict[str, str]) -> dict[str, Any]:

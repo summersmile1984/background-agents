@@ -71,9 +71,9 @@ describe("evaluateImageBuildRebuildPolicy", () => {
     }
 
     const current: Array<[ImageBuildProvider, string]> = [
-      ["modal", "v60-native-harnesses"],
-      ["opencomputer", "v60-native-harnesses"],
-      ["vercel", "v60-native-harnesses"],
+      ["modal", "v61-codewhale-harness"],
+      ["opencomputer", "v61-codewhale-harness"],
+      ["vercel", "v61-codewhale-harness"],
     ];
     for (const [provider, runtime_version] of current) {
       expect(

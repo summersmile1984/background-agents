@@ -62,6 +62,7 @@ describe("stripHarnessCredentialsForImageBuild", () => {
         CODEX_AUTH_JSON: "codex-auth",
         CODEX_ACCESS_TOKEN: "codex-access",
         CODEX_ACCESS_TOKEN_EXPIRES_AT: "1893456000",
+        DEEPSEEK_API_KEY: "deepseek-secret",
       })
     ).toEqual({ DATABASE_URL: "postgres://build" });
   });

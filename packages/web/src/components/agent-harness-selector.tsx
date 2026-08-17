@@ -25,6 +25,11 @@ const HARNESS_OPTIONS: Array<{
     label: "Claude Code",
     description: "Claude Agent SDK with setup-token session resume",
   },
+  {
+    value: "deepseek",
+    label: "DeepSeek (CodeWhale)",
+    description: "Native CodeWhale app-server; requires DEEPSEEK_API_KEY",
+  },
 ];
 
 export function AgentHarnessSelector({

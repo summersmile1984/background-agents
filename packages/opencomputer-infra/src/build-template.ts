@@ -9,6 +9,7 @@ const OPENCODE_VERSION = "1.18.18";
 const CODEX_VERSION = "0.147.0";
 const CLAUDE_CODE_VERSION = "2.1.233";
 const CLAUDE_AGENT_SDK_VERSION = "0.2.139";
+const CODEWHALE_VERSION = "0.9.8";
 const CODE_SERVER_VERSION = "4.109.5";
 const PYTHON_VERSION = "3.12";
 const AGENT_BROWSER_VERSION = "0.21.2";
@@ -165,18 +166,19 @@ function buildImage(options: Pick<BuildOptions, "repoRoot" | "builderMemoryMb">)
       `ln -sf ${PYTHON_VENV}/bin/python ${USER_BIN}/python`,
       `HOME=${SANDBOX_HOME} UV_CACHE_DIR=${UV_CACHE} uv pip install --python ${PYTHON_VENV}/bin/python httpx websockets "pydantic>=2.0" "PyJWT[crypto]" "claude-agent-sdk==${CLAUDE_AGENT_SDK_VERSION}" "mcp>=1.29.0,<2" "PyYAML>=6.0.2"`,
       `sudo rm -rf /app && sudo ln -s ${SANDBOX_APP_DIR} /app`,
-      // Install the JS toolchain into the sandbox-owned prefix. --allow-scripts=opencode-ai is
+      // Install the JS toolchain into the sandbox-owned prefix. The allow-list is
       // REQUIRED: the OpenComputer base image ships npm 12, which does not run package lifecycle
       // scripts by default. opencode-ai's postinstall copies the real ~180MB native binary over
       // the shipped bin/opencode.exe stub; without allowing it the stub survives and every
-      // session dies with "Exec format error: opencode". opencode-ai is the only co-installed
-      // package with an install-time lifecycle script.
-      `sudo env npm_config_cache=${NPM_CACHE} npm install -g --prefix ${NPM_PREFIX} --allow-scripts=opencode-ai pnpm@10 opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} zod@4.4.3 agent-browser@${AGENT_BROWSER_VERSION} @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`,
+      // session dies with "Exec format error: opencode". CodeWhale likewise downloads its
+      // native executable in postinstall, so both packages must remain on the allow-list.
+      `sudo env npm_config_cache=${NPM_CACHE} npm install -g --prefix ${NPM_PREFIX} --allow-scripts=opencode-ai,codewhale pnpm@10 opencode-ai@${OPENCODE_VERSION} @opencode-ai/plugin@${OPENCODE_VERSION} zod@4.4.3 agent-browser@${AGENT_BROWSER_VERSION} @openai/codex@${CODEX_VERSION} @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} codewhale@${CODEWHALE_VERSION}`,
       // Fail the build loudly if opencode is still a stub / not runnable (e.g. if the flag above
       // ever stops taking effect), so a broken image can never ship silently.
       `${NPM_PREFIX}/bin/opencode --version`,
       `${NPM_PREFIX}/bin/codex --version`,
-      `${NPM_PREFIX}/bin/claude --version`
+      `${NPM_PREFIX}/bin/claude --version`,
+      `${NPM_PREFIX}/bin/codewhale --version`
     )
     .runCommands(
       // GitHub CLI must exist at the path used by the authentication wrapper.
@@ -255,7 +257,7 @@ function buildImage(options: Pick<BuildOptions, "repoRoot" | "builderMemoryMb">)
       OPENINSPECT_BIN_INSTALL_DIR: USER_BIN,
       NO_PROXY: LOCAL_NO_PROXY,
       no_proxy: LOCAL_NO_PROXY,
-      SANDBOX_VERSION: "v60-native-harnesses",
+      SANDBOX_VERSION: "v61-codewhale-harness",
     })
     .workdir(`${SANDBOX_HOME}/workspace`)
     .builderMemory(options.builderMemoryMb);

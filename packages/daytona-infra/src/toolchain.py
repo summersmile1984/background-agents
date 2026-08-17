@@ -20,10 +20,11 @@ OPENCODE_VERSION = "1.18.18"
 CODEX_VERSION = "0.147.0"
 CLAUDE_CODE_VERSION = "2.1.233"
 CLAUDE_AGENT_SDK_VERSION = "0.2.139"
+CODEWHALE_VERSION = "0.9.8"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
 # Bump when changing image contents to invalidate the Daytona snapshot.
-SANDBOX_VERSION = "daytona-v7-native-harnesses"
+SANDBOX_VERSION = "daytona-v8-codewhale-harness"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -67,7 +68,8 @@ def build_base_image(repo_root: Path) -> Image:
             f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
             f"npm install -g @openai/codex@{CODEX_VERSION}",
             f"npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_VERSION}",
-            "codex --version && claude --version",
+            f"npm install -g codewhale@{CODEWHALE_VERSION}",
+            "codex --version && claude --version && codewhale --version",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",

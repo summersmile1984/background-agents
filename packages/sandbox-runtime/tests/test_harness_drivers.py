@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
 from sandbox_runtime.harness.base import HarnessPrompt
 from sandbox_runtime.harness.claude import ClaudeHarnessDriver
 from sandbox_runtime.harness.codex import CodexHarnessDriver
+from sandbox_runtime.harness.deepseek import DeepSeekHarnessDriver
 
 
 class Log:
@@ -201,9 +203,114 @@ async def test_claude_driver_uses_setup_token_environment_and_persists_session()
     }
 
 
+class FakeCodeWhaleRpc:
+    def __init__(self, *, include_stale_response: bool = False):
+        import asyncio
+
+        self.notifications = asyncio.Queue()
+        self.requests: list[tuple[str, dict[str, Any]]] = []
+        self.closed = False
+        self.include_stale_response = include_stale_response
+
+    async def start(self):
+        pass
+
+    async def request(self, method, params):
+        self.requests.append((method, params))
+        if method == "capabilities":
+            return {
+                "methods": [
+                    "thread/start",
+                    "thread/resume",
+                    "thread/message",
+                    "thread/interrupt",
+                ]
+            }
+        if method == "thread/start":
+            return {"thread_id": "codewhale-thread", "status": "ok"}
+        if method == "thread/resume":
+            return {"thread_id": params["thread_id"], "status": "ok"}
+        if method == "thread/message":
+            if self.include_stale_response:
+                await self.notifications.put(
+                    {"type": "response_delta", "response_id": "stale-response", "delta": "old"}
+                )
+                await self.notifications.put(
+                    {"type": "response_end", "response_id": "stale-response"}
+                )
+            await self.notifications.put({"type": "response_start", "response_id": "response-1"})
+            await self.notifications.put(
+                {"type": "response_delta", "response_id": "response-1", "delta": "whale"}
+            )
+            await self.notifications.put({"type": "response_end", "response_id": "response-1"})
+            return {"thread_id": params["thread_id"], "status": "accepted"}
+        if method == "thread/interrupt":
+            return {"interrupted": True}
+        if method == "shutdown":
+            return {"status": "stopped"}
+        return {}
+
+    async def close(self):
+        self.closed = True
+
+
+async def test_deepseek_driver_translates_codewhale_events_and_persists_state(tmp_path):
+    rpc = FakeCodeWhaleRpc(include_stale_response=True)
+    mcp_path = tmp_path / "memory" / "mcp.json"
+    state_path = tmp_path / "state"
+    driver = DeepSeekHarnessDriver(
+        workspace_path="/workspace",
+        state_path=state_path,
+        log=Log(),
+        environment={"DEEPSEEK_API_KEY": "secret"},
+        mcp_servers=(
+            {
+                "name": "docs search",
+                "type": "remote",
+                "url": "https://mcp.example.test/mcp",
+            },
+        ),
+        mcp_config_path=mcp_path,
+        rpc=rpc,
+    )
+    assert await driver.start() is None
+    driver._stale_response_ids.add("stale-response")
+
+    events = [
+        event
+        async for event in driver.stream_prompt(
+            HarnessPrompt(
+                message_id="message-1",
+                content="hello",
+                model="deepseek/deepseek-v4-pro",
+            )
+        )
+    ]
+
+    assert driver.session_id == "codewhale-thread"
+    assert events == [
+        {"type": "token", "content": "whale", "messageId": "message-1"},
+        {"type": "step_finish", "messageId": "message-1", "reason": "accepted"},
+    ]
+    thread_request = next(params for method, params in rpc.requests if method == "thread/start")
+    assert thread_request == {
+        "cwd": "/workspace",
+        "model_provider": "deepseek",
+        "persist_extended_history": True,
+        "model": "deepseek-v4-pro",
+    }
+    assert json.loads(mcp_path.read_text())["servers"]["docs_search"] == {
+        "url": "https://mcp.example.test/mcp"
+    }
+    assert state_path.is_dir()
+    await driver.close()
+    assert rpc.closed
+
+
 def test_native_drivers_ignore_models_owned_by_the_other_provider():
     assert CodexHarnessDriver._normalize_model("anthropic/claude-sonnet-5") is None
     assert ClaudeHarnessDriver._normalize_model("openai/gpt-5.6") is None
+    assert DeepSeekHarnessDriver._normalize_model("openai/gpt-5.6") is None
 
 
 async def test_claude_driver_falls_back_when_persisted_session_is_stale():

@@ -17,6 +17,7 @@ const HARNESS_CREDENTIAL_KEYS = new Set([
   "CODEX_AUTH_JSON",
   "CODEX_ACCESS_TOKEN",
   "CODEX_ACCESS_TOKEN_EXPIRES_AT",
+  "DEEPSEEK_API_KEY",
 ]);
 
 interface ManagedProviderEnvOptions {

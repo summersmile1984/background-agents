@@ -45,10 +45,15 @@ class JsonRpcProcess:
         self._next_id += 1
         future = asyncio.get_running_loop().create_future()
         self._pending[request_id] = future
-        payload = json.dumps({"id": request_id, "method": method, "params": params})
+        payload = json.dumps(
+            {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+        )
         process.stdin.write(payload.encode("utf-8") + b"\n")
         await process.stdin.drain()
-        response = await future
+        try:
+            response = await future
+        finally:
+            self._pending.pop(request_id, None)
         if "error" in response:
             raise RuntimeError(f"{method} failed: {response['error']}")
         result = response.get("result")
@@ -58,7 +63,7 @@ class JsonRpcProcess:
         process = self._require_process()
         if not process.stdin:
             raise RuntimeError("Harness RPC stdin is unavailable")
-        payload: dict[str, Any] = {"method": method}
+        payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             payload["params"] = params
         process.stdin.write(json.dumps(payload).encode("utf-8") + b"\n")
@@ -111,11 +116,15 @@ class JsonRpcProcess:
                     continue
                 request_id = message.get("id")
                 if isinstance(request_id, int) and request_id in self._pending:
-                    self._pending.pop(request_id).set_result(message)
-                elif "method" in message:
+                    future = self._pending[request_id]
+                    if not future.done():
+                        future.set_result(message)
+                elif isinstance(message, dict):
                     await self.notifications.put(message)
         except Exception as error:
             self._fail_pending(error)
+        else:
+            self._fail_pending(RuntimeError("Harness RPC stdout closed"))
 
     async def _read_stderr(self) -> None:
         process = self._require_process()

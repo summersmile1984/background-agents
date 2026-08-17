@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 
 import sandbox_runtime.native_mcp as native_mcp
-from sandbox_runtime.harness.mcp_config import claude_mcp_config, load_session_mcp_servers
+from sandbox_runtime.harness.mcp_config import (
+    claude_mcp_config,
+    codewhale_mcp_config,
+    load_session_mcp_servers,
+)
 
 
 def test_load_session_mcp_servers_and_translate_local_server():
@@ -56,6 +60,40 @@ def test_repository_resolution_preserves_nested_owner(monkeypatch, tmp_path):
         "owner": "group/subgroup",
         "name": "project",
         "path": "/workspace/project",
+    }
+
+
+def test_codewhale_mcp_config_supports_builtin_local_and_remote_servers():
+    config = codewhale_mcp_config(
+        (
+            {
+                "name": "docs search",
+                "type": "remote",
+                "url": "https://mcp.example.test/mcp",
+                "headers": {"X-Key": "secret"},
+            },
+        )
+    )
+
+    assert config["servers"]["open_inspect"] == {
+        "command": "env",
+        "args": [
+            "-u",
+            "DEEPSEEK_API_KEY",
+            "-u",
+            "OPENINSPECT_DEEPSEEK_TOKEN_FILE",
+            "-u",
+            "CODEWHALE_HOME",
+            "-u",
+            "CODEWHALE_MCP_CONFIG",
+            "python",
+            "-m",
+            "sandbox_runtime.native_mcp",
+        ],
+    }
+    assert config["servers"]["docs_search"] == {
+        "url": "https://mcp.example.test/mcp",
+        "headers": {"X-Key": "secret"},
     }
 
 
