@@ -2,6 +2,7 @@ import type { SessionStatus, SpawnSource } from "@open-inspect/shared/types/sess
 import { buildSessionRepositories, type SessionRepositoryEntry } from "./repository-target";
 import type { SqlResult, SqlStorage, TransactionSync } from "./sql-storage";
 import type { SessionRepositoryRow, SessionRow } from "./types";
+import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 /** Data for upserting a session. */
 export interface UpsertSessionData {
@@ -14,6 +15,7 @@ export interface UpsertSessionData {
   baseBranch?: string | null;
   model: string;
   reasoningEffort?: string | null;
+  agentHarness?: AgentHarness;
   status: SessionStatus;
   parentSessionId?: string | null;
   spawnSource?: SpawnSource;
@@ -66,9 +68,7 @@ export class SessionCoreRepository {
       throw new Error("No-repository sessions must not persist repoId or baseBranch");
     }
 
-    this.sql.exec(
-      `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    const commonParams = [
       data.id,
       data.sessionName,
       data.title,
@@ -87,7 +87,21 @@ export class SessionCoreRepository {
       data.sandboxSettings ?? null,
       data.environmentId ?? null,
       data.createdAt,
-      data.updatedAt
+      data.updatedAt,
+    ] as const;
+    if (data.agentHarness && data.agentHarness !== DEFAULT_AGENT_HARNESS) {
+      this.sql.exec(
+        `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at, agent_harness)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ...commonParams,
+        data.agentHarness
+      );
+      return;
+    }
+    this.sql.exec(
+      `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ...commonParams
     );
   }
 
@@ -107,6 +121,21 @@ export class SessionCoreRepository {
     this.sql.exec(
       `UPDATE session SET current_sha = ? WHERE id = (SELECT id FROM session LIMIT 1)`,
       sha
+    );
+  }
+
+  updateAgentSessionIdentity(
+    agentHarness: AgentHarness,
+    agentSessionId: string | null,
+    opencodeSessionId: string | null
+  ): void {
+    this.sql.exec(
+      `UPDATE session
+       SET agent_harness = ?, agent_session_id = ?, opencode_session_id = COALESCE(?, opencode_session_id)
+       WHERE id = (SELECT id FROM session LIMIT 1)`,
+      agentHarness,
+      agentSessionId,
+      opencodeSessionId
     );
   }
 

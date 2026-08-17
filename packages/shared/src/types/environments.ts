@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sessionRepositoriesInputSchema } from "./repositories";
+import { agentHarnessSchema } from "./agent-harness";
 
 /** Maximum characters in an environment's display name. */
 export const MAX_ENVIRONMENT_NAME_LENGTH = 200;
@@ -42,6 +43,7 @@ export const createEnvironmentInputSchema = z.object({
   name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH),
   description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
   prebuildEnabled: z.boolean().optional(),
+  defaultAgentHarness: agentHarnessSchema.nullish(),
   channelAssociations: environmentChannelAssociationsSchema.optional(),
   repositories: environmentRepositoriesInputSchema,
 });
@@ -50,6 +52,7 @@ export const updateEnvironmentInputSchema = z.object({
   name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH).optional(),
   description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
   prebuildEnabled: z.boolean().optional(),
+  defaultAgentHarness: agentHarnessSchema.nullish(),
   channelAssociations: environmentChannelAssociationsSchema.optional(),
   repositories: environmentRepositoriesInputSchema.optional(),
 });
@@ -77,6 +80,7 @@ export const environmentSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   prebuildEnabled: z.boolean(),
+  defaultAgentHarness: agentHarnessSchema.nullable().optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
   /**

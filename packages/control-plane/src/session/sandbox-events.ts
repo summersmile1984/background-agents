@@ -16,6 +16,7 @@ import type { SessionStatusService } from "./session-status-service";
 import type { SessionWebSocketManager } from "./websocket-manager";
 import type { SessionTitleUpdateOptions, SessionTitleUpdateResult } from "./title";
 import type { BackgroundJobDispatcher } from "../platform-ports";
+import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 
 type PushResolver = { resolve: () => void; reject: (err: Error) => void };
 type SandboxEventWithAck = SandboxEvent & { ackId?: string };
@@ -94,6 +95,14 @@ export class SessionSandboxEventProcessor {
     }
 
     if (event.type === "ready") {
+      // The guard keeps mixed-version test doubles and rolling deployments compatible.
+      if (typeof this.repository.updateAgentSessionIdentity === "function") {
+        this.repository.updateAgentSessionIdentity(
+          event.agentHarness ?? DEFAULT_AGENT_HARNESS,
+          event.agentSessionId ?? event.opencodeSessionId ?? null,
+          event.opencodeSessionId ?? null
+        );
+      }
       this.diffService.pinBaselines(event);
     }
 

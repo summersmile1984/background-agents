@@ -11,6 +11,7 @@
  */
 
 import type { McpServerConfig, SandboxSettings } from "@open-inspect/shared/types/integrations";
+import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { extractProviderAndModel } from "@open-inspect/shared/models";
 import type { SandboxStatus } from "@open-inspect/shared/types/sessions";
 import { sessionHasRepository, type SandboxRow, type SessionRow } from "../../session/types";
@@ -491,6 +492,8 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         sandboxAuthToken,
         provider,
         model: modelId,
+        agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
+        agentSessionId: session.agent_session_id,
         userEnvVars,
         prebuiltImageId,
         prebuiltImageSha,
@@ -787,6 +790,8 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         repoName: session.repo_name,
         provider,
         model: modelId,
+        agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
+        agentSessionId: session.agent_session_id,
         userEnvVars,
         timeoutSeconds,
         branch: session.base_branch,

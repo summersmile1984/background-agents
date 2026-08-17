@@ -13,6 +13,8 @@ from .boot_warnings import BootWarningSink
 from .browser_desktop import BrowserDesktop
 from .code_server import CodeServer
 from .constants import VNC_DISPLAY, VNC_PASSWORD_ENV_VAR
+from .dev_services import DevServiceManager
+from .harness_credentials import materialize_harness_credentials
 from .log_config import configure_logging, get_logger
 from .managed_skills import ManagedSkillsClient, ManagedSkillsMaterializer
 from .modal_image_build_start import MODAL_IMAGE_BUILD_START_ARGUMENT, run_modal_image_build
@@ -23,6 +25,7 @@ from .repository_sync import RepositorySynchronizer
 from .runtime_config import RuntimeConfig
 from .supervisor import SandboxSupervisor
 from .tunnel_environment import TunnelEnvironment
+from .types import AgentHarness
 from .web_terminal import WebTerminal
 
 configure_logging()
@@ -41,6 +44,12 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
         session_id=str(config.session_config.get("session_id", "")),
     )
     warnings = BootWarningSink(log)
+    materialize_harness_credentials(os.environ, log, warnings.record, config.agent_harness)
+    dev_services = DevServiceManager(
+        workspace_path=config.workspace_path,
+        log=log,
+        warn=warnings.record,
+    )
     repository_boot = RepositoryBoot(
         config.repository_config(),
         log,
@@ -48,18 +57,24 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
         TunnelEnvironment(config.sandbox_id, log),
         RepositoryHooks(log),
         RepositorySynchronizer(config.vcs_host, log),
+        dev_services,
     )
     managed_skills_config = config.managed_skills_config()
     managed_skills = None
     if managed_skills_config.control_plane_url and managed_skills_config.session_id:
-        global_config_dir = resolve_opencode_global_config_dir()
+        skills_root = {
+            AgentHarness.OPENCODE: resolve_opencode_global_config_dir() / "skills",
+            AgentHarness.CODEX: config.workspace_path / ".codex" / "skills",
+            AgentHarness.CLAUDE: config.workspace_path / ".claude" / "skills",
+            AgentHarness.DEEPSEEK: config.workspace_path / ".agents" / "skills",
+        }[config.agent_harness]
         managed_skills = ManagedSkillsMaterializer(
             ManagedSkillsClient(
                 managed_skills_config.control_plane_url,
                 managed_skills_config.session_id,
                 managed_skills_config.sandbox_token,
             ),
-            global_config_dir / "skills",
+            skills_root,
             log,
         )
     opencode_server = OpenCodeServer(
@@ -72,7 +87,7 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
     code_server = CodeServer(log)
     web_terminal = WebTerminal(log)
     browser_desktop = BrowserDesktop(log, password=vnc_password)
-    return SandboxSupervisor(
+    supervisor = SandboxSupervisor(
         config,
         repository_boot,
         opencode_server,
@@ -84,6 +99,8 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
         shutdown_event,
         log,
     )
+    supervisor.dev_services = dev_services
+    return supervisor
 
 
 def install_signal_handlers(supervisor: SandboxSupervisor) -> None:

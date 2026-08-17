@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { prepareManagedProviderEnv } from "./managed-provider-env";
+import {
+  prepareManagedProviderEnv,
+  stripHarnessCredentialsForImageBuild,
+} from "./managed-provider-env";
 
 describe("prepareManagedProviderEnv", () => {
   it("replaces durable OAuth credentials with provider markers", () => {
@@ -46,5 +49,20 @@ describe("prepareManagedProviderEnv", () => {
         brokerSecrets: { OPENAI_OAUTH_REFRESH_TOKEN: "primary" },
       })
     ).toEqual({ USER_VALUE: "visible", OPENAI_OAUTH_MANAGED: "1" });
+  });
+});
+
+describe("stripHarnessCredentialsForImageBuild", () => {
+  it("keeps ordinary build secrets but removes native harness login material", () => {
+    expect(
+      stripHarnessCredentialsForImageBuild({
+        DATABASE_URL: "postgres://build",
+        CLAUDE_CODE_OAUTH_TOKEN: "claude-secret",
+        CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT: "1893456000",
+        CODEX_AUTH_JSON: "codex-auth",
+        CODEX_ACCESS_TOKEN: "codex-access",
+        CODEX_ACCESS_TOKEN_EXPIRES_AT: "1893456000",
+      })
+    ).toEqual({ DATABASE_URL: "postgres://build" });
   });
 });

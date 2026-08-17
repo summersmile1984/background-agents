@@ -14,6 +14,7 @@ import type {
   AutomationRun,
   AutomationRunStatus,
 } from "@open-inspect/shared/types/automations";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { TriggerConfig } from "@open-inspect/shared/triggers";
 import type { SqlDatabase, SqlStatement } from "./sql-database";
 import type { AutomationListCursor } from "./automation-list-cursor";
@@ -56,6 +57,7 @@ export interface AutomationRow {
   schedule_tz: string;
   model: string;
   reasoning_effort: string | null;
+  agent_harness?: AgentHarness | null;
   enabled: number; // SQLite integer boolean
   next_run_at: number | null;
   consecutive_failures: number;
@@ -186,6 +188,7 @@ export function toAutomation(
     scheduleTz: row.schedule_tz,
     model: row.model,
     reasoningEffort: row.reasoning_effort,
+    ...(row.agent_harness !== undefined ? { agentHarness: row.agent_harness } : {}),
     enabled: row.enabled === 1,
     nextRunAt: row.next_run_at,
     consecutiveFailures: row.consecutive_failures,
@@ -307,6 +310,39 @@ export class AutomationStore {
    * `SlackChannelStore.bindChannelStatements` into one atomic `db.batch`.
    */
   bindAutomationInsert(row: AutomationRow): SqlStatement {
+    const commonValues = [
+      row.id,
+      row.name,
+      row.instructions,
+      row.trigger_type,
+      row.schedule_cron,
+      row.schedule_tz,
+      row.model,
+      row.reasoning_effort,
+      row.enabled,
+      row.next_run_at,
+      row.consecutive_failures,
+      row.created_by,
+      row.user_id,
+      row.created_at,
+      row.updated_at,
+      row.deleted_at,
+      row.event_type,
+      row.trigger_config,
+      row.trigger_auth_data,
+    ] as const;
+    if (row.agent_harness) {
+      return this.db
+        .prepare(
+          `INSERT INTO automations
+           (id, name, instructions,
+            trigger_type, schedule_cron, schedule_tz, model, reasoning_effort, enabled, next_run_at,
+            consecutive_failures, created_by, user_id, created_at, updated_at, deleted_at,
+            event_type, trigger_config, trigger_auth_data, agent_harness)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(...commonValues, row.agent_harness);
+    }
     return this.db
       .prepare(
         `INSERT INTO automations
@@ -316,27 +352,7 @@ export class AutomationStore {
           event_type, trigger_config, trigger_auth_data)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .bind(
-        row.id,
-        row.name,
-        row.instructions,
-        row.trigger_type,
-        row.schedule_cron,
-        row.schedule_tz,
-        row.model,
-        row.reasoning_effort,
-        row.enabled,
-        row.next_run_at,
-        row.consecutive_failures,
-        row.created_by,
-        row.user_id,
-        row.created_at,
-        row.updated_at,
-        row.deleted_at,
-        row.event_type,
-        row.trigger_config,
-        row.trigger_auth_data
-      );
+      .bind(...commonValues);
   }
 
   async create(row: AutomationRow): Promise<void> {
@@ -411,6 +427,7 @@ export class AutomationStore {
       "schedule_tz",
       "model",
       "reasoning_effort",
+      "agent_harness",
       "next_run_at",
       "enabled",
       "consecutive_failures",

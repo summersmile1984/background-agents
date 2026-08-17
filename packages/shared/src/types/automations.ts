@@ -11,6 +11,7 @@ import {
   repositoryInputSchema,
 } from "./repositories";
 import type { RepositoryInput, RepositoryRef } from "./repositories";
+import { agentHarnessSchema, type AgentHarness } from "./agent-harness";
 
 export type AutomationRunStatus = "starting" | "running" | "completed" | "failed" | "skipped";
 
@@ -76,6 +77,7 @@ const automationSchema = z.object({
   scheduleTz: z.string(),
   model: z.string(),
   reasoningEffort: z.string().nullable(),
+  agentHarness: agentHarnessSchema.nullable().optional(),
   enabled: z.boolean(),
   nextRunAt: z.number().nullable(),
   consecutiveFailures: z.number(),
@@ -99,6 +101,7 @@ export interface CreateAutomationRequest {
   scheduleTz?: string;
   model?: string;
   reasoningEffort?: string | null;
+  agentHarness?: AgentHarness | null;
   eventType?: string;
   triggerConfig?: TriggerConfig;
   sentryClientSecret?: string;
@@ -115,6 +118,7 @@ export interface UpdateAutomationRequest {
   scheduleTz?: string;
   model?: string;
   reasoningEffort?: string | null;
+  agentHarness?: AgentHarness | null;
   eventType?: string;
   triggerConfig?: TriggerConfig;
   /** Replaces the full repository selection when present. */

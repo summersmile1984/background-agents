@@ -608,6 +608,13 @@ rotation is persisted back to the global, repository, or environment scope that 
 [Using OpenAI Models](./OPENAI_MODELS.md) and
 [Using Grok with a SuperGrok Subscription](./GROK_MODELS.md).
 
+Native Codex and Claude Code harness sessions may instead receive `CODEX_AUTH_JSON`,
+`CODEX_ACCESS_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`. The runtime materializes those only for the
+selected harness, excludes them from agent shell commands and image builds, and removes disk-backed
+login state before filesystem snapshots. Optional `*_EXPIRES_AT` metadata drives rotation warnings.
+The selected native harness process necessarily remains in the credential trust boundary; the
+runtime containment above is not a brokered, zero-access credential design.
+
 > **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
 > added as global secrets. Modal injects these automatically via its own secrets mechanism.
 >
@@ -616,6 +623,9 @@ rotation is persisted back to the global, repository, or environment scope that 
 > require managed xAI OAuth credentials and must be enabled under **Settings > Models**.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.
+
+Repository-local databases and application processes are described in
+[Per-Sandbox Development Environments](./DEV_ENVIRONMENTS.md).
 
 ### Deployment Recommendations
 

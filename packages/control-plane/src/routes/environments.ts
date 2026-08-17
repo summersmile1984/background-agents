@@ -120,7 +120,14 @@ async function handleCreateEnvironment(
 
   const parsed = createEnvironmentInputSchema.safeParse(body);
   if (!parsed.success) return validationError(parsed.error);
-  const { name, description, prebuildEnabled, channelAssociations, repositories } = parsed.data;
+  const {
+    name,
+    description,
+    prebuildEnabled,
+    defaultAgentHarness,
+    channelAssociations,
+    repositories,
+  } = parsed.data;
 
   const store = new EnvironmentStore(ctx.db);
   if (await store.getByName(name)) {
@@ -136,6 +143,7 @@ async function handleCreateEnvironment(
     name,
     description: normalizeDescription(description),
     prebuild_enabled: prebuildEnabled ? 1 : 0,
+    default_agent_harness: defaultAgentHarness ?? null,
     channel_associations: normalizeChannelAssociations(channelAssociations) ?? null,
     created_at: now,
     updated_at: now,
@@ -196,7 +204,14 @@ async function handleUpdateEnvironment(
 
   const parsed = updateEnvironmentInputSchema.safeParse(body);
   if (!parsed.success) return validationError(parsed.error);
-  const { name, description, prebuildEnabled, channelAssociations, repositories } = parsed.data;
+  const {
+    name,
+    description,
+    prebuildEnabled,
+    defaultAgentHarness,
+    channelAssociations,
+    repositories,
+  } = parsed.data;
 
   if (name !== undefined) {
     const other = await store.getByName(name);
@@ -214,6 +229,9 @@ async function handleUpdateEnvironment(
   if (name !== undefined) fields.name = name;
   if (description !== undefined) fields.description = normalizeDescription(description);
   if (prebuildEnabled !== undefined) fields.prebuild_enabled = prebuildEnabled ? 1 : 0;
+  if (defaultAgentHarness !== undefined) {
+    fields.default_agent_harness = defaultAgentHarness ?? null;
+  }
   const channelAssociationsColumn = normalizeChannelAssociations(channelAssociations);
   if (channelAssociationsColumn !== undefined) {
     fields.channel_associations = channelAssociationsColumn;

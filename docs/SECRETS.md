@@ -76,6 +76,29 @@ The most common example:
 > `ANTHROPIC_API_KEY` as a global secret after deploying. Without it, Claude sessions will fail with
 > "Model not found." See [Getting Started](GETTING_STARTED.md) for details.
 
+### Native harness subscription credentials
+
+Codex and Claude Code can use subscription credentials instead of model API keys. Store these as a
+global, repository, or Environment secret according to the sessions that should receive them:
+
+| Key                                  | Purpose                                                                  |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `CLAUDE_CODE_OAUTH_TOKEN`            | Claude Code token produced by `claude setup-token`                       |
+| `CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT` | Optional ISO-8601 or Unix expiry metadata used for rotation warnings     |
+| `CODEX_AUTH_JSON`                    | Codex `auth.json` as JSON, or the base64 encoding of that JSON           |
+| `CODEX_ACCESS_TOKEN`                 | Enterprise Codex token, loaded through `codex login --with-access-token` |
+| `CODEX_ACCESS_TOKEN_EXPIRES_AT`      | Optional ISO-8601 or Unix expiry metadata used for rotation warnings     |
+
+`setup-token` credentials may be long-lived, but Open-Inspect does not assume a fixed one-year
+lifetime. If expiry metadata is supplied, sessions warn during the final 30 days and after expiry.
+
+These credentials receive stricter handling than ordinary environment variables: image builds drop
+them before repository setup runs, Claude's token is moved to memory-backed storage before services
+start, Codex login state is removed before snapshots, and agent shell commands do not inherit the
+credential variables. Values remain encrypted in D1 at rest and are never returned to the browser.
+The selected native harness process remains inside the credential trust boundary; this containment
+does not turn subscription credentials into brokered, zero-access tokens.
+
 ### When to use repository secrets
 
 Use repository secrets for credentials that are specific to a single project — database connection
@@ -135,7 +158,8 @@ Certain keys are reserved for system use and cannot be set as secrets:
 
 `PYTHONUNBUFFERED`, `SANDBOX_ID`, `CONTROL_PLANE_URL`, `SANDBOX_AUTH_TOKEN`, `REPO_OWNER`,
 `REPO_NAME`, `GITHUB_APP_TOKEN`, `SESSION_CONFIG`, `RESTORED_FROM_SNAPSHOT`,
-`OPENCODE_CONFIG_CONTENT`, `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `PWD`, `LANG`
+`OPENCODE_CONFIG_CONTENT`, `CODEX_HOME`, `OPENINSPECT_CLAUDE_TOKEN_FILE`, `PATH`, `HOME`, `USER`,
+`SHELL`, `TERM`, `PWD`, `LANG`
 
 If you try to save a reserved key, the UI will show a validation error.
 
@@ -167,6 +191,9 @@ from it, even after you rotate the secret. Two guidelines:
   — stale on-disk material persists until the next commit-triggered rebuild, which is another reason
   to keep secrets out of the image filesystem.
 
+Native harness subscription keys listed above are always removed from image-build environments and
+therefore are not available to `setup.sh`; they are injected only into live session sandboxes.
+
 ---
 
 ## Common Examples
@@ -182,6 +209,8 @@ from it, even after you rotate the secret. Two guidelines:
 | `DATABASE_URL`               | Repo   | Database connection string                                   |
 | `AWS_ACCESS_KEY_ID`          | Repo   | AWS credentials for a specific project                       |
 | `STRIPE_SECRET_KEY`          | Repo   | Stripe API key for a specific project                        |
+| `CLAUDE_CODE_OAUTH_TOKEN`    | Global | Claude Code subscription login from `claude setup-token`     |
+| `CODEX_AUTH_JSON`            | Global | Codex subscription login state                               |
 
 ---
 

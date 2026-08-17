@@ -11,6 +11,7 @@ import {
   DEFAULT_SESSION_LIST_OFFSET,
 } from "@open-inspect/shared/session-list-query";
 import type { SessionListRepository } from "@open-inspect/shared/types/repositories";
+import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { SessionSkillManifestInput } from "../session/skill-resolution";
 import { attachSessionListMetadata } from "./session-list-metadata";
 import {
@@ -66,6 +67,7 @@ export interface SessionEntry {
   repoName: string | null;
   model: string;
   reasoningEffort: string | null;
+  agentHarness?: AgentHarness;
   baseBranch: string | null;
   status: SessionStatus;
   parentSessionId?: string | null;
@@ -110,6 +112,8 @@ interface SessionRow {
   repo_name: string | null;
   model: string;
   reasoning_effort: string | null;
+  /** Absent only for rows created before migration 0064 during a rolling deploy. */
+  agent_harness?: AgentHarness;
   base_branch: string | null;
   status: SessionStatus;
   parent_session_id: string | null;
@@ -156,6 +160,7 @@ function toEntry(row: SessionRow): SessionEntry {
     repoName: row.repo_name,
     model: row.model,
     reasoningEffort: row.reasoning_effort,
+    ...(row.agent_harness ? { agentHarness: row.agent_harness } : {}),
     baseBranch: row.base_branch,
     status: row.status,
     parentSessionId: row.parent_session_id,
@@ -219,8 +224,8 @@ export class SessionIndexStore {
 
     const sessionStmt = this.db
       .prepare(
-        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at, agent_harness)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
@@ -243,7 +248,8 @@ export class SessionIndexStore {
         session.userId ?? null,
         session.environmentId ?? null,
         session.createdAt,
-        session.updatedAt
+        session.updatedAt,
+        session.agentHarness ?? DEFAULT_AGENT_HARNESS
       );
 
     const repositoryStmts = (session.repositories ?? []).map((repo, position) =>

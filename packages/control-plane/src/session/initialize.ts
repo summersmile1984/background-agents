@@ -7,6 +7,7 @@ import { SessionIndexStore } from "../db/session-index";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import { createLogger } from "../logger";
 import type { SessionSkillManifestInput } from "./skill-resolution";
+import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 const logger = createLogger("session-init");
 
@@ -44,6 +45,7 @@ export interface SessionInitInput {
   title?: string;
   model: string;
   reasoningEffort: string | null;
+  agentHarness?: AgentHarness;
   codeServerEnabled?: boolean;
   vncEnabled?: boolean;
   sandboxSettings?: SandboxSettings;
@@ -138,6 +140,7 @@ export async function initializeSession(
     repoName: input.repoName,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
+    agentHarness: input.agentHarness ?? DEFAULT_AGENT_HARNESS,
     baseBranch,
     repositories,
     environmentId: input.environmentId ?? null,
@@ -183,6 +186,7 @@ export async function initializeSession(
           title: input.title,
           model: input.model,
           reasoningEffort: input.reasoningEffort,
+          agentHarness: input.agentHarness ?? DEFAULT_AGENT_HARNESS,
           userId: input.participantUserId,
           canonicalUserId: input.platformUserId,
           scmLogin: input.scmLogin,

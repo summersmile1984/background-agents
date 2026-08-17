@@ -43,6 +43,7 @@ import {
   automationRepositoriesInputSchema,
   MAX_AUTOMATION_REPOSITORIES,
 } from "@open-inspect/shared/types/automations";
+import { agentHarnessSchema } from "@open-inspect/shared/types/agent-harness";
 import { isEnvironmentId } from "@open-inspect/shared/types/environments";
 import {
   type Route,
@@ -550,6 +551,13 @@ async function handleCreateAutomation(
   if (body.reasoningEffort !== undefined && body.reasoningEffort !== null && !reasoningEffort) {
     return error("Invalid reasoning effort for selected model", 400);
   }
+  if (
+    body.agentHarness !== undefined &&
+    body.agentHarness !== null &&
+    !agentHarnessSchema.safeParse(body.agentHarness).success
+  ) {
+    return error("Invalid agent harness", 400);
+  }
 
   const newRepositories = await resolveRepositorySelection(env, requestedRepositories, ctx);
 
@@ -600,6 +608,7 @@ async function handleCreateAutomation(
     schedule_tz: body.scheduleTz ?? "UTC",
     model,
     reasoning_effort: reasoningEffort,
+    agent_harness: body.agentHarness ?? null,
     enabled: 1,
     next_run_at: nextRunAt,
     consecutive_failures: 0,
@@ -756,6 +765,13 @@ async function handleUpdateAutomation(
   if (body.model !== undefined && !isValidModel(body.model)) {
     return error("Invalid model", 400);
   }
+  if (
+    body.agentHarness !== undefined &&
+    body.agentHarness !== null &&
+    !agentHarnessSchema.safeParse(body.agentHarness).success
+  ) {
+    return error("Invalid agent harness", 400);
+  }
 
   const nextModel = body.model !== undefined ? getValidModelOrDefault(body.model) : existing.model;
   const requestedReasoningEffort = body.reasoningEffort;
@@ -784,6 +800,7 @@ async function handleUpdateAutomation(
   if (body.reasoningEffort !== undefined || body.model !== undefined) {
     updateFields.reasoning_effort = resolvedReasoningEffort;
   }
+  if (body.agentHarness !== undefined) updateFields.agent_harness = body.agentHarness;
 
   // Repository-set edits are UNCONDITIONAL — no cardinality freeze and no
   // active-invocation guard. In-flight invocations already materialized their

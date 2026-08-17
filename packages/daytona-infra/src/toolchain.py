@@ -17,10 +17,13 @@ if TYPE_CHECKING:
 # Never pin below 1.18.15 — see packages/modal-infra/src/images/base.py for why
 # (OpenCode's message-ID counter wraps and earlier releases order by ID string).
 OPENCODE_VERSION = "1.18.18"
+CODEX_VERSION = "0.147.0"
+CLAUDE_CODE_VERSION = "2.1.233"
+CLAUDE_AGENT_SDK_VERSION = "0.2.139"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
 # Bump when changing image contents to invalidate the Daytona snapshot.
-SANDBOX_VERSION = "daytona-v6-vnc-opencode-1-18-18"
+SANDBOX_VERSION = "daytona-v7-native-harnesses"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -36,7 +39,7 @@ def build_base_image(repo_root: Path) -> Image:
             "libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 "
             "libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 "
             "libpango-1.0-0 libcairo2 ffmpeg xvfb fluxbox x11vnc "
-            "websockify novnc",
+            "websockify novnc postgresql postgresql-client redis-server",
             "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg "
             "| dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
             "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] "
@@ -55,10 +58,16 @@ def build_base_image(repo_root: Path) -> Image:
             "websockets",
             "pydantic>=2.0",
             "PyJWT[crypto]",
+            f"claude-agent-sdk=={CLAUDE_AGENT_SDK_VERSION}",
+            "mcp>=1.29.0,<2",
+            "PyYAML>=6.0.2",
         )
         .run_commands(
             f"npm install -g opencode-ai@{OPENCODE_VERSION}",
             f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
+            f"npm install -g @openai/codex@{CODEX_VERSION}",
+            f"npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_VERSION}",
+            "codex --version && claude --version",
             f"curl -fsSL -o /tmp/code-server.deb "
             f"https://github.com/coder/code-server/releases/download/v{CODE_SERVER_VERSION}/"
             f"code-server_{CODE_SERVER_VERSION}_amd64.deb",

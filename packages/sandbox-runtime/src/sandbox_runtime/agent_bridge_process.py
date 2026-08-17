@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from .constants import OPENCODE_PORT
+from .harness_credentials import read_claude_token
 from .process_output import iter_process_lines
 
 if TYPE_CHECKING:
@@ -21,6 +22,8 @@ class AgentBridgeProcess:
         self.control_plane_url = config.control_plane_url
         self.sandbox_token = config.sandbox_token
         self.session_id = config.session_id
+        self.agent_harness = config.agent_harness
+        self.agent_session_id = config.agent_session_id
         self._process: asyncio.subprocess.Process | None = None
 
     async def start(self) -> None:
@@ -32,6 +35,10 @@ class AgentBridgeProcess:
             self.log.info("bridge.skip", reason="no_session_id")
             return
 
+        child_environment = dict(os.environ)
+        claude_token = read_claude_token(child_environment)
+        if claude_token and self.agent_harness.value == "claude":
+            child_environment["CLAUDE_CODE_OAUTH_TOKEN"] = claude_token
         self._process = await asyncio.create_subprocess_exec(
             "python",
             "-m",
@@ -46,7 +53,10 @@ class AgentBridgeProcess:
             self.sandbox_token,
             "--opencode-port",
             str(OPENCODE_PORT),
-            env=os.environ,
+            "--agent-harness",
+            self.agent_harness.value,
+            *(["--agent-session-id", self.agent_session_id] if self.agent_session_id else []),
+            env=child_environment,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             limit=_LOG_FORWARD_STREAM_LIMIT_BYTES,

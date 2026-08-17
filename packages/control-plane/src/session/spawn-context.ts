@@ -1,5 +1,6 @@
 import { isValidSandboxTimeoutMs } from "@open-inspect/shared/types/integrations";
 import { z } from "zod";
+import { agentHarnessSchema } from "@open-inspect/shared/types/agent-harness";
 
 const sandboxTimeoutMsSchema = z.number().refine(isValidSandboxTimeoutMs);
 
@@ -30,6 +31,7 @@ export const spawnContextSchema = z.object({
   repoId: z.number().nullable(),
   model: z.string(),
   reasoningEffort: z.string().nullable(),
+  agentHarness: agentHarnessSchema.optional(),
   baseBranch: z.string().nullable(),
   sandboxTimeoutMs: sandboxTimeoutMsSchema.optional(),
   promptAuthor: promptAuthorSchema,

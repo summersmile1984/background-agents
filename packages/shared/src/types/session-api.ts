@@ -11,6 +11,7 @@ import {
   type Session,
   type SessionStatus,
 } from "./sessions";
+import { agentHarnessSchema } from "./agent-harness";
 
 export interface UserPreferences {
   userId: string;
@@ -214,6 +215,8 @@ const createSessionRequestBaseSchema = z.object({
   title: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional(),
+  /** Coding-agent runtime. Omitted requests retain the deployment/environment default. */
+  agentHarness: agentHarnessSchema.optional(),
   branch: z.string().optional(),
   /**
    * Ordered repository list ([0] = primary). Mutually exclusive with the

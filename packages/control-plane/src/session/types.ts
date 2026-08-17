@@ -12,6 +12,7 @@ import type {
   SpawnSource,
 } from "@open-inspect/shared/types/sessions";
 import type { ArtifactType } from "@open-inspect/shared/types/artifacts";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { EventType, GitSyncStatus } from "@open-inspect/shared/types/sandbox-events";
 import type { GitPushSpec } from "../source-control";
 import { z } from "zod";
@@ -38,6 +39,9 @@ export interface SessionRow {
   base_sha: string | null;
   current_sha: string | null;
   opencode_session_id: string | null;
+  /** Optional in the TypeScript shape for rolling-upgrade and test-fixture compatibility. */
+  agent_harness?: AgentHarness;
+  agent_session_id?: string | null;
   model: string; // LLM model to use (e.g., "anthropic/claude-haiku-4-5")
   reasoning_effort: string | null; // Reasoning effort level (e.g., "high", "max")
   status: SessionStatus;

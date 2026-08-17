@@ -9,6 +9,7 @@
  */
 
 import type { Environment, EnvironmentRepository } from "@open-inspect/shared/types/environments";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { parseJsonStringArray } from "./json-columns";
 import type { SqlDatabase, SqlStatement } from "./sql-database";
 
@@ -17,6 +18,8 @@ export interface EnvironmentRow {
   name: string;
   description: string | null;
   prebuild_enabled: number; // SQLite integer boolean
+  /** Absent only while a rolling deploy still reads a pre-migration row fixture. */
+  default_agent_harness?: AgentHarness | null;
   channel_associations: string | null; // JSON string array (mirrors repo_metadata)
   created_at: number;
   updated_at: number;
@@ -56,6 +59,7 @@ export function toEnvironment(
     name: row.name,
     description: row.description,
     prebuildEnabled: row.prebuild_enabled === 1,
+    defaultAgentHarness: row.default_agent_harness ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     channelAssociations: parseJsonStringArray(row.channel_associations),
@@ -65,13 +69,17 @@ export function toEnvironment(
 
 /** The mutable scalar columns of an environment row (everything but id/timestamps). */
 export type EnvironmentScalarFields = Partial<
-  Pick<EnvironmentRow, "name" | "description" | "prebuild_enabled" | "channel_associations">
+  Pick<
+    EnvironmentRow,
+    "name" | "description" | "prebuild_enabled" | "default_agent_harness" | "channel_associations"
+  >
 >;
 
 const MUTABLE_SCALAR_COLUMNS = [
   "name",
   "description",
   "prebuild_enabled",
+  "default_agent_harness",
   "channel_associations",
 ] as const satisfies readonly (keyof EnvironmentScalarFields)[];
 
@@ -82,14 +90,15 @@ export class EnvironmentStore {
     return this.db
       .prepare(
         `INSERT INTO environments
-         (id, name, description, prebuild_enabled, channel_associations, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+         (id, name, description, prebuild_enabled, default_agent_harness, channel_associations, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         row.id,
         row.name,
         row.description,
         row.prebuild_enabled,
+        row.default_agent_harness ?? null,
         row.channel_associations,
         row.created_at,
         row.updated_at
