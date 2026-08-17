@@ -23,6 +23,15 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* next-themes serializes a compiled helper call into its bootstrap script. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'globalThis.__name ??= (target, value) => Object.defineProperty(target, "name", { value, configurable: true });',
+          }}
+        />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
         <Providers>{children}</Providers>
       </body>

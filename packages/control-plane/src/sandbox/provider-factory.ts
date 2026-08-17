@@ -145,6 +145,15 @@ function createE2BProviderFromEnv(env: Env): E2BSandboxProvider {
       DEFAULT_E2B_SANDBOX_TIMEOUT_SECONDS
     ),
     autoPause: parseBooleanEnv("E2B_AUTO_PAUSE", env.E2B_AUTO_PAUSE, DEFAULT_E2B_AUTO_PAUSE),
+    useCreateTimeEnv: parseBooleanEnv(
+      "E2B_USE_CREATE_TIME_ENV",
+      env.E2B_USE_CREATE_TIME_ENV,
+      false
+    ),
+    llmEnvVars: {
+      XIAOMI_API_KEY: env.XIAOMI_API_KEY,
+      XIAOMI_BASE_URL: env.XIAOMI_BASE_URL,
+    },
   });
 }
 

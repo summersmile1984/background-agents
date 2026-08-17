@@ -356,6 +356,34 @@ describe("E2BSandboxProvider", () => {
     expect(client.killSandbox).toHaveBeenCalledWith("e2b-id");
   });
 
+  it("uses create-time env without an envd token for an explicitly compatible backend", async () => {
+    const client = mockClient({
+      createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+    });
+
+    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
+      status: "running",
+      providerObjectId: "e2b-id",
+    });
+    expect(client.createSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envVars: expect.objectContaining({
+          SANDBOX_ID: "sandbox-logical",
+          OI_USE_CREATE_TIME_ENV: "1",
+          VCS_CLONE_BASE_URL: "https://cp.test/git/sess-1",
+        }),
+        envVarsField: "envs",
+        secure: true,
+      })
+    );
+    expect(client.writeSessionEnv).not.toHaveBeenCalled();
+    expect(client.killSandbox).not.toHaveBeenCalled();
+  });
+
   it("429 maps to a TRANSIENT SandboxProviderError (not counted toward the circuit breaker)", async () => {
     const client = mockClient({
       createSandbox: vi.fn(async () => {

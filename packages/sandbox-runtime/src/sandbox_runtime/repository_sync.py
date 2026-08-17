@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from .diff_baseline import resolve_session_diff_baselines
 from .process_output import communicate_owned_subprocess, terminate_owned_subprocess
@@ -31,9 +32,29 @@ class RepositorySynchronizer:
     def __init__(self, vcs_host: str, log: Any) -> None:
         self.vcs_host = vcs_host
         self.log = log
+        self.clone_base_url = self._resolve_clone_base_url()
+
+    def _resolve_clone_base_url(self) -> str:
+        direct_base_url = f"https://{self.vcs_host}"
+        raw_base_url = os.environ.get("VCS_CLONE_BASE_URL", "").strip().rstrip("/")
+        if not raw_base_url:
+            return direct_base_url
+
+        parsed = urlsplit(raw_base_url)
+        if (
+            parsed.scheme.lower() != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            self.log.warn("git.clone_base_url_invalid")
+            return direct_base_url
+        return raw_base_url
 
     def _build_repo_url(self, repo: RepoEntry) -> str:
-        return f"https://{self.vcs_host}/{repo.owner}/{repo.name}.git"
+        return f"{self.clone_base_url}/{repo.owner}/{repo.name}.git"
 
     def _redact_git_stderr(self, stderr: bytes) -> str:
         return re.sub(r"(https?://)([^/\s@]+)@", r"\1***@", stderr.decode(errors="replace"))

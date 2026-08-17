@@ -6,6 +6,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import type { ReactNode } from "react";
 import { DEFAULT_MODEL } from "@open-inspect/shared/models";
+import { formatModelNameLower } from "@/lib/format";
 import NewAutomationPage from "./page";
 
 expect.extend(matchers);
@@ -99,7 +100,7 @@ describe("NewAutomationPage template pre-fill", () => {
 
     expect(screen.getByDisplayValue("Scan codebase for vulnerabilities")).toBeInTheDocument();
     // Falls back to the enabled default model rather than the unenabled suggestion.
-    expect(screen.getByText("claude sonnet 4.6")).toBeInTheDocument();
+    expect(screen.getByText(formatModelNameLower(DEFAULT_MODEL))).toBeInTheDocument();
     expect(screen.queryByText("claude opus 4.8")).not.toBeInTheDocument();
   });
 });

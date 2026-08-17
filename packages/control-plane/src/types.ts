@@ -98,6 +98,11 @@ export interface Env {
   E2B_TEMPLATE_ID?: string; // Pre-built E2B template ID
   E2B_SANDBOX_TIMEOUT_SECONDS?: string; // Sandbox TTL in seconds; Hobby plans must set 3300
   E2B_AUTO_PAUSE?: string; // "true" (default) pauses on TTL expiry (resumable, auto-resumes) instead of killing
+  E2B_USE_CREATE_TIME_ENV?: string; // CubeSandbox compatibility: inject session env during create instead of envd upload
+
+  // Xiaomi MiMo (OpenAI-compatible) LLM config injected into sandboxes
+  XIAOMI_API_KEY?: string;
+  XIAOMI_BASE_URL?: string;
 
   // Sandbox lifecycle configuration
   SANDBOX_INACTIVITY_TIMEOUT_MS?: string; // Inactivity timeout in ms (default: 600000 = 10 min)

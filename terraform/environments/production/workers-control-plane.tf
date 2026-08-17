@@ -30,8 +30,10 @@ module "control_plane_worker" {
   source = "../../modules/cloudflare-worker"
 
   account_id       = var.cloudflare_account_id
+  zone_id          = local.control_plane_custom_domain_enabled ? local.control_plane_zone_id : null
   worker_name      = "open-inspect-control-plane-${local.name_suffix}"
   worker_subdomain = var.cloudflare_worker_subdomain
+  custom_domain    = local.control_plane_custom_domain_enabled ? local.control_plane_custom_domain : null
   script_path      = local.control_plane_script_path
 
   kv_namespaces = [
@@ -143,6 +145,8 @@ module "control_plane_worker" {
       { name = "E2B_TEMPLATE_ID", value = var.e2b_template_id },
       { name = "E2B_SANDBOX_TIMEOUT_SECONDS", value = tostring(var.e2b_sandbox_timeout_seconds) },
       { name = "E2B_AUTO_PAUSE", value = tostring(var.e2b_auto_pause) },
+      { name = "E2B_USE_CREATE_TIME_ENV", value = tostring(var.e2b_use_create_time_env) },
+      { name = "XIAOMI_BASE_URL", value = var.xiaomi_base_url },
     ] : []
   )
 
@@ -187,6 +191,9 @@ module "control_plane_worker" {
     ] : [],
     local.use_e2b_backend ? [
       { name = "E2B_API_KEY", value = var.e2b_api_key },
+    ] : [],
+    local.use_e2b_backend && trimspace(var.xiaomi_api_key) != "" ? [
+      { name = "XIAOMI_API_KEY", value = var.xiaomi_api_key },
     ] : [],
     # Slack bot token enables the agent-initiated `slack-notify` endpoint.
     # Shares the variable with the slack-bot worker; bound here so the same

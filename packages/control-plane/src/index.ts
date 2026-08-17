@@ -18,6 +18,7 @@ import { createRequestMetrics, instrumentD1, type RequestMetrics } from "./db/in
 import { SessionIndexStore } from "./db/session-index";
 import type { SqlDatabase } from "./db/sql-database";
 import { createCloudflareBackgroundJobDispatcher } from "./cloudflare/background-job-dispatcher";
+import { handleGitHubGitProxy } from "./github-git-proxy";
 
 const logger = createLogger("worker");
 
@@ -31,6 +32,9 @@ export { SchedulerDO } from "./scheduler/durable-object";
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    const gitProxyResponse = await handleGitHubGitProxy(request, url, env);
+    if (gitProxyResponse) return gitProxyResponse;
 
     // WebSocket upgrade for session
     const upgradeHeader = request.headers.get("Upgrade");
