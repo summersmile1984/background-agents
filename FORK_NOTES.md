@@ -15,6 +15,11 @@ The fork is the writable production source; the upstream repository is treated a
   configured.
 - Sandboxes clone and push GitHub repositories through a session-authenticated smart-HTTP proxy in
   the control plane when direct `github.com` access is unavailable.
+- The sandbox bridge keeps the upstream WebSocket contract while selecting OpenCode (default),
+  Codex, Claude Code, or DeepSeek CodeWhale through provider adapters.
+- Repositories may declare isolated PostgreSQL, Redis, and development processes in
+  `.openinspect/environment.yaml`; their state remains outside repository checkouts and participates
+  in sandbox snapshot coordination.
 
 The compatibility switches default to the upstream behavior unless explicitly enabled. Personal
 domains, template IDs, account IDs, API keys, and other deployment values belong in ignored
