@@ -10,6 +10,7 @@ Environment=CODEX_RELAY_LISTEN_PORT=18767
 ExecStart=/usr/bin/node /absolute/path/to/background-agents/packages/e2b-infra/codex-relay.mjs
 Restart=on-failure
 RestartSec=2s
+TimeoutStopSec=15s
 NoNewPrivileges=true
 PrivateTmp=true
 

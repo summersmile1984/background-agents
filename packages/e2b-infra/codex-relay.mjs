@@ -4,6 +4,7 @@ import http from "node:http";
 import https from "node:https";
 import process from "node:process";
 import tls from "node:tls";
+import { setTimeout } from "node:timers";
 import { URL } from "node:url";
 
 const listenHost = process.env.CODEX_RELAY_LISTEN_HOST || "127.0.0.1";
@@ -16,6 +17,8 @@ if (!Number.isInteger(listenPort) || listenPort < 1 || listenPort > 65535) {
 }
 
 const agent = new https.Agent({ keepAlive: true, maxSockets: 64 });
+const downstreamSockets = new Set();
+const websocketUpstreamSockets = new Set();
 const hopByHopHeaders = new Set([
   "connection",
   "keep-alive",
@@ -114,6 +117,11 @@ const server = http.createServer((request, response) => {
   request.pipe(upstreamRequest);
 });
 
+server.on("connection", (socket) => {
+  downstreamSockets.add(socket);
+  socket.once("close", () => downstreamSockets.delete(socket));
+});
+
 server.on("upgrade", (request, clientSocket, head) => {
   const upstreamPath = mappedUpstreamPath(request.url);
   if (!upstreamPath || !upstreamPath.startsWith(`${upstreamPrefix}/responses`)) {
@@ -122,6 +130,8 @@ server.on("upgrade", (request, clientSocket, head) => {
   }
 
   const upstreamSocket = tls.connect({ host: upstreamHost, port: 443, servername: upstreamHost });
+  websocketUpstreamSockets.add(upstreamSocket);
+  upstreamSocket.once("close", () => websocketUpstreamSockets.delete(upstreamSocket));
   upstreamSocket.once("secureConnect", () => {
     const headers = upstreamHeaders(request.headers, { upgrade: true });
     const headerLines = Object.entries(headers).flatMap(([name, value]) => {
@@ -138,6 +148,7 @@ server.on("upgrade", (request, clientSocket, head) => {
     clientSocket.end("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
   });
   clientSocket.once("error", () => upstreamSocket.destroy());
+  clientSocket.once("close", () => upstreamSocket.destroy());
 });
 
 server.requestTimeout = 0;
@@ -146,6 +157,23 @@ server.listen(listenPort, listenHost, () => {
   process.stdout.write(`Codex relay listening on http://${listenHost}:${listenPort}\n`);
 });
 
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close(() => process.exit(0));
+
+  const forceCloseTimer = setTimeout(() => {
+    for (const socket of downstreamSockets) socket.destroy();
+    for (const socket of websocketUpstreamSockets) socket.destroy();
+    agent.destroy();
+  }, 5_000);
+  forceCloseTimer.unref();
+
+  const forceExitTimer = setTimeout(() => process.exit(0), 10_000);
+  forceExitTimer.unref();
+}
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  process.on(signal, shutdown);
 }
