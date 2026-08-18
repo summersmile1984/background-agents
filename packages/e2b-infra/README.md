@@ -71,3 +71,20 @@ the App can clone.
 | TTL lapse recovers          | Past the TTL the sandbox auto-pauses (not killed); the next prompt resumes it   |
 | code-server survives resume | Same URL and password work after resume                                         |
 | Stop pauses (resumable)     | Idle/heartbeat stop pauses; only a never-connected sandbox is killed (`DELETE`) |
+
+## Self-hosted CubeSandbox
+
+The fork also carries an additive CubeSandbox build path. It uses Cube's `sandbox-code` base image
+so the E2B-compatible envd and code-interpreter services remain available, while installing the same
+pinned harnesses and development services as the managed E2B image.
+
+```bash
+cd packages/e2b-infra
+CUBE_IMAGE=localhost:5000/oi-e2b:latest \
+  CUBE_TEMPLATE_ALIAS=oi-e2b-codewhale-harness \
+  bash build-cube-template.sh
+```
+
+The command builds from a temporary context containing only this package and `sandbox-runtime`,
+pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
+template only after it reaches `READY`.
