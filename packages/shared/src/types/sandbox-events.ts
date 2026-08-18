@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { sessionDiffBaselineRepositorySchema } from "./session-diffs";
 import { resolvedSessionAttachmentsSchema } from "./session-attachments";
+import { agentHarnessSchema } from "./agent-harness";
 
 const recordSchema = z.record(z.string(), z.unknown());
 const gitSyncStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
@@ -55,6 +56,9 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
     // Present in essentially every session's replay history.
     type: z.literal("ready"),
     opencodeSessionId: z.string().nullable().optional(),
+    agentHarness: agentHarnessSchema.optional(),
+    agentSessionId: z.string().nullable().optional(),
+    runtimeStatus: z.enum(["ready", "degraded"]).optional(),
     repositories: z.array(sessionDiffBaselineRepositorySchema).optional(),
   }),
   messageSandboxEventBaseSchema.extend({
@@ -150,7 +154,17 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
   // unknown union entries, so this entry must exist before runtimes emit it.
   z.object({
     type: z.literal("warning"),
-    scope: z.enum(["sync", "setup", "start", "assembly", "secrets", "media"]),
+    scope: z.enum([
+      "sync",
+      "setup",
+      "start",
+      "assembly",
+      "secrets",
+      "media",
+      "harness",
+      "services",
+      "snapshot",
+    ]),
     message: z.string(),
     repoOwner: z.string().optional(),
     repoName: z.string().optional(),

@@ -9,6 +9,7 @@ import type { ImageBuildScopeKind } from "@open-inspect/shared/types/image-build
 import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
 import type { CorrelationContext } from "../logger";
 import type { McpServerConfig } from "@open-inspect/shared/types/integrations";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 /** Default sandbox lifetime in seconds (2 hours). */
 export const DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200;
@@ -97,6 +98,10 @@ export interface CreateSandboxConfig {
   provider: string;
   /** LLM model (e.g., "claude-sonnet-4-5") */
   model: string;
+  /** Coding-agent runtime selected when the session was created. */
+  agentHarness?: AgentHarness;
+  /** Native runtime session/thread ID for resumption. */
+  agentSessionId?: string | null;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;
   /** OpenCode session ID for resumption */
@@ -200,6 +205,8 @@ export interface RestoreConfig {
   provider: string;
   /** LLM model (e.g., "claude-sonnet-4-5") */
   model: string;
+  agentHarness?: AgentHarness;
+  agentSessionId?: string | null;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;
   /** Sandbox lifetime in seconds. Defaults to DEFAULT_SANDBOX_TIMEOUT_SECONDS. */

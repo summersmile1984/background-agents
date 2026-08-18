@@ -10,6 +10,16 @@ const CONTROL_PLANE_OAUTH_KEYS = new Set([
   "XAI_OAUTH_MANAGED",
 ]);
 
+/** Native harness login material must never be baked into a reusable repository image. */
+const HARNESS_CREDENTIAL_KEYS = new Set([
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN_EXPIRES_AT",
+  "CODEX_AUTH_JSON",
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_ACCESS_TOKEN_EXPIRES_AT",
+  "DEEPSEEK_API_KEY",
+]);
+
 interface ManagedProviderEnvOptions {
   exposedSecrets: Record<string, string>;
   brokerSecrets: Record<string, string>;
@@ -25,4 +35,12 @@ export function prepareManagedProviderEnv({
   if (brokerSecrets.OPENAI_OAUTH_REFRESH_TOKEN) env.OPENAI_OAUTH_MANAGED = "1";
   if (brokerSecrets.XAI_OAUTH_REFRESH_TOKEN) env.XAI_OAUTH_MANAGED = "1";
   return env;
+}
+
+export function stripHarnessCredentialsForImageBuild(
+  environment: Record<string, string>
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(environment).filter(([key]) => !HARNESS_CREDENTIAL_KEYS.has(key))
+  );
 }

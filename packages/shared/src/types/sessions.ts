@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ResolvedSessionAttachment } from "./session-attachments";
 import type { SessionListRepository } from "./repositories";
+import type { AgentHarness } from "./agent-harness";
 
 export const sessionStatusSchema = z.enum([
   "created",
@@ -135,6 +136,10 @@ export interface Session {
   baseSha: string | null;
   currentSha: string | null;
   opencodeSessionId: string | null;
+  /** Generic harness identity; absent on responses from older control planes. */
+  agentHarness?: AgentHarness;
+  /** Native session/thread id for the selected harness. */
+  agentSessionId?: string | null;
   status: SessionStatus;
   parentSessionId: string | null;
   spawnSource: SpawnSource;

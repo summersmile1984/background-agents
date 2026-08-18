@@ -10,6 +10,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from .types import AgentHarness
+
 
 class BootMode(StrEnum):
     FRESH = "fresh"
@@ -76,6 +78,8 @@ class BridgeProcessConfig:
     control_plane_url: str
     sandbox_token: str
     session_id: str
+    agent_harness: AgentHarness
+    agent_session_id: str | None
 
 
 @dataclass(frozen=True)
@@ -124,6 +128,14 @@ class RuntimeConfig:
     def base_branch(self) -> str:
         return str(self.session_config.get("branch") or "main")
 
+    @property
+    def agent_harness(self) -> AgentHarness:
+        raw_harness = str(self.session_config.get("agent_harness") or AgentHarness.OPENCODE)
+        try:
+            return AgentHarness(raw_harness)
+        except ValueError:
+            return AgentHarness.OPENCODE
+
     def repository_config(self) -> RepositoryConfig:
         raw_repositories = self.session_config.get("repositories")
         repositories = (
@@ -165,6 +177,12 @@ class RuntimeConfig:
             control_plane_url=self.control_plane_url,
             sandbox_token=self.sandbox_token,
             session_id=str(self.session_config.get("session_id") or ""),
+            agent_harness=self.agent_harness,
+            agent_session_id=(
+                str(self.session_config["agent_session_id"])
+                if self.session_config.get("agent_session_id")
+                else None
+            ),
         )
 
     def managed_skills_config(self) -> ManagedSkillsConfig:

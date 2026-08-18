@@ -58,6 +58,9 @@ import {
 import { usePromptInput } from "@/hooks/use-prompt-input";
 import { useSessionSnapshot } from "./session-snapshot-provider";
 import { useSessionRename } from "@/hooks/use-session-rename";
+import { getAgentHarnessOrDefault } from "@open-inspect/shared/types/agent-harness";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
 
 type SessionState = ReturnType<typeof useSessionSocket>["sessionState"];
 
@@ -101,6 +104,9 @@ export default function SessionPage() {
     repoName: initialSnapshot.session.repoName,
     title: initialSnapshot.session.title,
   };
+  const agentHarness = getAgentHarnessOrDefault(
+    sessionState?.agentHarness ?? initialSnapshot.session.agentHarness
+  );
 
   const { handleArchive, handleUnarchive } = useSessionListActions(sessionId);
   const { optimisticTitle, renameSession } = useSessionRename({
@@ -116,7 +122,7 @@ export default function SessionPage() {
     handleModelChange,
     modelItems,
     loadingEnabledModels,
-  } = useModelSelection(sessionState);
+  } = useModelSelection(sessionState, agentHarness);
   const {
     prompt,
     sessionAttachments,
@@ -353,6 +359,7 @@ export default function SessionPage() {
           id: sessionId,
           status: sessionState?.status ?? DEFAULT_SESSION_STATUS,
           artifacts,
+          agentHarness,
           primaryRepo,
           onArchive: handleArchive,
           onUnarchive: handleUnarchive,
@@ -594,10 +601,15 @@ function useSessionListActions(sessionId: string) {
  * Model and reasoning-effort selection derived from session state until the
  * user takes ownership of an explicit draft.
  */
-function useModelSelection(sessionState: SessionState) {
+function useModelSelection(sessionState: SessionState, agentHarness: AgentHarness) {
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
 
-  const { enabledModels, enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const harnessModelOptions = useMemo(
+    () => getAgentHarnessModelOptions(enabledModelOptions, agentHarness),
+    [agentHarness, enabledModelOptions]
+  );
+  const harnessModelIds = useMemo(() => getModelIds(harnessModelOptions), [harnessModelOptions]);
   const { model: selectedModel, reasoningEffort } = resolveModelPreference(
     modelPreferenceDraft ?? {
       model: sessionState?.model ?? DEFAULT_MODEL,
@@ -605,11 +617,11 @@ function useModelSelection(sessionState: SessionState) {
         sessionState?.reasoningEffort ??
         getDefaultReasoningEffort(sessionState?.model ?? DEFAULT_MODEL),
     },
-    loadingEnabledModels ? undefined : enabledModels
+    loadingEnabledModels ? undefined : harnessModelIds
   );
   const modelItems = useMemo<ComboboxGroup[]>(
     () =>
-      enabledModelOptions.map((group) => ({
+      harnessModelOptions.map((group) => ({
         category: group.category,
         options: group.models.map((model) => ({
           value: model.id,
@@ -617,7 +629,7 @@ function useModelSelection(sessionState: SessionState) {
           description: model.description,
         })),
       })),
-    [enabledModelOptions]
+    [harnessModelOptions]
   );
 
   const handleModelChange = useCallback((model: string) => {

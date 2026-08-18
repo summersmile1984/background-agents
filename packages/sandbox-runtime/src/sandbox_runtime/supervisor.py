@@ -13,6 +13,7 @@ import httpx
 from .constants import BOOT_WARNINGS_FILE_PATH, IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_VAR
 from .repo_image_callback import RepoImageBuildCallback
 from .runtime_config import BootMode, RuntimeConfig
+from .types import AgentHarness
 
 if TYPE_CHECKING:
     import signal
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from .agent_bridge_process import AgentBridgeProcess
     from .browser_desktop import BrowserDesktop
     from .code_server import CodeServer
+    from .dev_services import DevServiceManager
     from .managed_skills import ManagedSkillsMaterializer
     from .opencode_server import OpenCodeServer
     from .repository_boot import RepositoryBoot, RepositoryBootResult
@@ -66,6 +68,7 @@ class SandboxSupervisor:
         self.boot_mode = BootMode.FRESH
         self._desktop_restart_task: asyncio.Task[bool] | None = None
         self._repository_boot_result: RepositoryBootResult | None = None
+        self.dev_services: DevServiceManager | None = None
 
     async def _report_fatal_error(self, message: str) -> None:
         self.log.error("supervisor.fatal", error_message=message)
@@ -260,9 +263,10 @@ class SandboxSupervisor:
         desktop_restarts = 0
 
         while not self.shutdown_event.is_set():
-            opencode_restarts = await self._handle_opencode_exit(opencode_restarts)
-            if self.shutdown_event.is_set():
-                break
+            if self.config.agent_harness == AgentHarness.OPENCODE:
+                opencode_restarts = await self._handle_opencode_exit(opencode_restarts)
+                if self.shutdown_event.is_set():
+                    break
             bridge_restarts = await self._handle_bridge_exit(bridge_restarts)
             if self.shutdown_event.is_set():
                 break
@@ -403,8 +407,15 @@ class SandboxSupervisor:
                 self.log.warn("web_terminal.start_failed", exc=error)
                 await self.web_terminal.stop()
 
-            await self.opencode_server.start(boot_result.repositories, boot_result.workdir)
-            opencode_ready = True
+            if self.config.agent_harness == AgentHarness.OPENCODE:
+                await self.opencode_server.start(boot_result.repositories, boot_result.workdir)
+                opencode_ready = True
+            else:
+                self.log.info(
+                    "opencode.skip",
+                    reason="native_harness_selected",
+                    agent_harness=self.config.agent_harness,
+                )
             await self.agent_bridge.start()
             self.log.info(
                 "sandbox.startup",
@@ -459,4 +470,6 @@ class SandboxSupervisor:
         await self.code_server.stop()
         await self.browser_desktop.stop()
         await self.opencode_server.stop()
+        if self.dev_services is not None:
+            await self.dev_services.stop()
         self.log.info("supervisor.shutdown_complete")

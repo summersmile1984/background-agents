@@ -6,6 +6,14 @@
  */
 
 export {
+  AGENT_HARNESSES,
+  DEFAULT_AGENT_HARNESS,
+  agentHarnessSchema,
+  getAgentHarnessOrDefault,
+} from "./agent-harness";
+export type { AgentHarness } from "./agent-harness";
+
+export {
   MAX_SESSION_ATTACHMENTS_PER_MESSAGE,
   SESSION_ATTACHMENT_IMAGE_MIME_TYPES,
   SESSION_ATTACHMENT_IMAGE_MAX_BYTES,

@@ -4,6 +4,7 @@ import { sessionRepositoryStateSchema } from "./repositories";
 import { sandboxEventSchema } from "./sandbox-events";
 import { sandboxStatusSchema, sessionStatusSchema } from "./sessions";
 import { clientRequestIdSchema } from "./prompts";
+import { agentHarnessSchema } from "./agent-harness";
 
 const timelineSequenceSchema = z.number().int().nonnegative().safe();
 
@@ -27,6 +28,8 @@ const sessionStateSchema = z.object({
   createdAt: z.number(),
   model: z.string().optional(),
   reasoningEffort: z.string().optional(),
+  agentHarness: agentHarnessSchema.optional(),
+  agentSessionId: z.string().nullable().optional(),
   isProcessing: z.boolean().optional(),
   parentSessionId: z.string().nullable().optional(),
   totalCost: z.number().optional(),

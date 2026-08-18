@@ -214,6 +214,20 @@ describe("Home", () => {
     await waitFor(() => expect(screen.queryByText("Warming sandbox...")).not.toBeInTheDocument());
   });
 
+  it("creates a session with the selected native harness", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /harness:.*default harness/i }));
+    await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: /^Codex/ }));
+    await user.type(screen.getByPlaceholderText("What do you want to build?"), "Use Codex");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
+    expect(sessionCreateBody()).toMatchObject({ agentHarness: "codex" });
+    expect(String(sessionCreateBody().model)).toMatch(/^openai\//);
+  });
+
   it("invalidates a warmed session when the managed skill selection changes", async () => {
     const user = userEvent.setup();
     render(<Home />);

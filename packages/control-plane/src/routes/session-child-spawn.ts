@@ -210,6 +210,7 @@ async function handleSpawnChild(
     title: body.title,
     model,
     reasoningEffort,
+    agentHarness: spawnContext.agentHarness,
     participantUserId: spawnContext.promptAuthor.userId,
     platformUserId: spawnContext.promptAuthor.canonicalUserId ?? null,
     scmLogin: spawnContext.promptAuthor.scmLogin,

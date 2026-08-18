@@ -19,6 +19,10 @@ import {
   type SessionTitleUpdateResult,
 } from "../../title";
 import { z } from "zod";
+import {
+  agentHarnessSchema,
+  DEFAULT_AGENT_HARNESS,
+} from "@open-inspect/shared/types/agent-harness";
 
 const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
 
@@ -111,6 +115,7 @@ const initRequestSchema = z.object({
   title: z.string().optional(),
   model: z.string().optional(),
   reasoningEffort: z.string().nullable().optional(),
+  agentHarness: agentHarnessSchema.optional(),
   userId: z.string(),
   /** Canonical platform user ID for analytics attribution; null when unresolved. */
   canonicalUserId: z.string().nullable().optional(),
@@ -249,6 +254,7 @@ export function createSessionLifecycleHandler(
         baseBranch,
         model,
         reasoningEffort,
+        agentHarness: body.agentHarness,
         status: "created",
         parentSessionId: body.parentSessionId ?? null,
         spawnSource: body.spawnSource ?? "user",
@@ -328,6 +334,8 @@ export function createSessionLifecycleHandler(
         baseSha: session.base_sha,
         currentSha: session.current_sha,
         opencodeSessionId: session.opencode_session_id,
+        agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
+        agentSessionId: session.agent_session_id,
         status: session.status,
         model: session.model,
         reasoningEffort: session.reasoning_effort ?? undefined,

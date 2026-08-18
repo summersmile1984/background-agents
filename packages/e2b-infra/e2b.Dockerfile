@@ -14,7 +14,11 @@
 FROM python:3.12-slim-bookworm
 
 # Pinned toolchain versions (keep in sync with daytona-infra/src/toolchain.py).
-ARG OPENCODE_VERSION=1.18.11
+ARG OPENCODE_VERSION=1.18.18
+ARG CODEX_VERSION=0.147.0
+ARG CLAUDE_CODE_VERSION=2.1.233
+ARG CLAUDE_AGENT_SDK_VERSION=0.2.139
+ARG CODEWHALE_VERSION=0.9.8
 ARG CODE_SERVER_VERSION=4.109.5
 ARG AGENT_BROWSER_VERSION=0.21.2
 
@@ -25,6 +29,7 @@ RUN apt-get update \
      libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
      libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
      libpango-1.0-0 libcairo2 ffmpeg xvfb fluxbox x11vnc websockify novnc \
+     postgresql postgresql-client redis-server \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
      | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' \
@@ -38,17 +43,25 @@ RUN apt-get update \
   && python -m pip install --upgrade pip
 
 # Python runtime deps for the supervisor + bridge.
-RUN pip install uv httpx websockets "pydantic>=2.0" "PyJWT[crypto]"
+RUN pip install uv httpx websockets "pydantic>=2.0" "PyJWT[crypto]" \
+    "claude-agent-sdk==${CLAUDE_AGENT_SDK_VERSION}" "mcp>=1.29.0,<2" "PyYAML>=6.0.2"
 
 # Agent toolchain: OpenCode, code-server, agent-browser.
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
   && npm install -g "@opencode-ai/plugin@${OPENCODE_VERSION}" zod \
+  && npm install -g "@openai/codex@${CODEX_VERSION}" \
+  && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+  && npm install -g "codewhale@${CODEWHALE_VERSION}" \
+  && codex --version && claude --version && codewhale --version \
   && curl -fsSL -o /tmp/code-server.deb \
      "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_amd64.deb" \
   && dpkg -i /tmp/code-server.deb \
   && rm /tmp/code-server.deb \
   && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
   && agent-browser install \
+  && mkdir -p /home/user/.agent-browser \
+  && cp -R /root/.agent-browser/. /home/user/.agent-browser/ \
+  && chown -R 1000:1000 /home/user/.agent-browser \
   && mkdir -p /workspace /app /tmp/opencode \
   # E2B runs as non-root `user`; the supervisor clones into /workspace and writes
   # /tmp/opencode, so make them world-writable (sticky).
@@ -81,7 +94,7 @@ ENV HOME=/root \
     PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app \
     NODE_PATH=/usr/lib/node_modules \
-    SANDBOX_VERSION=e2b-v3-vnc
+    SANDBOX_VERSION=e2b-v5-codewhale-harness
 
 # NOTE: file staging (sandbox_runtime, oi-launch.py), WORKDIR, and the start/ready
 # commands are applied by build-template.py via the E2B Template SDK

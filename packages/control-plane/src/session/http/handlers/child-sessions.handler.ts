@@ -1,4 +1,5 @@
 import { childFollowUpPromptRequestSchema } from "@open-inspect/shared/types/session-api";
+import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { z } from "zod";
 import { sessionStatusSchema } from "@open-inspect/shared/types/sessions";
 import { parsePersistedSandboxSettings } from "../../../sandbox/settings";
@@ -110,6 +111,7 @@ export function createChildSessionsHandler(deps: ChildSessionsHandlerDeps): Chil
         repoId: session.repo_id,
         model: session.model,
         reasoningEffort: session.reasoning_effort ?? null,
+        agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
         baseBranch: session.base_branch,
         sandboxTimeoutMs,
         promptAuthor: {

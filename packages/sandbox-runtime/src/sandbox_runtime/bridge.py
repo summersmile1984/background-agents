@@ -43,11 +43,17 @@ from .constants import (
 from .diff_capture import ControlPlaneDiffClient, SessionDiffRefreshWorker
 from .event_forwarder import BufferedEventForwarder
 from .git_signing import GitSigningError, GitSigningRuntime
+from .harness.base import HarnessDriver, HarnessPrompt
+from .harness.claude import ClaudeHarnessDriver
+from .harness.codex import CodexHarnessDriver
+from .harness.deepseek import DeepSeekHarnessDriver
+from .harness.mcp_config import load_session_mcp_servers
 from .log_config import configure_logging, get_logger
 from .opencode_client import OpenCodeClient
 from .prompt_stream import OpenCodePromptStream
 from .repo_config import find_repo_entry, load_repo_manifest
-from .types import GitUser
+from .snapshot_coordinator import SnapshotCoordinator
+from .types import AgentHarness, GitUser
 
 configure_logging()
 
@@ -182,6 +188,9 @@ class AgentBridge:
         auth_token: str,
         opencode_port: int = 4096,
         opencode_client: OpenCodeClient | None = None,
+        agent_harness: AgentHarness | str = AgentHarness.OPENCODE,
+        agent_session_id: str | None = None,
+        harness_driver: HarnessDriver | None = None,
     ):
         self.sandbox_id = sandbox_id
         self.session_id = session_id
@@ -189,6 +198,10 @@ class AgentBridge:
         self.auth_token = auth_token
         self.opencode_port = opencode_port
         self.opencode_base_url = f"http://localhost:{opencode_port}"
+        self.agent_harness = AgentHarness(agent_harness)
+        self.agent_session_id = agent_session_id
+        self._harness_driver = harness_driver
+        self._harness_start_error: str | None = None
 
         # Logger
         self.log = get_logger(
@@ -233,8 +246,12 @@ class AgentBridge:
         self.git_sync_complete = asyncio.Event()
 
         # Session state
-        self.opencode_session_id: str | None = None
-        self.session_id_file = Path(tempfile.gettempdir()) / "opencode-session-id"
+        self.opencode_session_id: str | None = (
+            agent_session_id if self.agent_harness == AgentHarness.OPENCODE else None
+        )
+        self.session_id_file = (
+            Path(tempfile.gettempdir()) / f"{self.agent_harness.value}-session-id"
+        )
         self.repo_path = Path("/workspace")
         # Supervisor-written canonical repo manifest; push targeting resolves
         # member checkout paths through it rather than joining spec-supplied
@@ -287,7 +304,7 @@ class AgentBridge:
 
     def _build_ready_event(self) -> dict[str, Any]:
         repositories = load_repo_manifest(self.repo_manifest_path)
-        return {
+        event: dict[str, Any] = {
             "type": "ready",
             "sandboxId": self.sandbox_id,
             "opencodeSessionId": self.opencode_session_id,
@@ -302,6 +319,15 @@ class AgentBridge:
                 if repository.base_sha
             ],
         }
+        if self.agent_harness != AgentHarness.OPENCODE:
+            event.update(
+                {
+                    "agentHarness": self.agent_harness.value,
+                    "agentSessionId": self.agent_session_id,
+                    "runtimeStatus": "degraded" if self._harness_start_error else "ready",
+                }
+            )
+        return event
 
     @staticmethod
     def _redact_git_stderr(stderr_text: str, push_url: str, redacted_push_url: str) -> str:
@@ -321,6 +347,16 @@ class AgentBridge:
         self.log.info("bridge.run_start")
 
         await self._load_session_id()
+        if self.agent_harness != AgentHarness.OPENCODE:
+            try:
+                await self._ensure_agent_session()
+            except Exception as error:
+                self._harness_start_error = str(error)
+                self.log.warn(
+                    "harness.start_failed",
+                    harness=self.agent_harness,
+                    exc=error,
+                )
         reconnect_attempts = 0
         run_outcome = "shutdown"
         signing_initialized = False
@@ -381,7 +417,10 @@ class AgentBridge:
             await self.diff_refresh.close(
                 timeout_seconds=self.DIFF_REFRESH_SHUTDOWN_TIMEOUT_SECONDS
             )
-            await self.opencode_client.aclose()
+            if self._harness_driver:
+                await self._harness_driver.close()
+            else:
+                await self.opencode_client.aclose()
             self.log.info(
                 "bridge.run_complete",
                 outcome=run_outcome,
@@ -687,8 +726,11 @@ class AgentBridge:
             prompt_author = parse_prompt_git_author(author_data)
             await self._configure_git_identity(prompt_author)
 
-            if not self.opencode_session_id:
-                await self._create_opencode_session()
+            if self.agent_harness == AgentHarness.OPENCODE:
+                if not self.opencode_session_id:
+                    await self._create_opencode_session()
+            else:
+                await self._ensure_agent_session()
 
             session_attachments, rejected_attachments = parse_session_image_attachments(
                 raw_attachments
@@ -707,9 +749,16 @@ class AgentBridge:
             had_error = False
             error_message = None
             emitted_output = False
-            async for event in self._stream_opencode_response_sse(
-                message_id, content, model, reasoning_effort, attachments
-            ):
+            event_stream = (
+                self._stream_opencode_response_sse(
+                    message_id, content, model, reasoning_effort, attachments
+                )
+                if self.agent_harness == AgentHarness.OPENCODE
+                else self._stream_harness_response(
+                    message_id, content, model, reasoning_effort, attachments
+                )
+            )
+            async for event in event_stream:
                 if event.get("type") == "error":
                     had_error = True
                     error_message = event.get("error")
@@ -719,7 +768,13 @@ class AgentBridge:
 
             if not had_error and not emitted_output:
                 had_error = True
-                error_message = "OpenCode completed without emitting assistant output."
+                harness_name = {
+                    AgentHarness.OPENCODE: "OpenCode",
+                    AgentHarness.CODEX: "Codex",
+                    AgentHarness.CLAUDE: "Claude Code",
+                    AgentHarness.DEEPSEEK: "DeepSeek",
+                }[self.agent_harness]
+                error_message = f"{harness_name} completed without emitting assistant output."
                 self.log.error(
                     "prompt.no_output",
                     message_id=message_id,
@@ -764,6 +819,7 @@ class AgentBridge:
     async def _create_opencode_session(self) -> None:
         """Create a new OpenCode session."""
         self.opencode_session_id = await self.opencode_client.create_session()
+        self.agent_session_id = self.opencode_session_id
         self.log.info(
             "opencode.session.ensure",
             opencode_session_id=self.opencode_session_id,
@@ -771,6 +827,79 @@ class AgentBridge:
         )
 
         await self._save_session_id()
+
+    async def _ensure_agent_session(self) -> None:
+        """Start or resume the selected non-OpenCode harness."""
+        if self.agent_harness == AgentHarness.OPENCODE:
+            if not self.opencode_session_id:
+                await self._create_opencode_session()
+            return
+        driver = self._ensure_harness_driver()
+        if driver.session_id:
+            self.agent_session_id = driver.session_id
+            return
+        self.agent_session_id = await driver.start(self.agent_session_id)
+        self._harness_start_error = None
+        await self._save_session_id()
+
+    def _ensure_harness_driver(self) -> HarnessDriver:
+        if self._harness_driver is not None:
+            return self._harness_driver
+        harness_workdir = self._harness_workdir()
+        mcp_servers = load_session_mcp_servers(os.environ)
+        if self.agent_harness == AgentHarness.CODEX:
+            self._harness_driver = CodexHarnessDriver(
+                workspace_path=str(harness_workdir),
+                log=self.log,
+                mcp_servers=mcp_servers,
+            )
+        elif self.agent_harness == AgentHarness.CLAUDE:
+            self._harness_driver = ClaudeHarnessDriver(
+                workspace_path=str(harness_workdir),
+                log=self.log,
+                mcp_servers=mcp_servers,
+            )
+        elif self.agent_harness == AgentHarness.DEEPSEEK:
+            self._harness_driver = DeepSeekHarnessDriver(
+                workspace_path=str(harness_workdir),
+                state_path=self.repo_path / ".openinspect" / "state" / "codewhale",
+                log=self.log,
+                mcp_servers=mcp_servers,
+            )
+        else:
+            raise RuntimeError(f"Unsupported harness '{self.agent_harness.value}'")
+        return self._harness_driver
+
+    def _harness_workdir(self) -> Path:
+        repositories = load_repo_manifest(self.repo_manifest_path)
+        if len(repositories) == 1 and repositories[0].path.is_dir():
+            return repositories[0].path
+        return self.repo_path
+
+    async def _stream_harness_response(
+        self,
+        message_id: str,
+        content: str,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+        attachments: list[HydratedSessionAttachment] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        driver = self._ensure_harness_driver()
+        previous_session_id = self.agent_session_id
+        async for event in driver.stream_prompt(
+            HarnessPrompt(
+                message_id=message_id,
+                content=content,
+                model=model,
+                reasoning_effort=reasoning_effort,
+                attachments=attachments,
+            )
+        ):
+            yield event
+        self.agent_session_id = driver.session_id
+        await self._save_session_id()
+        if self.agent_session_id and self.agent_session_id != previous_session_id:
+            await self._send_event(self._build_ready_event())
 
     def _ensure_prompt_stream(self) -> OpenCodePromptStream:
         """The long-lived prompt SSE translator, created on first use."""
@@ -815,15 +944,23 @@ class AgentBridge:
         if task and not task.done():
             task.cancel()
         # Best-effort: also tell OpenCode to stop (saves LLM compute cost)
-        await self._request_opencode_stop(reason="command")
+        if self.agent_harness == AgentHarness.OPENCODE:
+            await self._request_opencode_stop(reason="command")
+        elif self._harness_driver:
+            await self._harness_driver.stop(reason="command")
 
     async def _handle_snapshot(self) -> None:
         """Handle snapshot command - prepare for snapshot."""
         self.log.info("bridge.snapshot_prepare")
+        snapshot_warnings = await SnapshotCoordinator(self.log).prepare()
+        for warning in snapshot_warnings:
+            await self._send_event({"type": "warning", "scope": "snapshot", "message": warning})
         await self._send_event(
             {
                 "type": "snapshot_ready",
                 "opencodeSessionId": self.opencode_session_id,
+                "agentHarness": self.agent_harness.value,
+                "agentSessionId": self.agent_session_id,
             }
         )
 
@@ -1048,36 +1185,46 @@ class AgentBridge:
         await self.git_signing.refresh(user)
 
     async def _load_session_id(self) -> None:
-        """Load OpenCode session ID from file if it exists."""
-        if self.session_id_file.exists():
-            try:
-                self.opencode_session_id = self.session_id_file.read_text().strip()
+        """Load the native harness session ID persisted in the snapshot filesystem."""
+        try:
+            persisted_id = (
+                self.session_id_file.read_text().strip() if self.session_id_file.exists() else None
+            )
+        except Exception as error:
+            self.log.error("harness.session_load_error", harness=self.agent_harness, exc=error)
+            return
+        if self.agent_harness != AgentHarness.OPENCODE:
+            self.agent_session_id = self.agent_session_id or persisted_id
+            return
+        self.opencode_session_id = self.opencode_session_id or persisted_id
+        self.agent_session_id = self.opencode_session_id
+        if not self.opencode_session_id:
+            return
+        self.log.info(
+            "opencode.session.ensure",
+            opencode_session_id=self.opencode_session_id,
+            action="loaded",
+        )
+        try:
+            if not await self.opencode_client.session_exists(self.opencode_session_id):
                 self.log.info(
-                    "opencode.session.ensure",
+                    "opencode.session.invalid",
                     opencode_session_id=self.opencode_session_id,
-                    action="loaded",
                 )
-
-                try:
-                    if not await self.opencode_client.session_exists(self.opencode_session_id):
-                        self.log.info(
-                            "opencode.session.invalid",
-                            opencode_session_id=self.opencode_session_id,
-                        )
-                        self.opencode_session_id = None
-                except Exception:
-                    self.opencode_session_id = None
-
-            except Exception as e:
-                self.log.error("opencode.session.load_error", exc=e)
+                self.opencode_session_id = None
+                self.agent_session_id = None
+        except Exception:
+            self.opencode_session_id = None
+            self.agent_session_id = None
 
     async def _save_session_id(self) -> None:
-        """Save OpenCode session ID to file for persistence."""
-        if self.opencode_session_id:
+        """Save the native harness session ID for snapshot resume."""
+        native_session_id = self.agent_session_id or self.opencode_session_id
+        if native_session_id:
             try:
-                self.session_id_file.write_text(self.opencode_session_id)
-            except Exception as e:
-                self.log.error("opencode.session.save_error", exc=e)
+                self.session_id_file.write_text(native_session_id)
+            except Exception as error:
+                self.log.error("harness.session_save_error", harness=self.agent_harness, exc=error)
 
     async def _request_opencode_stop(self, reason: str) -> bool:
         if not self.opencode_session_id:
@@ -1163,6 +1310,13 @@ async def main() -> None:
     parser.add_argument("--control-plane", required=True, help="Control plane URL")
     parser.add_argument("--token", required=True, help="Auth token")
     parser.add_argument("--opencode-port", type=int, default=4096, help="OpenCode port")
+    parser.add_argument(
+        "--agent-harness",
+        choices=[harness.value for harness in AgentHarness],
+        default=AgentHarness.OPENCODE.value,
+        help="Native coding-agent harness",
+    )
+    parser.add_argument("--agent-session-id", help="Existing native harness session ID")
 
     args = parser.parse_args()
 
@@ -1172,6 +1326,8 @@ async def main() -> None:
         control_plane_url=args.control_plane,
         auth_token=args.token,
         opencode_port=args.opencode_port,
+        agent_harness=args.agent_harness,
+        agent_session_id=args.agent_session_id,
     )
 
     await bridge.run()

@@ -147,7 +147,7 @@ describe("browser authentication", () => {
     expect(await response.json()).toBeNull();
   });
 
-  it("initiates GitHub App sign-in with PKCE and no classic OAuth scopes", async () => {
+  it("initiates GitHub App sign-in with PKCE and configured profile scopes", async () => {
     const auth = createUserAuth({
       database: env.DB,
       publicWebOrigin: PUBLIC_WEB_ORIGIN,
@@ -184,7 +184,7 @@ describe("browser authentication", () => {
     expect(providerUrl.searchParams.get("redirect_uri")).toBe(
       `${PUBLIC_WEB_ORIGIN}/api/auth/callback/github`
     );
-    expect(providerUrl.searchParams.get("scope")).toBe("");
+    expect(providerUrl.searchParams.get("scope")).toBe("read:user user:email");
     expect(providerUrl.searchParams.get("code_challenge_method")).toBe("S256");
     expect(providerUrl.searchParams.get("state")).toBeTruthy();
 

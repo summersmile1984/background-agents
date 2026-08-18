@@ -58,6 +58,10 @@
       "import": "./dist/types/commit-signing.js",
       "types": "./dist/types/commit-signing.d.ts"
     },
+    "./types/agent-harness": {
+      "import": "./dist/types/agent-harness.js",
+      "types": "./dist/types/agent-harness.d.ts"
+    },
     "./types/environments": {
       "import": "./dist/types/environments.js",
       "types": "./dist/types/environments.d.ts"

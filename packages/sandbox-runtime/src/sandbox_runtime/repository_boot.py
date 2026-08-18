@@ -10,6 +10,7 @@ from .runtime_config import BootMode, RepositoryConfig
 
 if TYPE_CHECKING:
     from .boot_warnings import BootWarningSink
+    from .dev_services import DevServiceManager
     from .repository_hooks import RepositoryHooks
     from .repository_sync import RepositorySynchronizer
     from .tunnel_environment import TunnelEnvironment
@@ -36,6 +37,7 @@ class RepositoryBoot:
         tunnel_environment: TunnelEnvironment,
         hooks: RepositoryHooks,
         synchronizer: RepositorySynchronizer,
+        dev_services: DevServiceManager | None = None,
     ) -> None:
         self.config = config
         self.log = log
@@ -43,6 +45,7 @@ class RepositoryBoot:
         self.tunnel_environment = tunnel_environment
         self.hooks = hooks
         self.synchronizer = synchronizer
+        self.dev_services = dev_services
         self.sandbox_id = config.sandbox_id
         self.repo_owner = config.repo_owner
         self.repo_name = config.repo_name
@@ -204,6 +207,8 @@ class RepositoryBoot:
 
         start_success: bool | None = None
         if self.repositories and boot_mode is not BootMode.BUILD:
+            if self.dev_services is not None:
+                await self.dev_services.start(tuple(self.repositories), self._opencode_workdir())
             await self.tunnel_environment.wait_until_ready(expected_tunnel_ports)
             start_success = True
             for index, repo in enumerate(self.repositories):

@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS session (
   base_sha TEXT,                                    -- SHA of base branch at session start
   current_sha TEXT,                                 -- Current HEAD SHA
   opencode_session_id TEXT,                         -- OpenCode session ID (for 1:1 mapping)
+  agent_harness TEXT NOT NULL DEFAULT 'opencode',   -- Selected coding-agent runtime
+  agent_session_id TEXT,                            -- Native session/thread ID for the selected harness
   model TEXT DEFAULT 'anthropic/claude-haiku-4-5',   -- LLM model to use
   reasoning_effort TEXT,                            -- Session-level reasoning effort default
   status TEXT DEFAULT 'created',                    -- 'created', 'active', 'completed', 'failed', 'archived', 'cancelled'
@@ -558,6 +560,17 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
         WHERE id IN (${duplicateProcessingMessages})`);
       sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_one_processing
         ON messages(status) WHERE status = 'processing'`);
+    },
+  },
+  {
+    id: 43,
+    description: "Add generic agent harness identity",
+    run: (sql) => {
+      runMigration(
+        sql,
+        `ALTER TABLE session ADD COLUMN agent_harness TEXT NOT NULL DEFAULT 'opencode'`
+      );
+      runMigration(sql, `ALTER TABLE session ADD COLUMN agent_session_id TEXT`);
     },
   },
 ];

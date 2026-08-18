@@ -58,11 +58,11 @@ describe("evaluateImageBuildRebuildPolicy", () => {
     ).toMatchObject({ type: "rebuild", reason: "missing_image" });
   });
 
-  it("rebuilds each provider's pre-wraparound image and keeps the shared new generation", () => {
+  it("rebuilds images without native harnesses and keeps the shared new generation", () => {
     const superseded: Array<[ImageBuildProvider, string]> = [
-      ["modal", "v58-image-build-stdin-launch-vnc"],
-      ["opencomputer", "v57-vnc-opencode-1-18-11"],
-      ["vercel", "v57-vnc-opencode-1-18-11"],
+      ["modal", "v59-opencode-1-18-18"],
+      ["opencomputer", "v59-vnc-opencode-1-18-18"],
+      ["vercel", "v59-vnc-opencode-1-18-18"],
     ];
     for (const [provider, runtime_version] of superseded) {
       expect(
@@ -71,9 +71,9 @@ describe("evaluateImageBuildRebuildPolicy", () => {
     }
 
     const current: Array<[ImageBuildProvider, string]> = [
-      ["modal", "v59-opencode-1-18-18"],
-      ["opencomputer", "v59-vnc-opencode-1-18-18"],
-      ["vercel", "v59-vnc-opencode-1-18-18"],
+      ["modal", "v61-codewhale-harness"],
+      ["opencomputer", "v61-codewhale-harness"],
+      ["vercel", "v61-codewhale-harness"],
     ];
     for (const [provider, runtime_version] of current) {
       expect(

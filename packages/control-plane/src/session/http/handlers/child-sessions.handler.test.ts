@@ -469,6 +469,7 @@ describe("createChildSessionsHandler", () => {
       repoName: "repo",
       repoId: 123,
       model: "anthropic/claude-haiku-4-5",
+      agentHarness: "opencode",
       reasoningEffort: "high",
       baseBranch: "main",
       sandboxTimeoutMs: 14_400_000,

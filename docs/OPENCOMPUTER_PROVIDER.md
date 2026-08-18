@@ -32,7 +32,7 @@ deployment flow.
 OpenComputer sandboxes boot from a declarative template that contains:
 
 - the OpenInspect sandbox runtime
-- OpenCode and the OpenCode plugin dependencies
+- OpenCode plus native Codex, Claude Code, and DeepSeek CodeWhale runtimes
 - Python 3.12 runtime dependencies
 - GitHub CLI and Git credential helpers
 - browser/terminal support tools used by the agent runtime
@@ -91,8 +91,8 @@ The OpenComputer provider creates fresh sandboxes from the configured template. 
 the OpenInspect runtime, which:
 
 1. clones or syncs the selected GitHub repository
-2. prepares repo-local OpenCode tools and skills
-3. starts OpenCode inside the sandbox
+2. prepares provider-neutral tools and selected-harness skills
+3. starts the selected agent harness inside the sandbox
 4. starts the OpenInspect bridge process
 5. streams agent events back through the control plane
 

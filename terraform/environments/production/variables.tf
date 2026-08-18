@@ -569,6 +569,17 @@ variable "sandbox_provider" {
   }
 }
 
+variable "default_agent_harness" {
+  description = "Default coding-agent harness for sessions without a request or Environment override"
+  type        = string
+  default     = "opencode"
+
+  validation {
+    condition     = contains(["opencode", "codex", "claude", "deepseek"], var.default_agent_harness)
+    error_message = "default_agent_harness must be 'opencode', 'codex', 'claude', or 'deepseek'."
+  }
+}
+
 variable "sandbox_inactivity_timeout_ms" {
   description = "Milliseconds of sandbox inactivity before OpenInspect snapshots and stops the sandbox when no clients are connected."
   type        = number

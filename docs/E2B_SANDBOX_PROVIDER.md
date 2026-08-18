@@ -49,7 +49,7 @@ deployment flow.
 E2B sandboxes boot from a **template** image that contains:
 
 - the Open-Inspect sandbox runtime (`packages/sandbox-runtime`, staged into `/app`)
-- OpenCode and the OpenCode plugin dependencies
+- OpenCode plus native Codex, Claude Code, and DeepSeek CodeWhale runtimes
 - Python 3.12 and Node 22 runtimes
 - `code-server`, `agent-browser`, and browser/terminal tooling used by the agent runtime
 - GitHub CLI and a Git credential helper
@@ -94,8 +94,8 @@ command once at build and resumes it per create, so it never sees per-session en
 
 1. waits for the control plane to drop the per-session env file (`/tmp/oi-session.env`) over envd
 2. `exec`s the supervisor (`python -m sandbox_runtime.entrypoint`) with that env
-3. the supervisor clones or syncs the selected repositories, starts OpenCode and code-server, and
-   connects the Open-Inspect bridge back to the control plane
+3. the supervisor clones or syncs the selected repositories, starts the selected agent harness and
+   code-server, and connects the Open-Inspect bridge back to the control plane
 4. agent events stream back through the control plane
 
 ## Lifecycle: Pause and Resume

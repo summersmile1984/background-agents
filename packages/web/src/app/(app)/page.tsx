@@ -47,6 +47,9 @@ import {
 } from "@/hooks/use-managed-skills";
 import type { SessionTargetRequestFields } from "@/lib/session-target";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import { AgentHarnessSelector } from "@/components/agent-harness-selector";
+import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
@@ -80,6 +83,7 @@ export default function Home() {
   });
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(null);
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
   const skillSelectionKey =
     skillSelection.mode === "profile" ? `profile:${skillSelection.profileId}` : skillSelection.mode;
@@ -99,9 +103,12 @@ export default function Home() {
     reasoningEffort?: string;
     branch: string;
     skills: string;
+    agentHarness: AgentHarness | null;
   } | null>(null);
   const hasHydratedModelPreferencesRef = useRef(false);
-  const { enabledModels, enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const harnessModelOptions = getAgentHarnessModelOptions(enabledModelOptions, agentHarness);
+  const harnessModelIds = getModelIds(harnessModelOptions);
   const currentSkillPreviewTarget = session ? skillPreviewTarget(buildRequestFields()) : null;
   const {
     preview: skillPreview,
@@ -123,7 +130,7 @@ export default function Home() {
 
   const { model: selectedModel, reasoningEffort } = resolveModelPreference(
     modelPreferenceDraft ?? storedPreference,
-    loadingEnabledModels ? undefined : enabledModels
+    loadingEnabledModels ? undefined : harnessModelIds
   );
 
   // Skills are pinned while the session warms, so any identity input change
@@ -137,7 +144,14 @@ export default function Home() {
     setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     pendingConfigRef.current = null;
-  }, [sessionTarget, selectedModel, reasoningEffort, selectedBranch, skillSelectionKey]);
+  }, [
+    sessionTarget,
+    selectedModel,
+    reasoningEffort,
+    selectedBranch,
+    skillSelectionKey,
+    agentHarness,
+  ]);
 
   const createSessionForWarming = useCallback(async () => {
     if (loadingEnabledModels) return null;
@@ -153,6 +167,7 @@ export default function Home() {
       reasoningEffort,
       branch: sessionTarget?.kind === "repo" ? selectedBranch : "",
       skills: skillSelectionKey,
+      agentHarness,
     };
     pendingConfigRef.current = currentConfig;
 
@@ -168,6 +183,7 @@ export default function Home() {
             ...targetRequestFields,
             model: selectedModel,
             reasoningEffort,
+            ...(agentHarness ? { agentHarness } : {}),
             skillSelection,
           }),
           signal: abortController.signal,
@@ -180,7 +196,8 @@ export default function Home() {
             pendingConfigRef.current?.model === currentConfig.model &&
             pendingConfigRef.current?.reasoningEffort === currentConfig.reasoningEffort &&
             pendingConfigRef.current?.branch === currentConfig.branch &&
-            pendingConfigRef.current?.skills === currentConfig.skills
+            pendingConfigRef.current?.skills === currentConfig.skills &&
+            pendingConfigRef.current?.agentHarness === currentConfig.agentHarness
           ) {
             setPendingSessionId(data.sessionId);
             return data.sessionId as string;
@@ -214,6 +231,7 @@ export default function Home() {
     reasoningEffort,
     skillSelection,
     skillSelectionKey,
+    agentHarness,
     pendingSessionId,
     loadingEnabledModels,
   ]);
@@ -352,13 +370,15 @@ export default function Home() {
       isCreatingSession={isCreatingSession}
       error={error}
       handleSubmit={handleSubmit}
-      modelOptions={enabledModelOptions}
+      modelOptions={harnessModelOptions}
       skillSelection={skillSelection}
       setSkillSelection={setSkillSelection}
       skillPreviewTarget={currentSkillPreviewTarget}
       skillPreview={skillPreview}
       skillPreviewLoading={skillPreviewLoading}
       skillSuggestions={skillSuggestions}
+      agentHarness={agentHarness}
+      setAgentHarness={setAgentHarness}
     />
   );
 }
@@ -384,6 +404,8 @@ function HomeContent({
   skillPreview,
   skillPreviewLoading,
   skillSuggestions,
+  agentHarness,
+  setAgentHarness,
 }: {
   isAuthenticated: boolean;
   picker: SessionTargetSelection;
@@ -411,6 +433,8 @@ function HomeContent({
   skillPreview: SkillResolutionPreviewResponse | null;
   skillPreviewLoading: boolean;
   skillSuggestions: PromptSkillSuggestionSource;
+  agentHarness: AgentHarness | null;
+  setAgentHarness: (value: AgentHarness | null) => void;
 }) {
   const { isOpen } = useSidebarContext();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -583,6 +607,13 @@ function HomeContent({
                       target={skillPreviewTarget}
                       preview={skillPreview}
                       previewLoading={skillPreviewLoading}
+                      disabled={creating}
+                    />
+
+                    <AgentHarnessSelector
+                      value={agentHarness}
+                      onChange={setAgentHarness}
+                      showPrefix
                       disabled={creating}
                     />
                   </div>

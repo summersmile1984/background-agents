@@ -6,6 +6,15 @@ from typing import Any, TypedDict
 from pydantic import BaseModel
 
 
+class AgentHarness(StrEnum):
+    """Coding-agent runtime selected for a session."""
+
+    OPENCODE = "opencode"
+    CODEX = "codex"
+    CLAUDE = "claude"
+    DEEPSEEK = "deepseek"
+
+
 class SandboxStatus(StrEnum):
     """Status of a sandbox instance."""
 
@@ -147,6 +156,8 @@ class SessionConfig(BaseModel):
     branch: str | None = None
     base_sha: str | None = None
     opencode_session_id: str | None = None
+    agent_harness: AgentHarness = AgentHarness.OPENCODE
+    agent_session_id: str | None = None
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-6"
     mcp_servers: list[McpServerConfig] | None = None

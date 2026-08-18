@@ -6,6 +6,7 @@ This image provides a complete development environment with:
 - Node.js 22 LTS, pnpm, Bun runtime
 - Python 3.12 with uv
 - OpenCode CLI pre-installed
+- Codex CLI, Claude Agent SDK/CLI, and DeepSeek CodeWhale pre-installed
 - agent-browser CLI with headless Chrome for browser automation
 - ffmpeg for browser video encoding
 - Sandbox entrypoint and bridge code
@@ -33,6 +34,12 @@ SANDBOX_RUNTIME_DIR = Path(sandbox_runtime.__file__).parent
 # model. 1.18.15 orders by message creation time instead.
 OPENCODE_VERSION = "1.18.18"
 
+# Native harness versions are pinned so provider protocol translations remain reproducible.
+CODEX_VERSION = "0.147.0"
+CLAUDE_CODE_VERSION = "2.1.233"
+CLAUDE_AGENT_SDK_VERSION = "0.2.139"
+CODEWHALE_VERSION = "0.9.8"
+
 # code-server version to install (pinned for reproducible images)
 CODE_SERVER_VERSION = "4.109.5"
 
@@ -47,8 +54,8 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 # The numeric generation is one sequence shared by every image-build provider,
 # and MIN_REBUILD_RUNTIME_VERSION gates which prebuilt images get rebuilt onto
 # it, so bump every provider's label together.
-# v59: OpenCode past the message-ID wraparound (see OPENCODE_VERSION)
-CACHE_BUSTER = "v59-opencode-1-18-18"
+# v61: Add the native DeepSeek CodeWhale harness runtime.
+CACHE_BUSTER = "v61-codewhale-harness"
 
 # Base image with all development tools
 base_image = (
@@ -69,6 +76,9 @@ base_image = (
         "x11vnc",
         "websockify",
         "novnc",
+        "postgresql",
+        "postgresql-client",
+        "redis-server",
         # Shared libraries required by headless Chromium
         "libnss3",
         "libnspr4",
@@ -122,6 +132,9 @@ base_image = (
         "websockets",
         "pydantic>=2.0",  # Required for sandbox types
         "PyJWT[crypto]",  # For GitHub App token generation (includes cryptography)
+        f"claude-agent-sdk=={CLAUDE_AGENT_SDK_VERSION}",
+        "mcp>=1.29.0,<2",
+        "PyYAML>=6.0.2",
     )
     # Install OpenCode CLI and plugin for custom tools
     # CACHE_BUSTER is embedded in a no-op echo so Modal invalidates this layer on bump.
@@ -132,6 +145,15 @@ base_image = (
         # Install @opencode-ai/plugin globally for custom tools
         # This ensures tools can import the plugin without needing to run bun add
         f"npm install -g @opencode-ai/plugin@{OPENCODE_VERSION} zod",
+    )
+    # Install the native harness CLIs used by the provider bridge.
+    .run_commands(
+        f"npm install -g @openai/codex@{CODEX_VERSION}",
+        f"npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_VERSION}",
+        f"npm install -g codewhale@{CODEWHALE_VERSION}",
+        "codex --version",
+        "claude --version",
+        "codewhale --version",
     )
     # Pre-build OpenCode plugin deps into a staging directory.
     # At boot, _install_tools() copies these into .opencode/ so that

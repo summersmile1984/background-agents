@@ -668,6 +668,7 @@ describe("createSessionLifecycleHandler", () => {
       opencodeSessionId: "oc-1",
       status: "active",
       model: "anthropic/claude-haiku-4-5",
+      agentHarness: "opencode",
       reasoningEffort: "high",
       createdAt: 1000,
       updatedAt: 2000,

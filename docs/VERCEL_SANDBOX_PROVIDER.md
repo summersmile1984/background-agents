@@ -61,7 +61,8 @@ builds a managed base-runtime snapshot from the local checkout:
 2. Create a temporary Vercel sandbox with a deterministic name derived from that hash.
 3. Archive the checked-out `packages/sandbox-runtime` package and upload it into the temporary
    sandbox.
-4. Install the sandbox runtime, OpenCode, code-server, ttyd, browser tooling, and credential helper.
+4. Install the sandbox runtime, all agent harnesses, code-server, ttyd, browser tooling, and the
+   credential helper.
 5. Snapshot the prepared filesystem.
 6. Stop the temporary sandbox.
 7. Pass the deterministic snapshot name to the control plane as `VERCEL_BASE_SNAPSHOT_NAME`.

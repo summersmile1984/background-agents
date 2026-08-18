@@ -39,6 +39,7 @@ describe("buildSessionConfig", () => {
       repo_name: "testrepo",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      agent_harness: "opencode",
       mcp_servers: mcpServers,
       branch: "feature/x",
     });
@@ -109,6 +110,7 @@ describe("buildSessionConfig", () => {
       repo_name: "testrepo",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      agent_harness: "opencode",
     });
     expect(parsed).not.toHaveProperty("mcp_servers");
   });
@@ -186,6 +188,7 @@ describe("buildSandboxEnvVars", () => {
       repo_name: "testrepo",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      agent_harness: "opencode",
     });
     // No embedded git tokens — the sandbox brokers credentials per-request.
     expect(envVars).not.toHaveProperty("VCS_CLONE_TOKEN");

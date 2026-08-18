@@ -522,6 +522,8 @@ modal_environment_web_suffix = "your-modal-web-suffix" # Lowercase letters, digi
 
 # Sandbox provider: "modal" (default), "daytona", or "vercel"
 # sandbox_provider          = "modal"
+# Default harness: "opencode" (default), "codex", "claude", or "deepseek"
+# default_agent_harness     = "opencode"
 
 # Daytona (only required when sandbox_provider = "daytona")
 # daytona_api_url           = "https://app.daytona.io/api"
@@ -963,6 +965,7 @@ Go to your fork's Settings → Secrets and variables → Actions, and add:
 | `MODAL_ENVIRONMENT`              | Modal environment name (defaults to `main`)                                                 |
 | `MODAL_ENVIRONMENT_WEB_SUFFIX`   | Modal environment web suffix for endpoint URLs; lowercase letters, digits, dashes, or empty |
 | `SANDBOX_PROVIDER`               | `modal`, `daytona`, or `vercel`                                                             |
+| `DEFAULT_AGENT_HARNESS`          | Optional default: `opencode`, `codex`, or `claude`                                          |
 | `DAYTONA_API_URL`                | Daytona API URL _(only if `sandbox_provider = "daytona"`)_                                  |
 | `DAYTONA_API_KEY`                | Daytona API key _(only if `sandbox_provider = "daytona"`)_                                  |
 | `DAYTONA_BASE_SNAPSHOT`          | Daytona base snapshot name _(only if `sandbox_provider = "daytona"`)_                       |

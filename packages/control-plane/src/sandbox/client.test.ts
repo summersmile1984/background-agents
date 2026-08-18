@@ -102,6 +102,7 @@ describe("ModalClient", () => {
       repo_name: "testrepo",
       provider: "anthropic",
       model: "anthropic/claude-sonnet-4-5",
+      agent_harness: "opencode",
       mcp_servers: [{ id: "mcp-1", name: "Tool", type: "local", enabled: true }],
     });
   });

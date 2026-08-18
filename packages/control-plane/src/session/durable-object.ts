@@ -21,6 +21,7 @@ import type { ScmSettings } from "@open-inspect/shared/types/integrations";
 import { resolveAppName } from "@open-inspect/shared/app-name";
 import { timingSafeEqual } from "@open-inspect/shared/auth";
 import { DEFAULT_MODEL } from "@open-inspect/shared/models";
+import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl } from "../sandbox/client";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
@@ -1628,6 +1629,8 @@ export class SessionDO extends DurableObject<Env> {
       createdAt: session.created_at,
       model: session.model ?? DEFAULT_MODEL,
       reasoningEffort: session.reasoning_effort ?? undefined,
+      agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
+      agentSessionId: session.agent_session_id,
       isProcessing: this.getIsProcessing(),
       parentSessionId: session.parent_session_id,
       totalCost: session.total_cost ?? 0,

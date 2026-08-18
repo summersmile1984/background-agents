@@ -6,7 +6,7 @@
 
 export const VERCEL_PYTHON_BIN = "/usr/bin/python3.12";
 export const DEFAULT_VERCEL_RUNTIME = "node24";
-export const VERCEL_SANDBOX_VERSION = "v59-vnc-opencode-1-18-18";
+export const VERCEL_SANDBOX_VERSION = "v61-codewhale-harness";
 export const VERCEL_RUNTIME_WORKDIR = "/tmp/open-inspect-runtime";
 export const VERCEL_LOCAL_RUNTIME_EXTRACT_DIR = `${VERCEL_RUNTIME_WORKDIR}/packages`;
 
@@ -17,6 +17,9 @@ export function buildVercelBootstrapScript(params: { runtimeExtractDir?: string 
 set -euo pipefail
 
 OPENCODE_VERSION="1.18.18"
+CODEX_VERSION="0.147.0"
+CLAUDE_CODE_VERSION="2.1.233"
+CODEWHALE_VERSION="0.9.8"
 CODE_SERVER_VERSION="4.109.5"
 AGENT_BROWSER_VERSION="0.21.2"
 TTYD_VERSION="1.7.7"
@@ -36,6 +39,7 @@ sudo dnf install -y dnf-plugins-core git gcc gcc-c++ make ca-certificates openss
 sudo dnf install -y xorg-x11-server-Xvfb autoconf automake libtool cmake xz diffutils pkgconf-pkg-config openssl-devel libjpeg-turbo-devel zlib-devel libX11-devel libXext-devel libXft-devel libXinerama-devel libXpm-devel libXrandr-devel libXtst-devel libXfixes-devel libXdamage-devel
 sudo dnf install -y libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb libxkbcommon libdrm mesa-libgbm alsa-lib atk at-spi2-atk cups-libs pango cairo nspr nss || true
 sudo dnf install -y ffmpeg || true
+sudo dnf install -y postgresql15 postgresql15-server redis6 || sudo dnf install -y postgresql postgresql-server redis
 if ! command -v gh >/dev/null 2>&1; then
   sudo dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo || true
   sudo dnf install -y gh || true
@@ -78,7 +82,10 @@ command -v x11vnc
 command -v websockify
 test -f /usr/share/novnc/vnc.html
 
-sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION"
+sudo npm install -g pnpm@latest opencode-ai@"$OPENCODE_VERSION" @opencode-ai/plugin@"$OPENCODE_VERSION" zod agent-browser@"$AGENT_BROWSER_VERSION" @openai/codex@"$CODEX_VERSION" @anthropic-ai/claude-code@"$CLAUDE_CODE_VERSION" codewhale@"$CODEWHALE_VERSION"
+codex --version
+claude --version
+codewhale --version
 if [ ! -x /root/.bun/bin/bun ]; then
   curl -fsSL https://bun.sh/install | sudo -E bash || true
 fi

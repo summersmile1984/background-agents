@@ -11,6 +11,7 @@ import type { McpServerConfig, SandboxSettings } from "@open-inspect/shared/type
 import { z } from "zod";
 import { createLogger } from "../logger";
 import type { CorrelationContext } from "../logger";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { buildSessionConfig, toRepositoryConfigPayload } from "./sandbox-env";
 import type { SessionRepositoryInfo } from "./provider";
 
@@ -161,6 +162,8 @@ export interface CreateSandboxRequest {
   opencodeSessionId?: string;
   provider?: string;
   model?: string;
+  agentHarness?: AgentHarness;
+  agentSessionId?: string | null;
   userEnvVars?: Record<string, string>;
   prebuiltImageId?: string | null;
   prebuiltImageSha?: string | null;
@@ -197,6 +200,8 @@ export interface RestoreSandboxRequest {
   repoName: string | null;
   provider: string;
   model: string;
+  agentHarness?: AgentHarness;
+  agentSessionId?: string | null;
   userEnvVars?: Record<string, string>;
   timeoutSeconds?: number;
   branch?: string | null;
@@ -378,6 +383,8 @@ export class ModalClient {
           opencode_session_id: request.opencodeSessionId || null,
           provider: request.provider || "anthropic",
           model: request.model || "claude-sonnet-4-6",
+          agent_harness: request.agentHarness,
+          agent_session_id: request.agentSessionId ?? null,
           user_env_vars: request.userEnvVars || null,
           repo_image_id: request.prebuiltImageId || null,
           repo_image_sha: request.prebuiltImageSha || null,

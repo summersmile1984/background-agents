@@ -11,6 +11,7 @@ import { UserStore } from "../db/user-store";
 import { createLogger } from "../logger";
 import { parseCreateSessionInput } from "../session/create-session-input";
 import { initializeSession, type SessionInitInput } from "../session/initialize";
+import { resolveAgentHarness } from "../session/agent-harness";
 import { resolveGitHubEnrichmentForRequest } from "../session/identity";
 import { resolveSessionScopedSettings } from "../session/integration-settings-resolution";
 import { resolveManagedSkills, SkillResolutionError } from "../session/skill-resolution";
@@ -172,6 +173,12 @@ async function handleCreateSession(
     body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
       ? body.reasoningEffort
       : null;
+  const agentHarness = await resolveAgentHarness({
+    requested: body.agentHarness,
+    environmentId,
+    environmentStore: new EnvironmentStore(ctx.db),
+    deploymentDefault: env.DEFAULT_AGENT_HARNESS,
+  });
 
   // Session-scoped integration settings resolve from the primary member (design
   // §6.2). In list mode that is repositories[0]; otherwise the scalar pair — the
@@ -214,6 +221,7 @@ async function handleCreateSession(
     title: body.title,
     model,
     reasoningEffort,
+    agentHarness,
     participantUserId,
     platformUserId: resolvedUserId,
     scmLogin,

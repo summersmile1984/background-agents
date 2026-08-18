@@ -10,6 +10,7 @@ import {
   MAX_ENVIRONMENT_DESCRIPTION_LENGTH,
   type Environment,
 } from "@open-inspect/shared/types/environments";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -21,11 +22,13 @@ import { useRepos, type Repo } from "@/hooks/use-repos";
 import { RepositoryMultiSelect } from "@/components/repository-multi-select";
 import { repositorySelectionKey } from "@/lib/repository-selection";
 import { supportsRepoImages } from "@/lib/sandbox-provider";
+import { AgentHarnessSelector } from "@/components/agent-harness-selector";
 
 export interface EnvironmentFormValues {
   name: string;
   description: string | null;
   prebuildEnabled: boolean;
+  defaultAgentHarness: AgentHarness | null;
   repositories: RepositoryInput[];
 }
 
@@ -55,6 +58,9 @@ export function EnvironmentForm({
   const [name, setName] = useState(initialValues?.name ?? "");
   const [description, setDescription] = useState(initialValues?.description ?? "");
   const [prebuildEnabled, setPrebuildEnabled] = useState(initialValues?.prebuildEnabled ?? false);
+  const [defaultAgentHarness, setDefaultAgentHarness] = useState<AgentHarness | null>(
+    initialValues?.defaultAgentHarness ?? null
+  );
   const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
     (initialValues?.repositories ?? []).map((repository) =>
       repositorySelectionKey(repository.repoOwner, repository.repoName)
@@ -116,6 +122,7 @@ export function EnvironmentForm({
       name: name.trim(),
       description: description.trim() ? description.trim() : null,
       prebuildEnabled,
+      defaultAgentHarness,
       repositories: selectedKeys.map((key) => {
         const entry: RepositoryInput = parseRepositoryFullName(key) ?? {
           repoOwner: "",
@@ -238,6 +245,19 @@ export function EnvironmentForm({
             <code>vercel</code>, or <code>opencomputer</code>.
           </p>
         )}
+      </div>
+
+      <div>
+        <p className="block text-sm font-medium text-foreground mb-1.5">Default harness</p>
+        <AgentHarnessSelector
+          value={defaultAgentHarness}
+          onChange={setDefaultAgentHarness}
+          inheritLabel="Deployment default"
+          disabled={submitting}
+        />
+        <p className="text-xs text-muted-foreground mt-1 leading-normal">
+          Sessions may override this when they are created.
+        </p>
       </div>
 
       <div className="flex items-center gap-2">

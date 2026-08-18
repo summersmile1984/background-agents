@@ -4,6 +4,7 @@ from types import MappingProxyType
 import pytest
 
 from sandbox_runtime.runtime_config import BootMode, RuntimeConfig
+from sandbox_runtime.types import AgentHarness
 
 
 @pytest.mark.parametrize(
@@ -61,3 +62,20 @@ def test_session_config_is_recursively_immutable():
     assert isinstance(repositories[0], MappingProxyType)
     with pytest.raises(TypeError):
         repositories[0]["repo_name"] = "changed"
+
+
+def test_runtime_config_selects_harness_and_native_session_id():
+    config = RuntimeConfig.from_env(
+        {
+            "SESSION_CONFIG": json.dumps(
+                {
+                    "session_id": "session-1",
+                    "agent_harness": "claude",
+                    "agent_session_id": "native-1",
+                }
+            )
+        }
+    )
+
+    assert config.agent_harness is AgentHarness.CLAUDE
+    assert config.bridge_process_config().agent_session_id == "native-1"

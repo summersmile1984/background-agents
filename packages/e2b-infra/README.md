@@ -71,3 +71,42 @@ the App can clone.
 | TTL lapse recovers          | Past the TTL the sandbox auto-pauses (not killed); the next prompt resumes it   |
 | code-server survives resume | Same URL and password work after resume                                         |
 | Stop pauses (resumable)     | Idle/heartbeat stop pauses; only a never-connected sandbox is killed (`DELETE`) |
+
+## Self-hosted CubeSandbox
+
+The fork also carries an additive CubeSandbox build path. It uses Cube's `sandbox-code` base image
+so the E2B-compatible envd and code-interpreter services remain available, while installing the same
+pinned harnesses and development services as the managed E2B image.
+
+```bash
+cd packages/e2b-infra
+CUBE_IMAGE=localhost:5000/oi-e2b:latest \
+  CUBE_TEMPLATE_ALIAS=oi-e2b-codewhale-harness \
+  bash build-cube-template.sh
+```
+
+The command builds from a temporary context containing only this package and `sandbox-runtime`,
+pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
+template only after it reaches `READY`.
+
+`build-cube-template.sh` sets the sandbox DNS server to `119.29.29.29` by default. Cube's AF_XDP
+network path does not make a resolver bound to a host-local address reachable from the sandbox.
+Override the resolver with `CUBE_DNS_SERVER` when the Cube network provides another
+sandbox-reachable DNS service.
+
+## Optional Codex model relay for Cube
+
+In networks where a Cube sandbox cannot connect directly to the Codex model endpoint, the Codex
+app-server can use an HTTPS relay by adding a global Open-Inspect secret named
+`CODEX_OPENAI_BASE_URL`. The value is passed to Codex as its `openai_base_url` configuration and is
+excluded from the commands Codex runs inside the workspace.
+
+`codex-relay.mjs` is the restricted host-side relay used by the self-hosted Cube deployment. It only
+forwards Codex model and response paths to the upstream service and binds to `127.0.0.1` by default.
+Publish it through an authenticated/controlled HTTPS ingress and set `CODEX_OPENAI_BASE_URL` to that
+public URL. `open-inspect-codex-relay.service.example` is an example systemd user service; replace
+its absolute `ExecStart` path before installing it.
+
+The relay is a **host service**, not a sandbox service. Each session sandbox still runs its own
+`sandbox_runtime`, Python WebSocket bridge, and Codex app-server. Cloudflare remains the control
+plane and tunnel ingress; it does not run the Codex app-server.

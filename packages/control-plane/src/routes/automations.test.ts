@@ -715,6 +715,28 @@ describe("automation route handlers", () => {
       );
     });
 
+    it("stores an explicit harness and accepts null as inherited", async () => {
+      mockStore.getById.mockResolvedValue(sampleRow);
+
+      const selected = await callRoute("POST", "/automations", {
+        body: { ...validBody, agentHarness: "codex" },
+      });
+      const inherited = await callRoute("POST", "/automations", {
+        body: { ...validBody, name: "Inherited", agentHarness: null },
+      });
+
+      expect(selected.status).toBe(201);
+      expect(inherited.status).toBe(201);
+      expect(mockStore.bindAutomationInsert).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ agent_harness: "codex" })
+      );
+      expect(mockStore.bindAutomationInsert).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ agent_harness: null })
+      );
+    });
+
     it("returns 400 for invalid reasoning effort", async () => {
       const res = await callRoute("POST", "/automations", {
         body: { ...validBody, model: "anthropic/claude-sonnet-4-6", reasoningEffort: "xhigh" },

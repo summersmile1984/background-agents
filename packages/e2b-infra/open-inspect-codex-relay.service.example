@@ -1,0 +1,18 @@
+[Unit]
+Description=Open-Inspect Codex model relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=CODEX_RELAY_LISTEN_HOST=127.0.0.1
+Environment=CODEX_RELAY_LISTEN_PORT=18767
+ExecStart=/usr/bin/node /absolute/path/to/background-agents/packages/e2b-infra/codex-relay.mjs
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

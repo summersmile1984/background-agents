@@ -12,6 +12,7 @@ import {
 } from "@open-inspect/shared/triggers";
 import { MAX_AUTOMATION_REPOSITORIES } from "@open-inspect/shared/types/automations";
 import type { AutomationRepositoryInput } from "@open-inspect/shared/types/automations";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import {
   DEFAULT_MODEL,
   getReasoningConfig,
@@ -48,6 +49,7 @@ import {
 import { CronPicker } from "./cron-picker";
 import { TriggerTypeSelector } from "./trigger-type-selector";
 import { ConditionBuilder } from "./condition-builder";
+import { AgentHarnessSelector } from "@/components/agent-harness-selector";
 import { useAutomationTargets } from "./use-automation-targets";
 import { cn } from "@/lib/utils";
 import { NO_REPOSITORY_LABEL, formatRepositoriesLabel } from "@/lib/repo-label";
@@ -113,6 +115,7 @@ export interface AutomationFormValues {
   environmentIds?: string[];
   model: string;
   reasoningEffort: string | null;
+  agentHarness: AgentHarness | null;
   scheduleCron: string;
   scheduleTz: string;
   instructions: string;
@@ -143,6 +146,9 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
   const [repoQuery, setRepoQuery] = useState("");
   const [model, setModel] = useState(initialValues?.model ?? DEFAULT_MODEL);
   const [reasoningEffort, setReasoningEffort] = useState(initialValues?.reasoningEffort ?? "");
+  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(
+    initialValues?.agentHarness ?? null
+  );
   const [scheduleCron, setScheduleCron] = useState(initialValues?.scheduleCron ?? "0 9 * * *");
   const [scheduleTz, setScheduleTz] = useState(
     initialValues?.scheduleTz ?? Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -292,6 +298,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
         reasoningEffort && isValidReasoningEffort(resolvedModel, reasoningEffort)
           ? reasoningEffort
           : null,
+      agentHarness,
       scheduleCron,
       scheduleTz,
       instructions: instructions.trim(),
@@ -753,6 +760,19 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
         <FieldDescription>
           For models that support it, overrides how much chain-of-thought style reasoning is
           allowed. &quot;Use model default&quot; leaves the choice to the model.
+        </FieldDescription>
+      </div>
+
+      <div>
+        <p className="block text-sm font-medium text-foreground mb-1.5">Harness</p>
+        <AgentHarnessSelector
+          value={agentHarness}
+          onChange={setAgentHarness}
+          inheritLabel="Target default"
+          disabled={submitting}
+        />
+        <FieldDescription>
+          An explicit choice overrides each target environment&apos;s default harness.
         </FieldDescription>
       </div>
 

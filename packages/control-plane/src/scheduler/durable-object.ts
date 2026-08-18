@@ -63,6 +63,8 @@ import { resolveAutomationRepositories } from "../automation/repository";
 import { resolveAutomationSessionTarget } from "../automation/session-target";
 import type { RequestContext } from "../routes/shared";
 import { deliverWithRetry } from "../session/callback-delivery";
+import { resolveAgentHarness } from "../session/agent-harness";
+import { EnvironmentStore } from "../db/environments";
 
 /** Max automations to process per tick (backpressure). */
 const MAX_PER_TICK = 25;
@@ -1372,6 +1374,12 @@ export class SchedulerDO extends DurableObject<Env> {
       { mode: "all" },
       userId
     );
+    const agentHarness = await resolveAgentHarness({
+      requested: automation.agent_harness ?? undefined,
+      environmentId: target.environmentId,
+      environmentStore: new EnvironmentStore(this.db),
+      deploymentDefault: this.env.DEFAULT_AGENT_HARNESS,
+    });
 
     await initializeSession(
       this.env,
@@ -1381,6 +1389,7 @@ export class SchedulerDO extends DurableObject<Env> {
         title: `[Auto] ${automation.name}`,
         model: automation.model,
         reasoningEffort: automation.reasoning_effort,
+        agentHarness,
         participantUserId: automation.created_by,
         platformUserId: userId,
         scmTokenEncrypted: null,
