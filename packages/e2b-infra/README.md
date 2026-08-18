@@ -88,3 +88,25 @@ CUBE_IMAGE=localhost:5000/oi-e2b:latest \
 The command builds from a temporary context containing only this package and `sandbox-runtime`,
 pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
 template only after it reaches `READY`.
+
+`build-cube-template.sh` sets the sandbox DNS server to `119.29.29.29` by default. Cube's AF_XDP
+network path does not make a resolver bound to a host-local address reachable from the sandbox.
+Override the resolver with `CUBE_DNS_SERVER` when the Cube network provides another
+sandbox-reachable DNS service.
+
+## Optional Codex model relay for Cube
+
+In networks where a Cube sandbox cannot connect directly to the Codex model endpoint, the Codex
+app-server can use an HTTPS relay by adding a global Open-Inspect secret named
+`CODEX_OPENAI_BASE_URL`. The value is passed to Codex as its `openai_base_url` configuration and is
+excluded from the commands Codex runs inside the workspace.
+
+`codex-relay.mjs` is the restricted host-side relay used by the self-hosted Cube deployment. It only
+forwards Codex model and response paths to the upstream service and binds to `127.0.0.1` by default.
+Publish it through an authenticated/controlled HTTPS ingress and set `CODEX_OPENAI_BASE_URL` to that
+public URL. `open-inspect-codex-relay.service.example` is an example systemd user service; replace
+its absolute `ExecStart` path before installing it.
+
+The relay is a **host service**, not a sandbox service. Each session sandbox still runs its own
+`sandbox_runtime`, Python WebSocket bridge, and Codex app-server. Cloudflare remains the control
+plane and tunnel ingress; it does not run the Codex app-server.

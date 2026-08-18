@@ -47,6 +47,12 @@ class FakeRpc:
             )
             await self.notifications.put(
                 {
+                    "method": "item/agentMessage/delta",
+                    "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": " world"},
+                }
+            )
+            await self.notifications.put(
+                {
                     "method": "item/started",
                     "params": {
                         "threadId": "thread-1",
@@ -104,7 +110,12 @@ async def test_codex_driver_translates_app_server_notifications():
 
     assert rpc.notifications_sent == ["initialized"]
     assert events[0] == {"type": "token", "content": "hello", "messageId": "message-1"}
-    assert events[1]["type"] == "tool_call"
+    assert events[1] == {
+        "type": "token",
+        "content": "hello world",
+        "messageId": "message-1",
+    }
+    assert events[2]["type"] == "tool_call"
     assert events[-1]["type"] == "step_finish"
     turn_request = next(params for method, params in rpc.requests if method == "turn/start")
     assert turn_request["model"] == "gpt-5.6"
@@ -117,6 +128,39 @@ async def test_codex_driver_translates_app_server_notifications():
         "url": "https://mcp.example.test/mcp",
         "http_headers": {"X-Key": "secret"},
     }
+    assert (
+        "CODEX_OPENAI_BASE_URL" in thread_request["config"]["shell_environment_policy"]["exclude"]
+    )
+
+
+def test_codex_driver_configures_https_model_relay():
+    driver = CodexHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment={"CODEX_OPENAI_BASE_URL": "https://codex-relay.example.test/relay/"},
+    )
+
+    assert driver._rpc._command == [
+        "codex",
+        "-c",
+        'openai_base_url="https://codex-relay.example.test/relay"',
+        "app-server",
+        "--stdio",
+        "--strict-config",
+    ]
+
+
+def test_codex_driver_rejects_insecure_model_relay():
+    try:
+        CodexHarnessDriver(
+            workspace_path="/workspace",
+            log=Log(),
+            environment={"CODEX_OPENAI_BASE_URL": "http://relay.example.test"},
+        )
+    except ValueError as error:
+        assert "must be an HTTPS URL" in str(error)
+    else:
+        raise AssertionError("insecure Codex relay URL was accepted")
 
 
 @dataclass

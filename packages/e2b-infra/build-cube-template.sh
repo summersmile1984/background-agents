@@ -6,6 +6,7 @@ repo_root=$(cd "$script_dir/../.." && pwd)
 image=${CUBE_IMAGE:-localhost:5000/oi-e2b:latest}
 template_alias=${CUBE_TEMPLATE_ALIAS:-oi-e2b-codewhale-harness}
 writable_layer_size=${CUBE_WRITABLE_LAYER_SIZE:-4G}
+dns_server=${CUBE_DNS_SERVER:-119.29.29.29}
 build_dir=$(mktemp -d /tmp/open-inspect-cube-build.XXXXXX)
 
 cleanup() {
@@ -28,6 +29,7 @@ cubemastercli tpl create-from-image \
   --image "$image" \
   --alias "$template_alias" \
   --writable-layer-size "$writable_layer_size" \
+  --dns "$dns_server" \
   --expose-port 49999 \
   --expose-port 49983 \
   --probe 49999

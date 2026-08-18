@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from ..harness_credentials import remove_runtime_codex_auth
 from ..types import AgentHarness
@@ -30,9 +31,11 @@ _SECRET_ENV_NAMES = (
     "CODEX_ACCESS_TOKEN",
     "CODEX_ACCESS_TOKEN_EXPIRES_AT",
     "CODEX_HOME",
+    "CODEX_OPENAI_BASE_URL",
     "SANDBOX_AUTH_TOKEN",
 )
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
+_CODEX_BASE_URL_ENV = "CODEX_OPENAI_BASE_URL"
 
 
 class CodexHarnessDriver:
@@ -52,7 +55,7 @@ class CodexHarnessDriver:
         self._environment = dict(environment or os.environ)
         self._mcp_servers = mcp_servers
         self._rpc = rpc or JsonRpcProcess(
-            ["codex", "app-server", "--stdio", "--strict-config"],
+            self._app_server_command(self._environment),
             cwd=workspace_path,
             env=self._environment,
             log=log,
@@ -148,6 +151,7 @@ class CodexHarnessDriver:
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise RuntimeError("Codex app-server returned no turn ID")
         self._active_turn_id = turn["id"]
+        cumulative_text = ""
 
         while True:
             notification = await self._rpc.notifications.get()
@@ -164,7 +168,12 @@ class CodexHarnessDriver:
             if method == "item/agentMessage/delta":
                 delta = event_params.get("delta")
                 if isinstance(delta, str) and delta:
-                    yield {"type": "token", "content": delta, "messageId": prompt.message_id}
+                    cumulative_text += delta
+                    yield {
+                        "type": "token",
+                        "content": cumulative_text,
+                        "messageId": prompt.message_id,
+                    }
                 continue
             if method == "thread/tokenUsage/updated":
                 usage = event_params.get("tokenUsage")
@@ -223,6 +232,23 @@ class CodexHarnessDriver:
         if "/" not in model:
             return model
         return model.split("/", 1)[1] if model.startswith("openai/") else None
+
+    @staticmethod
+    def _app_server_command(environment: Mapping[str, str]) -> list[str]:
+        command = ["codex"]
+        base_url = environment.get(_CODEX_BASE_URL_ENV, "").strip().rstrip("/")
+        if base_url:
+            parsed = urlsplit(base_url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise ValueError(f"{_CODEX_BASE_URL_ENV} must be an HTTPS URL without userinfo")
+            command.extend(["-c", f"openai_base_url={json.dumps(base_url)}"])
+        command.extend(["app-server", "--stdio", "--strict-config"])
+        return command
 
     @staticmethod
     def _error_text(error: object) -> str:
