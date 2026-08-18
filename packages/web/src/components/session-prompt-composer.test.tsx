@@ -63,6 +63,7 @@ function ComposerHarness({
         id: "session-1",
         status,
         artifacts: [],
+        agentHarness: "codex",
         onArchive: vi.fn(),
         onUnarchive: vi.fn(),
       }}
@@ -185,6 +186,18 @@ describe("SessionPromptComposer", () => {
     render(<ComposerHarness initialValue="Keep me" submitError="The prompt queue is full" />);
     expect(screen.getByRole("alert")).toHaveTextContent("The prompt queue is full");
     expect(screen.getByDisplayValue("Keep me")).toBeInTheDocument();
+  });
+
+  it("shows the session harness as locked", () => {
+    render(<ComposerHarness />);
+
+    expect(screen.getByTestId("session-agent-harness")).toHaveAccessibleName(
+      "Harness: Codex; locked for this session"
+    );
+    expect(screen.getByTestId("session-agent-harness")).toHaveAttribute(
+      "title",
+      "The harness is fixed when this session is created. Start a new session to change it."
+    );
   });
 
   it("offers pinned skills in the follow-up textarea", async () => {

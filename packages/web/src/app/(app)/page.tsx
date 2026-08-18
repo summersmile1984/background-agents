@@ -49,6 +49,7 @@ import type { SessionTargetRequestFields } from "@/lib/session-target";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { AgentHarnessSelector } from "@/components/agent-harness-selector";
+import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
@@ -105,7 +106,9 @@ export default function Home() {
     agentHarness: AgentHarness | null;
   } | null>(null);
   const hasHydratedModelPreferencesRef = useRef(false);
-  const { enabledModels, enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
+  const harnessModelOptions = getAgentHarnessModelOptions(enabledModelOptions, agentHarness);
+  const harnessModelIds = getModelIds(harnessModelOptions);
   const currentSkillPreviewTarget = session ? skillPreviewTarget(buildRequestFields()) : null;
   const {
     preview: skillPreview,
@@ -127,7 +130,7 @@ export default function Home() {
 
   const { model: selectedModel, reasoningEffort } = resolveModelPreference(
     modelPreferenceDraft ?? storedPreference,
-    loadingEnabledModels ? undefined : enabledModels
+    loadingEnabledModels ? undefined : harnessModelIds
   );
 
   // Skills are pinned while the session warms, so any identity input change
@@ -367,7 +370,7 @@ export default function Home() {
       isCreatingSession={isCreatingSession}
       error={error}
       handleSubmit={handleSubmit}
-      modelOptions={enabledModelOptions}
+      modelOptions={harnessModelOptions}
       skillSelection={skillSelection}
       setSkillSelection={setSkillSelection}
       skillPreviewTarget={currentSkillPreviewTarget}
@@ -610,6 +613,7 @@ function HomeContent({
                     <AgentHarnessSelector
                       value={agentHarness}
                       onChange={setAgentHarness}
+                      showPrefix
                       disabled={creating}
                     />
                   </div>

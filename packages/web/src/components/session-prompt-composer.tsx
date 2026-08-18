@@ -15,12 +15,15 @@ import type { Artifact } from "@/types/session";
 import type { SessionStatus } from "@open-inspect/shared/types/sessions";
 import { MAX_WEB_PROMPT_CHARS } from "@open-inspect/shared/types/websocket";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import { SessionAgentHarness } from "@/components/agent-harness-selector";
 
 type SessionPromptComposerProps = {
   session: {
     id: string;
     status: SessionStatus;
     artifacts: Artifact[];
+    agentHarness: AgentHarness;
     primaryRepo?: { repoOwner: string; repoName: string } | null;
     onArchive: () => void | Promise<void>;
     onUnarchive: () => void | Promise<void>;
@@ -222,6 +225,8 @@ export function SessionPromptComposer({
                 onSelect={model.onReasoningEffortChange}
                 disabled={prompt.draftLocked || !sessionPromptable}
               />
+
+              <SessionAgentHarness value={session.agentHarness} />
             </div>
 
             {/* Right side - Agent label */}

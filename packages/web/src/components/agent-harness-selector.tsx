@@ -27,20 +27,26 @@ const HARNESS_OPTIONS: Array<{
   },
   {
     value: "deepseek",
-    label: "DeepSeek (CodeWhale)",
+    label: "DeepSeek Harness",
     description: "Native CodeWhale app-server; requires DEEPSEEK_API_KEY",
   },
 ];
+
+export function getAgentHarnessLabel(value: AgentHarness): string {
+  return HARNESS_OPTIONS.find((option) => option.value === value)?.label ?? value;
+}
 
 export function AgentHarnessSelector({
   value,
   onChange,
   inheritLabel = "Default harness",
+  showPrefix = false,
   disabled = false,
 }: {
   value: AgentHarness | null | undefined;
   onChange: (value: AgentHarness | null) => void;
   inheritLabel?: string;
+  showPrefix?: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -62,9 +68,25 @@ export function AgentHarnessSelector({
       disabled={disabled}
       triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
     >
-      <span className="truncate">
-        {value ? HARNESS_OPTIONS.find((option) => option.value === value)?.label : inheritLabel}
-      </span>
+      {showPrefix && <span className="shrink-0 text-xs">Harness:&nbsp;</span>}
+      <span className="truncate">{value ? getAgentHarnessLabel(value) : inheritLabel}</span>
     </Combobox>
+  );
+}
+
+export function SessionAgentHarness({ value }: { value: AgentHarness }) {
+  const label = getAgentHarnessLabel(value);
+
+  return (
+    <span
+      data-testid="session-agent-harness"
+      className="flex max-w-full items-center gap-1 text-sm text-muted-foreground"
+      title="The harness is fixed when this session is created. Start a new session to change it."
+      aria-label={`Harness: ${label}; locked for this session`}
+    >
+      <span className="shrink-0 text-xs">Harness:</span>
+      <span className="truncate font-medium text-foreground">{label}</span>
+      <span className="shrink-0 text-xs">· locked</span>
+    </span>
   );
 }
