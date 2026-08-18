@@ -18,6 +18,38 @@ class Log:
         pass
 
 
+def manager(tmp_path: Path) -> DevServiceManager:
+    return DevServiceManager(workspace_path=tmp_path, log=Log(), warn=lambda *_args: None)
+
+
+def test_postgres_command_runs_as_current_user_when_unprivileged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+
+    assert manager(tmp_path)._postgres_command("/usr/bin/postgres", "-D", "/data") == (
+        "/usr/bin/postgres",
+        "-D",
+        "/data",
+    )
+
+
+def test_postgres_command_drops_to_postgres_when_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+
+    assert manager(tmp_path)._postgres_command("/usr/bin/postgres", "-D", "/data") == (
+        "runuser",
+        "-u",
+        "postgres",
+        "--",
+        "/usr/bin/postgres",
+        "-D",
+        "/data",
+    )
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

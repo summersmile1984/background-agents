@@ -83,33 +83,34 @@ class DevServiceManager:
         data_dir.mkdir(parents=True, exist_ok=True)
         managed: ManagedProcess | None = None
         try:
-            await self._run("chown", "-R", "postgres:postgres", str(data_dir))
+            # Managed E2B/Cube sandboxes run the supervisor as an unprivileged
+            # user. Only root can hand the data directory to the distro's
+            # postgres account; otherwise initialise and run PostgreSQL as the
+            # current sandbox user, which already owns the workspace.
+            if os.geteuid() == 0:
+                await self._run("chown", "-R", "postgres:postgres", str(data_dir))
             if not (data_dir / "PG_VERSION").exists():
                 await self._run(
-                    "runuser",
-                    "-u",
-                    "postgres",
-                    "--",
-                    str(bindir / "initdb"),
-                    "-D",
-                    str(data_dir),
-                    "-U",
-                    config.user,
-                    "--auth=trust",
-                    "--no-locale",
+                    *self._postgres_command(
+                        str(bindir / "initdb"),
+                        "-D",
+                        str(data_dir),
+                        "-U",
+                        config.user,
+                        "--auth=trust",
+                        "--no-locale",
+                    )
                 )
             process = await asyncio.create_subprocess_exec(
-                "runuser",
-                "-u",
-                "postgres",
-                "--",
-                str(bindir / "postgres"),
-                "-D",
-                str(data_dir),
-                "-p",
-                str(config.port),
-                "-k",
-                "/tmp",
+                *self._postgres_command(
+                    str(bindir / "postgres"),
+                    "-D",
+                    str(data_dir),
+                    "-p",
+                    str(config.port),
+                    "-k",
+                    "/tmp",
+                ),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -301,6 +302,12 @@ class DevServiceManager:
         if process.returncode:
             return None
         return Path(stdout.decode().strip())
+
+    @staticmethod
+    def _postgres_command(*command: str) -> tuple[str, ...]:
+        if os.geteuid() == 0:
+            return ("runuser", "-u", "postgres", "--", *command)
+        return command
 
     async def _run(self, *command: str) -> None:
         process = await asyncio.create_subprocess_exec(

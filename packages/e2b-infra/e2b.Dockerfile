@@ -59,6 +59,9 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
   && rm /tmp/code-server.deb \
   && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
   && agent-browser install \
+  && mkdir -p /home/user/.agent-browser \
+  && cp -R /root/.agent-browser/. /home/user/.agent-browser/ \
+  && chown -R 1000:1000 /home/user/.agent-browser \
   && mkdir -p /workspace /app /tmp/opencode \
   # E2B runs as non-root `user`; the supervisor clones into /workspace and writes
   # /tmp/opencode, so make them world-writable (sticky).

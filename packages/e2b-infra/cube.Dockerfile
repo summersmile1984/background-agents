@@ -53,6 +53,9 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
   && chmod 0755 /usr/local/bin/ttyd \
   && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
   && agent-browser install \
+  && mkdir -p /home/user/.agent-browser \
+  && cp -R /root/.agent-browser/. /home/user/.agent-browser/ \
+  && chown -R 1000:1000 /home/user/.agent-browser \
   && mkdir -p /workspace /app /tmp/opencode \
   && chmod 1777 /workspace /tmp/opencode
 
