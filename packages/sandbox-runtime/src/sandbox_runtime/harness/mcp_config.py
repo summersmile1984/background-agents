@@ -14,8 +14,6 @@ CODEWHALE_MCP_ENV_PREFIX = [
     "-u",
     "DEEPSEEK_API_KEY",
     "-u",
-    "OPENINSPECT_DEEPSEEK_TOKEN_FILE",
-    "-u",
     "CODEWHALE_HOME",
     "-u",
     "CODEWHALE_MCP_CONFIG",

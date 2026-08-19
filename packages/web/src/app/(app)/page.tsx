@@ -83,7 +83,7 @@ export default function Home() {
   });
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(null);
+  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>("opencode");
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
   const skillSelectionKey =
     skillSelection.mode === "profile" ? `profile:${skillSelection.profileId}` : skillSelection.mode;
@@ -612,7 +612,8 @@ function HomeContent({
 
                     <AgentHarnessSelector
                       value={agentHarness}
-                      onChange={setAgentHarness}
+                      onChange={(value) => setAgentHarness(value ?? "opencode")}
+                      allowInherit={false}
                       showPrefix
                       disabled={creating}
                     />

@@ -81,7 +81,7 @@ pinned harnesses and development services as the managed E2B image.
 ```bash
 cd packages/e2b-infra
 CUBE_IMAGE=localhost:5000/oi-e2b:latest \
-  CUBE_TEMPLATE_ALIAS=oi-e2b-codewhale-harness \
+  CUBE_TEMPLATE_ALIAS=oi-e2b-multi-harness \
   bash build-cube-template.sh
 ```
 
@@ -94,19 +94,26 @@ network path does not make a resolver bound to a host-local address reachable fr
 Override the resolver with `CUBE_DNS_SERVER` when the Cube network provides another
 sandbox-reachable DNS service.
 
-## Optional Codex model relay for Cube
+## Host model relay for Cube
 
 In networks where a Cube sandbox cannot connect directly to the Codex model endpoint, the Codex
 app-server can use an HTTPS relay by adding a global Open-Inspect secret named
 `CODEX_OPENAI_BASE_URL`. The value is passed to Codex as its `openai_base_url` configuration and is
 excluded from the commands Codex runs inside the workspace.
 
-`codex-relay.mjs` is the restricted host-side relay used by the self-hosted Cube deployment. It only
-forwards Codex model and response paths to the upstream service and binds to `127.0.0.1` by default.
-Publish it through an authenticated/controlled HTTPS ingress and set `CODEX_OPENAI_BASE_URL` to that
-public URL. `open-inspect-codex-relay.service.example` is an example systemd user service; replace
-its absolute `ExecStart` path before installing it.
+`codex-relay.mjs` is the restricted host-side relay used by the self-hosted Cube deployment. It
+keeps the existing ChatGPT subscription path and also exposes session-scoped DeepSeek OpenAI
+Responses, Chat Completions, and Anthropic Messages paths. For DeepSeek, the sandbox sends its
+existing `SANDBOX_AUTH_TOKEN`; the relay verifies that token with the control plane before replacing
+it with the provider key read from `DEEPSEEK_API_KEY_FILE`. The provider key never enters a sandbox,
+repository image, snapshot, or Cloudflare storage.
+
+The relay binds to `127.0.0.1` by default. Publish it through a controlled HTTPS ingress and set
+`CODEX_OPENAI_BASE_URL` (or the more specific `DEEPSEEK_RELAY_BASE_URL`) to that public URL. Set
+`MODEL_RELAY_CONTROL_PLANE_URL` to the public control-plane HTTPS URL. The example systemd service
+shows the non-secret file path and URL settings; keep the key file outside the repository with mode
+`0600`, and replace the absolute `ExecStart` path before installing the unit.
 
 The relay is a **host service**, not a sandbox service. Each session sandbox still runs its own
-`sandbox_runtime`, Python WebSocket bridge, and Codex app-server. Cloudflare remains the control
-plane and tunnel ingress; it does not run the Codex app-server.
+`sandbox_runtime`, Python WebSocket bridge, and selected harness. Cloudflare remains the control
+plane and tunnel ingress; it does not run OpenCode, Codex, Claude Code, or CodeWhale.

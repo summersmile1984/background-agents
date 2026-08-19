@@ -77,7 +77,7 @@ ENV HOME=/root \
     PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app \
     NODE_PATH=/usr/lib/node_modules \
-    SANDBOX_VERSION=v61-codewhale-harness
+    SANDBOX_VERSION=v72-deepseek-multi-harness
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/cube-entry"]

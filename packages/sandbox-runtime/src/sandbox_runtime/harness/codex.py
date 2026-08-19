@@ -12,6 +12,7 @@ import os
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+from ..deepseek_relay import deepseek_relay_url, uses_deepseek_model
 from ..harness_credentials import remove_runtime_codex_auth
 from ..types import AgentHarness
 from .json_rpc import JsonRpcProcess
@@ -32,6 +33,7 @@ _SECRET_ENV_NAMES = (
     "CODEX_ACCESS_TOKEN_EXPIRES_AT",
     "CODEX_HOME",
     "CODEX_OPENAI_BASE_URL",
+    "DEEPSEEK_RELAY_BASE_URL",
     "SANDBOX_AUTH_TOKEN",
 )
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
@@ -231,11 +233,34 @@ class CodexHarnessDriver:
             return None
         if "/" not in model:
             return model
-        return model.split("/", 1)[1] if model.startswith("openai/") else None
+        return model.split("/", 1)[1] if model.startswith(("openai/", "deepseek/")) else None
 
     @staticmethod
     def _app_server_command(environment: Mapping[str, str]) -> list[str]:
         command = ["codex"]
+        if uses_deepseek_model(environment):
+            base_url = deepseek_relay_url(environment, "openai")
+            if not base_url or not environment.get("SANDBOX_AUTH_TOKEN", "").strip():
+                raise RuntimeError("DeepSeek Codex sessions require the Host model relay")
+            command.extend(
+                [
+                    "-c",
+                    'model_provider="deepseek"',
+                    "-c",
+                    'model_providers.deepseek.name="DeepSeek via Open-Inspect Host relay"',
+                    "-c",
+                    f"model_providers.deepseek.base_url={json.dumps(base_url)}",
+                    "-c",
+                    'model_providers.deepseek.env_key="SANDBOX_AUTH_TOKEN"',
+                    "-c",
+                    'model_providers.deepseek.wire_api="responses"',
+                    "-c",
+                    "model_context_window=1000000",
+                ]
+            )
+            command.extend(["app-server", "--stdio", "--strict-config"])
+            return command
+
         base_url = environment.get(_CODEX_BASE_URL_ENV, "").strip().rstrip("/")
         if base_url:
             parsed = urlsplit(base_url)

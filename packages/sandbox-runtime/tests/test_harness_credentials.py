@@ -22,7 +22,6 @@ def _redirect_paths(monkeypatch, tmp_path: Path) -> None:
     memory_dir = tmp_path / "memory"
     monkeypatch.setattr(credentials, "CREDENTIAL_MEMORY_DIR", memory_dir)
     monkeypatch.setattr(credentials, "CLAUDE_TOKEN_FILE", memory_dir / "claude-token")
-    monkeypatch.setattr(credentials, "DEEPSEEK_TOKEN_FILE", memory_dir / "deepseek-token")
     monkeypatch.setattr(credentials, "SHELL_SANITIZER_FILE", memory_dir / "sanitize.sh")
     monkeypatch.setattr(credentials, "CODEX_AUTH_PATH", tmp_path / "home/.codex/auth.json")
     monkeypatch.setattr(credentials, "CODEX_AUTH_MARKER", memory_dir / "codex-marker")
@@ -55,17 +54,17 @@ def test_unselected_harness_credentials_are_dropped(monkeypatch, tmp_path):
 
     credentials.materialize_harness_credentials(environment, _Log(), lambda *_: None, "opencode")
 
-    assert environment == {"DEEPSEEK_API_KEY": "deepseek-secret"}
+    assert environment == {}
     assert not credentials.CREDENTIAL_MEMORY_DIR.exists()
 
 
-def test_opencode_keeps_deepseek_model_key(monkeypatch, tmp_path):
+def test_opencode_drops_deepseek_provider_key(monkeypatch, tmp_path):
     _redirect_paths(monkeypatch, tmp_path)
     environment = {"DEEPSEEK_API_KEY": "model-key"}
 
     credentials.materialize_harness_credentials(environment, _Log(), lambda *_: None, "opencode")
 
-    assert environment == {"DEEPSEEK_API_KEY": "model-key"}
+    assert environment == {}
     assert not credentials.CREDENTIAL_MEMORY_DIR.exists()
 
 
@@ -82,14 +81,14 @@ def test_native_non_deepseek_harness_drops_deepseek_key(monkeypatch, tmp_path):
     assert credentials.read_claude_token(environment) == "setup-token"
 
 
-def test_deepseek_key_moves_to_memory_and_other_harness_credentials_are_dropped(
-    monkeypatch, tmp_path
-):
+def test_deepseek_model_drops_all_vendor_credentials_without_materializing(monkeypatch, tmp_path):
     _redirect_paths(monkeypatch, tmp_path)
     environment = {
         "DEEPSEEK_API_KEY": "deepseek-secret",
         "CLAUDE_CODE_OAUTH_TOKEN": "claude-secret",
         "CODEX_AUTH_JSON": '{"tokens":{}}',
+        "CODEX_OPENAI_BASE_URL": "https://relay.example.test",
+        "SESSION_CONFIG": '{"session_id":"session-1","model":"deepseek/deepseek-v4-flash"}',
     }
 
     credentials.materialize_harness_credentials(environment, _Log(), lambda *_: None, "deepseek")
@@ -97,10 +96,11 @@ def test_deepseek_key_moves_to_memory_and_other_harness_credentials_are_dropped(
     assert "DEEPSEEK_API_KEY" not in environment
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in environment
     assert "CODEX_AUTH_JSON" not in environment
-    assert credentials.read_deepseek_token(environment) == "deepseek-secret"
-    assert credentials.DEEPSEEK_TOKEN_FILE.stat().st_mode & 0o777 == 0o600
-    assert environment["BASH_ENV"] == str(credentials.SHELL_SANITIZER_FILE)
-    assert "CODEWHALE_MCP_CONFIG" in credentials.SHELL_SANITIZER_FILE.read_text()
+    assert environment == {
+        "CODEX_OPENAI_BASE_URL": "https://relay.example.test",
+        "SESSION_CONFIG": '{"session_id":"session-1","model":"deepseek/deepseek-v4-flash"}',
+    }
+    assert not credentials.CREDENTIAL_MEMORY_DIR.exists()
 
 
 def test_claude_setup_token_moves_to_memory_and_is_removed_from_parent_env(monkeypatch, tmp_path):

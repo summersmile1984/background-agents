@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 Environment=CODEX_RELAY_LISTEN_HOST=127.0.0.1
 Environment=CODEX_RELAY_LISTEN_PORT=18767
+Environment=DEEPSEEK_API_KEY_FILE=/absolute/path/outside-the-repository/deepseek-api-key
+Environment=MODEL_RELAY_CONTROL_PLANE_URL=https://open-inspect-control-plane.example.workers.dev
 ExecStart=/usr/bin/node /absolute/path/to/background-agents/packages/e2b-infra/codex-relay.mjs
 Restart=on-failure
 RestartSec=2s

@@ -13,7 +13,7 @@ const HARNESS_OPTIONS: Array<{
   {
     value: "opencode",
     label: "OpenCode",
-    description: "Default upstream-compatible harness",
+    description: "Upstream-compatible OpenCode harness",
   },
   {
     value: "codex",
@@ -28,7 +28,7 @@ const HARNESS_OPTIONS: Array<{
   {
     value: "deepseek",
     label: "DeepSeek Harness",
-    description: "Native CodeWhale app-server; requires DEEPSEEK_API_KEY",
+    description: "Native CodeWhale app-server via the Host model relay",
   },
 ];
 
@@ -39,13 +39,15 @@ export function getAgentHarnessLabel(value: AgentHarness): string {
 export function AgentHarnessSelector({
   value,
   onChange,
-  inheritLabel = "Default harness",
+  inheritLabel = "OpenCode",
+  allowInherit = true,
   showPrefix = false,
   disabled = false,
 }: {
   value: AgentHarness | null | undefined;
   onChange: (value: AgentHarness | null) => void;
   inheritLabel?: string;
+  allowInherit?: boolean;
   showPrefix?: boolean;
   disabled?: boolean;
 }) {
@@ -56,11 +58,15 @@ export function AgentHarnessSelector({
         onChange(nextValue === INHERIT_VALUE ? null : (nextValue as AgentHarness))
       }
       items={[
-        {
-          value: INHERIT_VALUE,
-          label: inheritLabel,
-          description: "Resolve from the environment or deployment default",
-        },
+        ...(allowInherit
+          ? [
+              {
+                value: INHERIT_VALUE,
+                label: inheritLabel,
+                description: "Resolve from the environment or deployment setting",
+              },
+            ]
+          : []),
         ...HARNESS_OPTIONS,
       ]}
       direction="up"

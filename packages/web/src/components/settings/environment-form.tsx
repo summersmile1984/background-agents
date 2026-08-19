@@ -248,11 +248,11 @@ export function EnvironmentForm({
       </div>
 
       <div>
-        <p className="block text-sm font-medium text-foreground mb-1.5">Default harness</p>
+        <p className="block text-sm font-medium text-foreground mb-1.5">Harness for new sessions</p>
         <AgentHarnessSelector
           value={defaultAgentHarness}
           onChange={setDefaultAgentHarness}
-          inheritLabel="Deployment default"
+          inheritLabel="OpenCode (deployment setting)"
           disabled={submitting}
         />
         <p className="text-xs text-muted-foreground mt-1 leading-normal">

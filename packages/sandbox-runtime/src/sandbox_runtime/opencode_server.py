@@ -18,6 +18,7 @@ from .constants import (
     DEFAULT_BIN_INSTALL_DIR,
     OPENCODE_PORT,
 )
+from .deepseek_relay import deepseek_relay_url
 from .git_excludes import install_runtime_git_excludes
 from .process_output import iter_process_lines
 
@@ -487,6 +488,25 @@ class OpenCodeServer:
             "model": f"{self.provider}/{self.model}",
             "permission": {"*": {"*": "allow"}},
         }
+        provider_config: dict[str, Any] = {}
+
+        if self.provider == "deepseek":
+            relay_url = deepseek_relay_url(os.environ, "openai")
+            sandbox_token = os.environ.get("SANDBOX_AUTH_TOKEN", "").strip()
+            if not relay_url or not sandbox_token:
+                raise RuntimeError("DeepSeek OpenCode sessions require the Host model relay")
+            provider_config["deepseek"] = {
+                "name": "DeepSeek via Open-Inspect Host relay",
+                "options": {
+                    "baseURL": relay_url,
+                    "apiKey": sandbox_token,
+                },
+                "models": {
+                    "deepseek-v4-flash": {"name": "DeepSeek V4 Flash"},
+                    "deepseek-v4-pro": {"name": "DeepSeek V4 Pro"},
+                },
+            }
+            self.log.info("deepseek.provider_configured", transport="host_relay")
 
         # Inject an OpenAI-compatible custom provider for Xiaomi MiMo when the
         # control plane supplies its API key (OpenCode picks the provider up from
@@ -496,21 +516,21 @@ class OpenCodeServer:
             os.environ.get("XIAOMI_BASE_URL", "") or "https://token-plan-cn.xiaomimimo.com/v1"
         )
         if xiaomi_api_key:
-            opencode_config["provider"] = {
-                "xiaomi": {
-                    "npm": "@ai-sdk/openai-compatible",
-                    "name": "Xiaomi MiMo",
-                    "options": {
-                        "baseURL": xiaomi_base_url,
-                        "apiKey": xiaomi_api_key,
-                    },
-                    "models": {
-                        "mimo-v2.5": {"name": "MiMo V2.5"},
-                        "mimo-v2.5-pro": {"name": "MiMo V2.5 Pro"},
-                    },
-                }
+            provider_config["xiaomi"] = {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Xiaomi MiMo",
+                "options": {
+                    "baseURL": xiaomi_base_url,
+                    "apiKey": xiaomi_api_key,
+                },
+                "models": {
+                    "mimo-v2.5": {"name": "MiMo V2.5"},
+                    "mimo-v2.5-pro": {"name": "MiMo V2.5 Pro"},
+                },
             }
             self.log.info("xiaomi.provider_configured", base_url=xiaomi_base_url)
+        if provider_config:
+            opencode_config["provider"] = provider_config
 
         # Inject MCP servers
         mcp_servers = self._resolve_mcp_servers()

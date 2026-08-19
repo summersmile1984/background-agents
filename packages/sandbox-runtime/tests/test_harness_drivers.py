@@ -18,6 +18,14 @@ class Log:
         pass
 
 
+def deepseek_environment(model: str = "deepseek/deepseek-v4-flash") -> dict[str, str]:
+    return {
+        "CODEX_OPENAI_BASE_URL": "https://relay.example.test",
+        "SANDBOX_AUTH_TOKEN": "sandbox-token",
+        "SESSION_CONFIG": json.dumps({"session_id": "session-1", "model": model}),
+    }
+
+
 class FakeRpc:
     def __init__(self):
         import asyncio
@@ -163,6 +171,25 @@ def test_codex_driver_rejects_insecure_model_relay():
         raise AssertionError("insecure Codex relay URL was accepted")
 
 
+def test_codex_driver_uses_deepseek_responses_relay_without_provider_key():
+    environment = deepseek_environment()
+    environment["DEEPSEEK_API_KEY"] = "must-stay-on-host"
+    driver = CodexHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment=environment,
+    )
+
+    command = driver._rpc._command
+    assert 'model_provider="deepseek"' in command
+    assert (
+        'model_providers.deepseek.base_url="https://relay.example.test/sessions/session-1/'
+        'deepseek/openai"'
+    ) in command
+    assert 'model_providers.deepseek.env_key="SANDBOX_AUTH_TOKEN"' in command
+    assert "must-stay-on-host" not in repr(command)
+
+
 @dataclass
 class StreamEvent:
     event: dict[str, Any]
@@ -196,8 +223,16 @@ class Options:
 
 async def fake_claude_query(*, prompt, options):
     assert prompt == "hello"
-    assert options.kwargs["permission_mode"] == "bypassPermissions"
+    assert options.kwargs["permission_mode"] == "acceptEdits"
+    assert "Bash" in options.kwargs["allowed_tools"]
+    assert "mcp__open_inspect__*" in options.kwargs["allowed_tools"]
     assert options.kwargs["mcp_servers"]["open_inspect"]["command"] == "python"
+    yield StreamEvent(
+        {
+            "type": "content_block_start",
+            "content_block": {"type": "text", "text": "h"},
+        }
+    )
     yield StreamEvent(
         {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "hi"}}
     )
@@ -232,8 +267,9 @@ async def test_claude_driver_uses_setup_token_environment_and_persists_session()
     ]
 
     assert driver.session_id == "claude-session"
-    assert events[0] == {"type": "token", "content": "hi", "messageId": "message-1"}
-    assert events[1] == {
+    assert events[0] == {"type": "token", "content": "h", "messageId": "message-1"}
+    assert events[1] == {"type": "token", "content": "hi", "messageId": "message-1"}
+    assert events[2] == {
         "type": "tool_result",
         "callId": "call-1",
         "result": "done",
@@ -245,6 +281,33 @@ async def test_claude_driver_uses_setup_token_environment_and_persists_session()
         "output": 3,
         "cache": {"read": 0, "write": 0},
     }
+
+
+def test_claude_driver_uses_anthropic_relay_with_sandbox_token():
+    environment = deepseek_environment()
+    environment["CLAUDE_CODE_OAUTH_TOKEN"] = "must-not-be-used"
+    driver = ClaudeHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment=environment,
+        query_function=fake_claude_query,
+        options_class=Options,
+    )
+
+    assert driver._environment["ANTHROPIC_BASE_URL"] == (
+        "https://relay.example.test/sessions/session-1/deepseek/anthropic"
+    )
+    assert driver._environment["ANTHROPIC_AUTH_TOKEN"] == "sandbox-token"
+    assert driver._environment["ANTHROPIC_MODEL"] == "deepseek-v4-flash"
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in driver._environment
+    options = driver._build_options(
+        HarnessPrompt(
+            message_id="message-1",
+            content="hello",
+            model="deepseek/deepseek-v4-flash",
+        )
+    )
+    assert options.kwargs["include_partial_messages"] is False
 
 
 class FakeCodeWhaleRpc:
@@ -284,7 +347,14 @@ class FakeCodeWhaleRpc:
                 )
             await self.notifications.put({"type": "response_start", "response_id": "response-1"})
             await self.notifications.put(
-                {"type": "response_delta", "response_id": "response-1", "delta": "whale"}
+                {"type": "response_delta", "response_id": "response-1", "delta": "H"}
+            )
+            await self.notifications.put(
+                {
+                    "type": "response_delta",
+                    "response_id": "response-1",
+                    "delta": "ARNESS_OK: deepseek",
+                }
             )
             await self.notifications.put({"type": "response_end", "response_id": "response-1"})
             return {"thread_id": params["thread_id"], "status": "accepted"}
@@ -306,7 +376,7 @@ async def test_deepseek_driver_translates_codewhale_events_and_persists_state(tm
         workspace_path="/workspace",
         state_path=state_path,
         log=Log(),
-        environment={"DEEPSEEK_API_KEY": "secret"},
+        environment={**deepseek_environment(), "DEEPSEEK_API_KEY": "must-stay-on-host"},
         mcp_servers=(
             {
                 "name": "docs search",
@@ -333,7 +403,12 @@ async def test_deepseek_driver_translates_codewhale_events_and_persists_state(tm
 
     assert driver.session_id == "codewhale-thread"
     assert events == [
-        {"type": "token", "content": "whale", "messageId": "message-1"},
+        {"type": "token", "content": "H", "messageId": "message-1"},
+        {
+            "type": "token",
+            "content": "HARNESS_OK: deepseek",
+            "messageId": "message-1",
+        },
         {"type": "step_finish", "messageId": "message-1", "reason": "accepted"},
     ]
     thread_request = next(params for method, params in rpc.requests if method == "thread/start")
@@ -347,14 +422,47 @@ async def test_deepseek_driver_translates_codewhale_events_and_persists_state(tm
         "url": "https://mcp.example.test/mcp"
     }
     assert state_path.is_dir()
+    assert "DEEPSEEK_API_KEY" not in driver._environment
+    assert "DEEPSEEK_BASE_URL" not in driver._environment
+    assert "CODEWHALE_BASE_URL" not in driver._environment
+    config = driver._config_path.read_text()
+    assert "[providers.deepseek]" in config
+    assert 'api_key_env = "SANDBOX_AUTH_TOKEN"' in config
+    assert 'base_url = "https://relay.example.test/sessions/session-1/deepseek/openai"' in config
+    assert "sandbox-token" not in config
+    assert "must-stay-on-host" not in driver._environment.values()
     await driver.close()
     assert rpc.closed
+
+
+async def test_deepseek_driver_binds_session_token_to_custom_endpoint(tmp_path):
+    driver = DeepSeekHarnessDriver(
+        workspace_path="/workspace",
+        state_path=tmp_path / "state",
+        log=Log(),
+        environment=deepseek_environment(),
+        mcp_config_path=tmp_path / "mcp.json",
+    )
+
+    command = driver._rpc._command
+    assert command[:2] == ["codewhale", "app-server"]
+    assert command[command.index("--config") + 1] == str(driver._config_path)
+    assert "--api-key" not in command
+    assert "sandbox-token" not in command
+    assert "must-stay-on-host" not in command
+    await driver.close()
 
 
 def test_native_drivers_ignore_models_owned_by_the_other_provider():
     assert CodexHarnessDriver._normalize_model("anthropic/claude-sonnet-5") is None
     assert ClaudeHarnessDriver._normalize_model("openai/gpt-5.6") is None
     assert DeepSeekHarnessDriver._normalize_model("openai/gpt-5.6") is None
+    assert CodexHarnessDriver._normalize_model("deepseek/deepseek-v4-flash") == (
+        "deepseek-v4-flash"
+    )
+    assert ClaudeHarnessDriver._normalize_model("deepseek/deepseek-v4-flash") == (
+        "deepseek-v4-flash"
+    )
 
 
 async def test_claude_driver_falls_back_when_persisted_session_is_stale():
