@@ -60,7 +60,7 @@ import { useSessionSnapshot } from "./session-snapshot-provider";
 import { useSessionRename } from "@/hooks/use-session-rename";
 import { getAgentHarnessOrDefault } from "@open-inspect/shared/types/agent-harness";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
-import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
+import { getModelIds, getSessionAgentHarnessModelOptions } from "@/lib/agent-harness-models";
 
 type SessionState = ReturnType<typeof useSessionSocket>["sessionState"];
 
@@ -606,8 +606,9 @@ function useModelSelection(sessionState: SessionState, agentHarness: AgentHarnes
 
   const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
   const harnessModelOptions = useMemo(
-    () => getAgentHarnessModelOptions(enabledModelOptions, agentHarness),
-    [agentHarness, enabledModelOptions]
+    () =>
+      getSessionAgentHarnessModelOptions(enabledModelOptions, agentHarness, sessionState?.model),
+    [agentHarness, enabledModelOptions, sessionState?.model]
   );
   const harnessModelIds = useMemo(() => getModelIds(harnessModelOptions), [harnessModelOptions]);
   const { model: selectedModel, reasoningEffort } = resolveModelPreference(

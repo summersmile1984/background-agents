@@ -31,6 +31,23 @@ function parseStatus(value: unknown): HostModelRelayStatus["deepseek"] | null {
   return { configured: deepseek.configured, fingerprint };
 }
 
+async function relayErrorMessage(response: Response): Promise<string> {
+  if (response.status === 401) return "Host model relay rejected the management credential";
+  try {
+    const value: unknown = await response.json();
+    if (value && typeof value === "object" && "error" in value) {
+      const error = value.error;
+      if (error && typeof error === "object" && "message" in error) {
+        const message = error.message;
+        if (typeof message === "string" && message.trim()) return message;
+      }
+    }
+  } catch {
+    // Fall back to a stable message when the Host returns a malformed error.
+  }
+  return `Host model relay request failed (${response.status})`;
+}
+
 export class ModelRelayAdminClient {
   private readonly baseUrl: string;
 
@@ -127,12 +144,7 @@ export class ModelRelayAdminClient {
         signal: controller.signal,
       });
       if (!response.ok) {
-        throw new ModelRelayAdminError(
-          response.status === 401
-            ? "Host model relay rejected the management credential"
-            : `Host model relay request failed (${response.status})`,
-          response.status
-        );
+        throw new ModelRelayAdminError(await relayErrorMessage(response), response.status);
       }
       return response;
     } catch (cause) {

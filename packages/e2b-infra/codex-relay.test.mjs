@@ -171,6 +171,7 @@ test("rotates and tests DeepSeek through the authenticated admin API", async () 
     deepSeekKeyManager: keyManager,
     adminAuthSecret: secret,
     validateProviderKey: async () => ({ ok: true, status: 200 }),
+    testProviderKey: async () => ({ ok: true, status: 200 }),
   });
   await new Promise((resolve) => relay.server.listen(0, "127.0.0.1", resolve));
   const address = relay.server.address();
@@ -198,6 +199,28 @@ test("rotates and tests DeepSeek through the authenticated admin API", async () 
 
     const unauthorized = await globalThis.fetch(`${baseUrl}/admin/v1/status`);
     assert.equal(unauthorized.status, 401);
+  } finally {
+    await relay.close();
+  }
+});
+
+test("surfaces a paid-inference failure from the DeepSeek provider test", async () => {
+  const secret = "relay-admin-test-secret";
+  const relay = createRelayServer({
+    deepSeekApiKey: "configured-host-key",
+    adminAuthSecret: secret,
+    testProviderKey: async () => ({ ok: false, status: 402 }),
+  });
+  await new Promise((resolve) => relay.server.listen(0, "127.0.0.1", resolve));
+  const address = relay.server.address();
+  const pathName = "/admin/v1/providers/deepseek/test";
+  try {
+    const response = await globalThis.fetch(`http://127.0.0.1:${address.port}${pathName}`, {
+      method: "POST",
+      headers: buildRelayAdminAuthHeaders({ secret, method: "POST", rawUrl: pathName }),
+    });
+    assert.equal(response.status, 402);
+    assert.match((await response.json()).error.message, /inference failed \(402\)/);
   } finally {
     await relay.close();
   }

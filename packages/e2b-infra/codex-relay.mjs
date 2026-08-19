@@ -218,10 +218,55 @@ export function validateDeepSeekApiKey(apiKey, agent) {
   });
 }
 
+export function testDeepSeekInference(apiKey, agent) {
+  return new Promise((resolve) => {
+    if (!apiKey) {
+      resolve({ ok: false, status: 400 });
+      return;
+    }
+    const body = Buffer.from(
+      JSON.stringify({
+        model: "deepseek-v4-flash",
+        messages: [{ role: "user", content: "Reply with OK." }],
+        max_tokens: 1,
+        stream: false,
+      })
+    );
+    const request = https.request(
+      {
+        protocol: "https:",
+        hostname: DEEPSEEK_UPSTREAM_HOST,
+        port: 443,
+        method: "POST",
+        path: "/chat/completions",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-length": String(body.length),
+          "content-type": "application/json",
+        },
+        agent,
+        timeout: 10_000,
+      },
+      (response) => {
+        response.resume();
+        resolve({
+          ok: Boolean(
+            response.statusCode && response.statusCode >= 200 && response.statusCode < 300
+          ),
+          status: response.statusCode || 502,
+        });
+      }
+    );
+    request.once("timeout", () => request.destroy());
+    request.once("error", () => resolve({ ok: false, status: 502 }));
+    request.end(body);
+  });
+}
+
 async function handleAdminRequest(
   request,
   response,
-  { authenticator, keyManager, validateProviderKey, agent }
+  { authenticator, keyManager, validateProviderKey, testProviderKey, agent }
 ) {
   const body = await readRequestBody(request);
   if (!body) {
@@ -294,9 +339,10 @@ async function handleAdminRequest(
       jsonError(response, 409, "DeepSeek is not configured");
       return;
     }
-    const validation = await validateProviderKey(apiKey, agent);
-    if (!validation.ok) {
-      jsonError(response, 502, "DeepSeek provider is unavailable");
+    const testResult = await testProviderKey(apiKey, agent);
+    if (!testResult.ok) {
+      const status = testResult.status >= 400 && testResult.status < 500 ? testResult.status : 502;
+      jsonError(response, status, `DeepSeek inference failed (${testResult.status})`);
       return;
     }
     response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json" });
@@ -371,6 +417,7 @@ export function createRelayServer({
   controlPlaneUrl,
   adminAuthSecret,
   validateProviderKey = validateDeepSeekApiKey,
+  testProviderKey = testDeepSeekInference,
   agent = new https.Agent({ keepAlive: true, maxSockets: 64 }),
 } = {}) {
   const keyManager = deepSeekKeyManager || createMemoryDeepSeekKeyManager(deepSeekApiKey || null);
@@ -390,6 +437,7 @@ export function createRelayServer({
         authenticator: adminAuthenticator,
         keyManager,
         validateProviderKey,
+        testProviderKey,
         agent,
       });
       return;

@@ -61,6 +61,18 @@ describe("ModelRelayAdminClient", () => {
     });
   });
 
+  it("surfaces the Host's safe provider-test failure message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({ error: { message: "DeepSeek inference failed (402)" } }, { status: 402 })
+      )
+    );
+    await expect(
+      new ModelRelayAdminClient("https://relay-admin.example.test", "admin-secret").testDeepSeek()
+    ).rejects.toMatchObject({ message: "DeepSeek inference failed (402)", status: 402 });
+  });
+
   it("rejects an unsafe management URL", () => {
     expect(
       () => new ModelRelayAdminClient("http://relay-admin.example.test", "admin-secret")
