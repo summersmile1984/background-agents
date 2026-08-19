@@ -193,6 +193,9 @@ jobs:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_cloudflare_worker_subdomain: ${{ secrets.CLOUDFLARE_WORKER_SUBDOMAIN }}
+          TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_custom_domain: ${{ secrets.CLOUDFLARE_CUSTOM_DOMAIN }}
+          TF_VAR_cloudflare_control_plane_custom_domain: ${{ secrets.CLOUDFLARE_CONTROL_PLANE_CUSTOM_DOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || '000000000000000000000000' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
           TF_VAR_modal_token_id: ${{ secrets.MODAL_TOKEN_ID }}
@@ -232,6 +235,7 @@ jobs:
           TF_VAR_linear_webhook_secret: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
           TF_VAR_web_platform: "${{ secrets.WEB_PLATFORM || 'vercel' }}"
           TF_VAR_enable_durable_object_bindings: "${{ secrets.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
+          TF_VAR_enable_service_bindings: "${{ secrets.ENABLE_SERVICE_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ secrets.SANDBOX_PROVIDER || 'modal' }}"
           TF_VAR_default_agent_harness: "${{ secrets.DEFAULT_AGENT_HARNESS || 'opencode' }}"
           TF_VAR_sandbox_runtime_harnesses: "${{ secrets.SANDBOX_RUNTIME_HARNESSES || 'opencode,codex,claude,deepseek' }}"
@@ -259,8 +263,12 @@ jobs:
           TF_VAR_e2b_api_key: ${{ secrets.E2B_API_KEY }}
           TF_VAR_e2b_template_id: ${{ secrets.E2B_TEMPLATE_ID }}
           TF_VAR_e2b_api_url: "${{ secrets.E2B_API_URL || 'https://api.e2b.app' }}"
+          TF_VAR_e2b_build_template: "${{ secrets.E2B_BUILD_TEMPLATE || 'true' }}"
           TF_VAR_e2b_sandbox_timeout_seconds: "${{ secrets.E2B_SANDBOX_TIMEOUT_SECONDS || '7200' }}"
           TF_VAR_e2b_auto_pause: "${{ secrets.E2B_AUTO_PAUSE || 'true' }}"
+          TF_VAR_e2b_use_create_time_env: "${{ secrets.E2B_USE_CREATE_TIME_ENV || 'false' }}"
+          TF_VAR_xiaomi_api_key: ${{ secrets.XIAOMI_API_KEY }}
+          TF_VAR_xiaomi_base_url: "${{ secrets.XIAOMI_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1' }}"
 
       - name: Post Plan Results
         uses: actions/github-script@v8
@@ -353,6 +361,9 @@ jobs:
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_cloudflare_worker_subdomain: ${{ secrets.CLOUDFLARE_WORKER_SUBDOMAIN }}
+          TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_custom_domain: ${{ secrets.CLOUDFLARE_CUSTOM_DOMAIN }}
+          TF_VAR_cloudflare_control_plane_custom_domain: ${{ secrets.CLOUDFLARE_CONTROL_PLANE_CUSTOM_DOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || '000000000000000000000000' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
           TF_VAR_modal_token_id: ${{ secrets.MODAL_TOKEN_ID }}
@@ -392,6 +403,7 @@ jobs:
           TF_VAR_linear_webhook_secret: ${{ secrets.LINEAR_WEBHOOK_SECRET }}
           TF_VAR_web_platform: "${{ secrets.WEB_PLATFORM || 'vercel' }}"
           TF_VAR_enable_durable_object_bindings: "${{ secrets.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
+          TF_VAR_enable_service_bindings: "${{ secrets.ENABLE_SERVICE_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ secrets.SANDBOX_PROVIDER || 'modal' }}"
           TF_VAR_default_agent_harness: "${{ secrets.DEFAULT_AGENT_HARNESS || 'opencode' }}"
           TF_VAR_sandbox_runtime_harnesses: "${{ secrets.SANDBOX_RUNTIME_HARNESSES || 'opencode,codex,claude,deepseek' }}"
@@ -419,8 +431,12 @@ jobs:
           TF_VAR_e2b_api_key: ${{ secrets.E2B_API_KEY }}
           TF_VAR_e2b_template_id: ${{ secrets.E2B_TEMPLATE_ID }}
           TF_VAR_e2b_api_url: "${{ secrets.E2B_API_URL || 'https://api.e2b.app' }}"
+          TF_VAR_e2b_build_template: "${{ secrets.E2B_BUILD_TEMPLATE || 'true' }}"
           TF_VAR_e2b_sandbox_timeout_seconds: "${{ secrets.E2B_SANDBOX_TIMEOUT_SECONDS || '7200' }}"
           TF_VAR_e2b_auto_pause: "${{ secrets.E2B_AUTO_PAUSE || 'true' }}"
+          TF_VAR_e2b_use_create_time_env: "${{ secrets.E2B_USE_CREATE_TIME_ENV || 'false' }}"
+          TF_VAR_xiaomi_api_key: ${{ secrets.XIAOMI_API_KEY }}
+          TF_VAR_xiaomi_base_url: "${{ secrets.XIAOMI_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1' }}"
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
 
