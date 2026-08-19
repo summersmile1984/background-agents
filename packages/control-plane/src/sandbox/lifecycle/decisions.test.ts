@@ -765,22 +765,22 @@ describe("evaluateConnectingTimeout", () => {
 
   it("returns not timed out when within timeout window", () => {
     const now = Date.now();
-    const createdAt = now - 60_000; // 60s ago, well within 120s timeout
+    const createdAt = now - (config.timeoutMs - 1_000);
 
     const result = evaluateConnectingTimeout("connecting", createdAt, config, now);
 
     expect(result.isTimedOut).toBe(false);
-    expect(result.elapsedMs).toBe(60_000);
+    expect(result.elapsedMs).toBe(config.timeoutMs - 1_000);
   });
 
   it("returns timed out when past timeout", () => {
     const now = Date.now();
-    const createdAt = now - 130_000; // 130s ago, past 120s timeout
+    const createdAt = now - (config.timeoutMs + 10_000);
 
     const result = evaluateConnectingTimeout("connecting", createdAt, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(130_000);
+    expect(result.elapsedMs).toBe(config.timeoutMs + 10_000);
   });
 
   it("returns timed out at exact boundary (>=)", () => {
@@ -795,12 +795,12 @@ describe("evaluateConnectingTimeout", () => {
 
   it("returns timed out when stuck in spawning past timeout (interrupted spawn)", () => {
     const now = Date.now();
-    const createdAt = now - 130_000; // 130s ago, past 120s timeout
+    const createdAt = now - (config.timeoutMs + 10_000);
 
     const result = evaluateConnectingTimeout("spawning", createdAt, config, now);
 
     expect(result.isTimedOut).toBe(true);
-    expect(result.elapsedMs).toBe(130_000);
+    expect(result.elapsedMs).toBe(config.timeoutMs + 10_000);
   });
 
   it("returns not timed out for spawning within timeout window", () => {

@@ -37,7 +37,7 @@ info "Node $(node -v) ✓"
 # 2. Install npm dependencies (also triggers husky via prepare script)
 # ---------------------------------------------------------------------------
 info "Installing npm dependencies…"
-npm install
+npm ci --prefer-offline --no-audit --no-fund
 
 # ---------------------------------------------------------------------------
 # 3. Build shared package (other packages depend on it)
@@ -113,13 +113,17 @@ if [ -d "$MODAL_DIR" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 6. Verify the setup
+# 6. Verify image builds without blocking fresh session startup
 # ---------------------------------------------------------------------------
-info "Running type check…"
-if npm run typecheck; then
-  info "Type check passed ✓"
+if [[ "${OPENINSPECT_BOOT_MODE:-fresh}" == "build" ]]; then
+  info "Running type check for the prebuilt image…"
+  if npm run typecheck; then
+    info "Type check passed ✓"
+  else
+    warn "Type check had issues — you may need to build additional packages."
+  fi
 else
-  warn "Type check had issues — you may need to build additional packages."
+  info "Skipping full type check during fresh startup; CI and image builds run it."
 fi
 
 # ---------------------------------------------------------------------------
