@@ -78,8 +78,10 @@ The most common example:
 
 ### Native harness credentials
 
-Codex and Claude Code can use subscription credentials instead of model API keys. Store these as a
-global, repository, or Environment secret according to the sessions that should receive them:
+Codex and Claude Code can use subscription credentials instead of model API keys. Deployment
+administrators can manage global values under **Settings > Harnesses**, which shows fingerprints and
+expiry metadata without returning the value. Repository or Environment overrides can still be stored
+in their **Secrets** editors according to the sessions that should receive them:
 
 | Key                                  | Purpose                                                                  |
 | ------------------------------------ | ------------------------------------------------------------------------ |
@@ -222,8 +224,9 @@ therefore are not available to `setup.sh`; they are injected only into live sess
 ### "Model not found" errors
 
 If you see "Model not found" errors, add the API key for your selected model provider as a global
-secret in Settings. For Claude on Daytona or Vercel, add `ANTHROPIC_API_KEY`. For DeepSeek, add
-`DEEPSEEK_API_KEY`. For Z.AI Coding Plan, add `ZHIPU_API_KEY`. For SuperGrok, follow the
+secret in Settings. For Claude on Daytona or Vercel, add `ANTHROPIC_API_KEY`. For DeepSeek, rotate
+the Host-only key under **Settings > Harnesses**; never add `DEEPSEEK_API_KEY` as a sandbox secret.
+For Z.AI Coding Plan, add `ZHIPU_API_KEY`. For SuperGrok, follow the
 [managed OAuth setup guide](GROK_MODELS.md) instead of injecting the refresh token into a sandbox.
 
 ### Secret not appearing in sandbox

@@ -252,7 +252,6 @@ export function EnvironmentForm({
         <AgentHarnessSelector
           value={defaultAgentHarness}
           onChange={setDefaultAgentHarness}
-          inheritLabel="OpenCode (deployment setting)"
           disabled={submitting}
         />
         <p className="text-xs text-muted-foreground mt-1 leading-normal">

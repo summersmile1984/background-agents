@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
 import process from "node:process";
 import tls from "node:tls";
 import { setTimeout } from "node:timers";
 import { pathToFileURL, URL } from "node:url";
+import {
+  createFileBackedDeepSeekKeyManager,
+  createMemoryDeepSeekKeyManager,
+} from "./deepseek-key-manager.mjs";
+import { createRelayAdminAuthenticator } from "./relay-admin-auth.mjs";
 
 const CHATGPT_UPSTREAM_HOST = "chatgpt.com";
 const CHATGPT_UPSTREAM_PREFIX = "/backend-api/codex";
@@ -37,6 +43,16 @@ const forwardedClientHeaders = new Set([
   "x-forwarded-proto",
   "x-real-ip",
 ]);
+
+export function resolveAdminAuthSecret(env) {
+  const direct = env.MODEL_RELAY_ADMIN_AUTH_SECRET?.trim();
+  if (direct) return direct;
+  const file = env.MODEL_RELAY_ADMIN_AUTH_SECRET_FILE?.trim();
+  if (!file) return undefined;
+  const value = readFileSync(file, "utf8").trim();
+  if (!value) throw new Error("MODEL_RELAY_ADMIN_AUTH_SECRET_FILE is empty");
+  return value;
+}
 
 function canonicalDeepSeekPath(protocol, pathname) {
   const path = pathname.startsWith("/v1/") ? pathname.slice(3) : pathname;
@@ -141,16 +157,6 @@ function jsonError(response, statusCode, message) {
   response.end(JSON.stringify({ error: { message } }));
 }
 
-function readDeepSeekApiKey(path) {
-  if (!path) return null;
-  try {
-    const key = fs.readFileSync(path, "utf8").trim();
-    return key || null;
-  } catch {
-    return null;
-  }
-}
-
 function validateControlPlaneUrl(value) {
   if (!value) return null;
   const url = new URL(value);
@@ -158,6 +164,146 @@ function validateControlPlaneUrl(value) {
     throw new Error("MODEL_RELAY_CONTROL_PLANE_URL must be an HTTPS URL without userinfo");
   }
   return url;
+}
+
+function readRequestBody(request, maxBytes = 16 * 1024) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let size = 0;
+    let exceeded = false;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        exceeded = true;
+        chunks.length = 0;
+      } else if (!exceeded) {
+        chunks.push(chunk);
+      }
+    });
+    request.once("end", () => resolve(exceeded ? null : Buffer.concat(chunks)));
+    request.once("error", () => resolve(null));
+  });
+}
+
+export function validateDeepSeekApiKey(apiKey, agent) {
+  return new Promise((resolve) => {
+    if (!apiKey) {
+      resolve({ ok: false, status: 400 });
+      return;
+    }
+    const request = https.request(
+      {
+        protocol: "https:",
+        hostname: DEEPSEEK_UPSTREAM_HOST,
+        port: 443,
+        method: "GET",
+        path: "/models",
+        headers: { authorization: `Bearer ${apiKey}` },
+        agent,
+        timeout: 10_000,
+      },
+      (response) => {
+        response.resume();
+        resolve({
+          ok: Boolean(
+            response.statusCode && response.statusCode >= 200 && response.statusCode < 300
+          ),
+          status: response.statusCode || 502,
+        });
+      }
+    );
+    request.once("timeout", () => request.destroy());
+    request.once("error", () => resolve({ ok: false, status: 502 }));
+    request.end();
+  });
+}
+
+async function handleAdminRequest(
+  request,
+  response,
+  { authenticator, keyManager, validateProviderKey, agent }
+) {
+  const body = await readRequestBody(request);
+  if (!body) {
+    jsonError(response, 413, "request body is too large");
+    return;
+  }
+  const verification = authenticator?.verify({
+    method: request.method || "GET",
+    rawUrl: request.url || "/",
+    headers: request.headers,
+    body,
+  });
+  if (!verification?.ok) {
+    jsonError(response, 401, "unauthorized");
+    return;
+  }
+
+  const pathname = new URL(request.url || "/", "http://relay.invalid").pathname;
+  if (request.method === "GET" && pathname === "/admin/v1/status") {
+    response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "ok", relay: "online", deepseek: keyManager.status() }));
+    return;
+  }
+  if (request.method === "PUT" && pathname === "/admin/v1/providers/deepseek/key") {
+    let parsed;
+    try {
+      parsed = JSON.parse(body.toString("utf8"));
+    } catch {
+      jsonError(response, 400, "invalid JSON body");
+      return;
+    }
+    const apiKey = typeof parsed?.apiKey === "string" ? parsed.apiKey.trim() : "";
+    if (!apiKey) {
+      jsonError(response, 400, "DeepSeek API key is required");
+      return;
+    }
+    const validation = await validateProviderKey(apiKey, agent);
+    if (!validation.ok) {
+      jsonError(
+        response,
+        validation.status === 401 || validation.status === 403 ? 400 : 502,
+        validation.status === 401 || validation.status === 403
+          ? "DeepSeek rejected the credential"
+          : "DeepSeek credential validation is unavailable"
+      );
+      return;
+    }
+    try {
+      const status = keyManager.replace(apiKey);
+      response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "updated", deepseek: status }));
+    } catch {
+      jsonError(response, 500, "Host key storage is unavailable");
+    }
+    return;
+  }
+  if (request.method === "DELETE" && pathname === "/admin/v1/providers/deepseek/key") {
+    try {
+      const status = keyManager.remove();
+      response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json" });
+      response.end(JSON.stringify({ status: "deleted", deepseek: status }));
+    } catch {
+      jsonError(response, 500, "Host key storage is unavailable");
+    }
+    return;
+  }
+  if (request.method === "POST" && pathname === "/admin/v1/providers/deepseek/test") {
+    const apiKey = keyManager.get();
+    if (!apiKey) {
+      jsonError(response, 409, "DeepSeek is not configured");
+      return;
+    }
+    const validation = await validateProviderKey(apiKey, agent);
+    if (!validation.ok) {
+      jsonError(response, 502, "DeepSeek provider is unavailable");
+      return;
+    }
+    response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "ok", deepseek: keyManager.status() }));
+    return;
+  }
+  jsonError(response, 404, "unsupported relay administration path");
 }
 
 function verifySandboxToken(controlPlaneUrl, sessionId, token, agent) {
@@ -221,15 +367,36 @@ function proxyRequest(request, response, route, headers, agent) {
 
 export function createRelayServer({
   deepSeekApiKey,
+  deepSeekKeyManager,
   controlPlaneUrl,
+  adminAuthSecret,
+  validateProviderKey = validateDeepSeekApiKey,
   agent = new https.Agent({ keepAlive: true, maxSockets: 64 }),
 } = {}) {
+  const keyManager = deepSeekKeyManager || createMemoryDeepSeekKeyManager(deepSeekApiKey || null);
+  const adminAuthenticator = adminAuthSecret
+    ? createRelayAdminAuthenticator({ secret: adminAuthSecret })
+    : null;
   const downstreamSockets = new Set();
   const websocketUpstreamSockets = new Set();
   const server = http.createServer(async (request, response) => {
+    if ((request.url || "").startsWith("/admin/")) {
+      if (!adminAuthenticator) {
+        request.resume();
+        jsonError(response, 404, "unsupported model relay path");
+        return;
+      }
+      await handleAdminRequest(request, response, {
+        authenticator: adminAuthenticator,
+        keyManager,
+        validateProviderKey,
+        agent,
+      });
+      return;
+    }
     if (request.url === "/healthz") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ status: "ok", deepseek: Boolean(deepSeekApiKey) }));
+      response.end(JSON.stringify({ status: "ok", deepseek: keyManager.status().configured }));
       return;
     }
 
@@ -241,7 +408,8 @@ export function createRelayServer({
     }
 
     if (route.kind === "deepseek") {
-      if (!deepSeekApiKey) {
+      const currentDeepSeekApiKey = keyManager.get();
+      if (!currentDeepSeekApiKey) {
         request.resume();
         jsonError(response, 503, "DeepSeek relay is not configured");
         return;
@@ -269,7 +437,7 @@ export function createRelayServer({
         upstreamHeaders(request.headers, {
           upstreamHost: route.upstreamHost,
           protocol: route.protocol,
-          providerApiKey: deepSeekApiKey,
+          providerApiKey: currentDeepSeekApiKey,
         }),
         agent
       );
@@ -355,8 +523,12 @@ function startFromEnvironment() {
   }
 
   const controlPlaneUrl = validateControlPlaneUrl(process.env.MODEL_RELAY_CONTROL_PLANE_URL);
-  const deepSeekApiKey = readDeepSeekApiKey(process.env.DEEPSEEK_API_KEY_FILE);
-  const relay = createRelayServer({ deepSeekApiKey, controlPlaneUrl });
+  const deepSeekKeyManager = createFileBackedDeepSeekKeyManager(process.env.DEEPSEEK_API_KEY_FILE);
+  const relay = createRelayServer({
+    deepSeekKeyManager,
+    controlPlaneUrl,
+    adminAuthSecret: resolveAdminAuthSecret(process.env),
+  });
   relay.server.listen(listenPort, listenHost, () => {
     process.stdout.write(
       `Open-Inspect model relay listening on http://${listenHost}:${listenPort}\n`

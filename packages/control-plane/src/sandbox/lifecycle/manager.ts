@@ -183,6 +183,8 @@ export interface SandboxLifecycleConfig {
   heartbeat: HeartbeatConfig;
   connectingTimeout: ConnectingTimeoutConfig;
   controlPlaneUrl: string;
+  /** Public Host relay URL. The control plane injects it as reserved runtime configuration. */
+  modelRelayPublicUrl?: string;
   /** Default model ID used when the session has no model override. */
   model: string;
   /** Session ID for log correlation. Optional — logs will omit sessionId if not provided. */
@@ -227,6 +229,18 @@ function multiRepoSpawnFields(
   return repositories.length > 1 || repositories.some((repository) => repository.baseSha)
     ? { repositories }
     : {};
+}
+
+function withManagedRuntimeEnv(
+  userEnvVars: Record<string, string> | undefined,
+  modelRelayPublicUrl: string | undefined
+): Record<string, string> | undefined {
+  if (!modelRelayPublicUrl) return userEnvVars;
+  return {
+    ...(userEnvVars ?? {}),
+    CODEX_OPENAI_BASE_URL: modelRelayPublicUrl,
+    DEEPSEEK_RELAY_BASE_URL: modelRelayPublicUrl,
+  };
 }
 
 // ==================== MCP Server Lookup ====================
@@ -446,7 +460,10 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
 
       await this.stopPriorProviderSandbox();
 
-      const userEnvVars = await this.storage.getUserEnvVars();
+      const userEnvVars = withManagedRuntimeEnv(
+        await this.storage.getUserEnvVars(),
+        this.config.modelRelayPublicUrl
+      );
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
       const repositories = this.storage.getSessionRepositories();
       const multiRepoFields = multiRepoSpawnFields(repositories);
@@ -770,7 +787,10 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
 
       await this.stopPriorProviderSandbox();
 
-      const userEnvVars = await this.storage.getUserEnvVars();
+      const userEnvVars = withManagedRuntimeEnv(
+        await this.storage.getUserEnvVars(),
+        this.config.modelRelayPublicUrl
+      );
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       const repositories = this.storage.getSessionRepositories();

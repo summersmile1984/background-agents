@@ -109,10 +109,21 @@ it with the provider key read from `DEEPSEEK_API_KEY_FILE`. The provider key nev
 repository image, snapshot, or Cloudflare storage.
 
 The relay binds to `127.0.0.1` by default. Publish it through a controlled HTTPS ingress and set
-`CODEX_OPENAI_BASE_URL` (or the more specific `DEEPSEEK_RELAY_BASE_URL`) to that public URL. Set
-`MODEL_RELAY_CONTROL_PLANE_URL` to the public control-plane HTTPS URL. The example systemd service
-shows the non-secret file path and URL settings; keep the key file outside the repository with mode
-`0600`, and replace the absolute `ExecStart` path before installing the unit.
+`model_relay_public_url` to that public URL. Publish `/admin/v1/*` through a separate restricted
+hostname or route and set `model_relay_admin_url` to it. Set `MODEL_RELAY_CONTROL_PLANE_URL` to the
+public control-plane HTTPS URL. Generate one long random value for `MODEL_RELAY_ADMIN_AUTH_SECRET`
+and configure the same value as the sensitive Terraform `model_relay_admin_auth_secret`. For a Host
+service, prefer writing it to a `0600` file and setting `MODEL_RELAY_ADMIN_AUTH_SECRET_FILE`; a
+direct environment value remains supported. This bootstrap secret is intentionally not editable in
+the web app. The example systemd service shows the non-secret file paths and URL setting; keep both
+files outside the repository with mode `0600`, and replace the absolute `ExecStart` path before
+installing the unit.
+
+The control plane signs every Host management request, and the relay binds the signature to the
+method, path, query, and body while enforcing timestamp and nonce replay limits. In **Settings >
+Harnesses**, a deployment administrator can validate and atomically rotate the DeepSeek key, test
+the provider connection, or remove the key. Candidate keys are checked before activation; a failed
+check does not replace the current key.
 
 The relay is a **host service**, not a sandbox service. Each session sandbox still runs its own
 `sandbox_runtime`, Python WebSocket bridge, and selected harness. Cloudflare remains the control

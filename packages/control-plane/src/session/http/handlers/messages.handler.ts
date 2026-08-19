@@ -5,6 +5,7 @@ import {
   type EnqueuePromptRequest,
 } from "../../enqueue-prompt-contract";
 import type { MessageService } from "../../services/message.service";
+import { AgentRuntimeSelectionError } from "../../../agent-runtime/selection";
 import { parseEventListCursor } from "../../event-cursor";
 import { SessionAttachmentError } from "../../session-attachment-resolver";
 import {
@@ -60,6 +61,9 @@ export function createMessagesHandler(deps: MessagesHandlerDeps): MessagesHandle
             { error: error.message, code: "PROMPT_REQUEST_CONFLICT" },
             { status: 409 }
           );
+        }
+        if (error instanceof AgentRuntimeSelectionError) {
+          return Response.json({ error: error.message, code: error.code }, { status: 409 });
         }
         log.error("handleEnqueuePrompt error", {
           error: error instanceof Error ? error : String(error),

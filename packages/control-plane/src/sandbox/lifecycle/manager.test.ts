@@ -895,6 +895,41 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.createSandbox).toHaveBeenCalledWith(expect.objectContaining({ userEnvVars }));
     });
 
+    it("injects the managed Host relay URL and overrides user-supplied relay values", async () => {
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const storage = createMockStorage(createMockSession(), sandbox, {
+        DATABASE_URL: "postgres://example",
+        CODEX_OPENAI_BASE_URL: "https://untrusted.example.com",
+        DEEPSEEK_RELAY_BASE_URL: "https://untrusted.example.com",
+      });
+      const provider = createMockProvider();
+      const config = {
+        ...createTestConfig(),
+        modelRelayPublicUrl: "https://relay.example.com",
+      };
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        config
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userEnvVars: {
+            DATABASE_URL: "postgres://example",
+            CODEX_OPENAI_BASE_URL: "https://relay.example.com",
+            DEEPSEEK_RELAY_BASE_URL: "https://relay.example.com",
+          },
+        })
+      );
+    });
+
     it("spawns no-repository sessions without repo-only sandbox features", async () => {
       const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
       const storage = createMockStorage(
@@ -3294,6 +3329,41 @@ describe("SandboxLifecycleManager", () => {
       expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({
           sandboxSettings: { tunnelPorts: [3000] },
+        })
+      );
+    });
+
+    it("restoreFromSnapshot() injects the managed Host relay URL", async () => {
+      const sandbox = createMockSandbox({
+        status: "stopped",
+        snapshot_image_id: "img-abc123",
+      });
+      const storage = createMockStorage(createMockSession(), sandbox, {
+        DATABASE_URL: "postgres://example",
+      });
+      const provider = createMockProvider();
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        {
+          ...createTestConfig(),
+          modelRelayPublicUrl: "https://relay.example.com",
+        }
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userEnvVars: {
+            DATABASE_URL: "postgres://example",
+            CODEX_OPENAI_BASE_URL: "https://relay.example.com",
+            DEEPSEEK_RELAY_BASE_URL: "https://relay.example.com",
+          },
         })
       );
     });

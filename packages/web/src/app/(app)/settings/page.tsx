@@ -7,6 +7,7 @@ import { SettingsNav, type SettingsCategory } from "@/components/settings/settin
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { EnvironmentsSettings } from "@/components/settings/environments-settings";
 import { ModelsSettings } from "@/components/settings/models-settings";
+import { HarnessesSettings } from "@/components/settings/harnesses-settings";
 import { DataControlsSettings } from "@/components/settings/data-controls-settings";
 import { KeyboardShortcutsSettings } from "@/components/settings/keyboard-shortcuts-settings";
 import { IntegrationsSettings } from "@/components/settings/integrations-settings";
@@ -25,6 +26,7 @@ const CATEGORY_LABELS: Record<SettingsCategory, string> = {
   secrets: "Secrets",
   environments: "Environments",
   models: "Models",
+  harnesses: "Harnesses",
   images: "Images",
   appearance: "Appearance",
   "keyboard-shortcuts": "Keyboard",
@@ -40,6 +42,7 @@ const VALID_CATEGORIES = new Set<string>([
   "secrets",
   "environments",
   "models",
+  "harnesses",
   "images",
   "appearance",
   "keyboard-shortcuts",
@@ -92,6 +95,7 @@ function SettingsPageContent() {
       {activeCategory === "secrets" && <SecretsSettings />}
       {activeCategory === "environments" && <EnvironmentsSettings />}
       {activeCategory === "models" && <ModelsSettings />}
+      {activeCategory === "harnesses" && <HarnessesSettings />}
       {activeCategory === "images" && repoImagesEnabled && <ImagesSettings />}
       {activeCategory === "appearance" && <AppearanceSettings />}
       {activeCategory === "keyboard-shortcuts" && <KeyboardShortcutsSettings />}

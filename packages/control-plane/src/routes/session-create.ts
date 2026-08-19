@@ -7,11 +7,16 @@ import { applyIdentityEnforcement, resolveCanonicalUserId } from "../auth/identi
 import { resolveEnvironmentTarget, resolveSessionRepositories } from "../repos/resolve";
 import { resolveScmProviderFromEnv } from "../source-control";
 import { EnvironmentStore } from "../db/environments";
+import { AgentRuntimePreferencesStore } from "../db/agent-runtime-preferences";
 import { UserStore } from "../db/user-store";
 import { createLogger } from "../logger";
 import { parseCreateSessionInput } from "../session/create-session-input";
 import { initializeSession, type SessionInitInput } from "../session/initialize";
 import { resolveAgentHarness } from "../session/agent-harness";
+import {
+  AgentRuntimeSelectionError,
+  assertAgentRuntimeSelection,
+} from "../agent-runtime/selection";
 import { resolveGitHubEnrichmentForRequest } from "../session/identity";
 import { resolveSessionScopedSettings } from "../session/integration-settings-resolution";
 import { resolveManagedSkills, SkillResolutionError } from "../session/skill-resolution";
@@ -177,8 +182,27 @@ async function handleCreateSession(
     requested: body.agentHarness,
     environmentId,
     environmentStore: new EnvironmentStore(ctx.db),
+    runtimePreferencesStore: new AgentRuntimePreferencesStore(ctx.db),
     deploymentDefault: env.DEFAULT_AGENT_HARNESS,
   });
+  try {
+    await assertAgentRuntimeSelection({
+      db: ctx.db,
+      env,
+      harness: agentHarness,
+      model,
+      target: {
+        environmentId,
+        repositories,
+        repoId,
+      },
+    });
+  } catch (cause) {
+    if (cause instanceof AgentRuntimeSelectionError) {
+      return json({ error: cause.message, code: cause.code }, 409);
+    }
+    throw cause;
+  }
 
   // Session-scoped integration settings resolve from the primary member (design
   // §6.2). In list mode that is repositories[0]; otherwise the scalar pair — the

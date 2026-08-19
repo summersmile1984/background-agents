@@ -76,6 +76,9 @@ describe("route policy table", () => {
     ["GET", "/sessions/session-1/sandbox-access"],
     ["PATCH", "/sessions/session-1/read-state"],
     ["GET", "/sessions/session-1/skills"],
+    ["GET", "/agent-runtime/readiness"],
+    ["PUT", "/agent-runtime/preferences"],
+    ["PUT", "/agent-runtime/host-relay/deepseek-key"],
   ])("owns the human-user restriction for %s %s", (method, path) => {
     expect(routeFor(method, path)?.authentication.kind).toBe("user");
   });

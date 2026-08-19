@@ -18,7 +18,13 @@ export const SERVICE_SIGNATURE_HEADER = "X-OpenInspect-Service-Signature";
 export const ACTOR_HEADER = "X-OpenInspect-Actor";
 export const SIG1_PREFIX = "sig1";
 
-export const SERVICE_NAMES = ["web", "slack-bot", "github-bot", "linear-bot"] as const;
+export const SERVICE_NAMES = [
+  "web",
+  "slack-bot",
+  "github-bot",
+  "linear-bot",
+  "control-plane",
+] as const;
 export type ServiceName = (typeof SERVICE_NAMES)[number];
 
 export function isServiceName(value: string): value is ServiceName {

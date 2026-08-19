@@ -17,6 +17,7 @@ const SERVICE_SECRET: Record<ServiceName, string> = {
   "slack-bot": "test-service-secret-slack-bot",
   "github-bot": "test-service-secret-github-bot",
   "linear-bot": "test-service-secret-linear-bot",
+  "control-plane": "outbound-only-secret",
 };
 
 async function signedFetch(p: {
@@ -48,7 +49,8 @@ describe("sig1 service-credential authentication", () => {
 
   it("accepts a signed GET from every non-web service", async () => {
     for (const service of Object.keys(SERVICE_SECRET).filter(
-      (candidate): candidate is Exclude<ServiceName, "web"> => candidate !== "web"
+      (candidate): candidate is Exclude<ServiceName, "web" | "control-plane"> =>
+        candidate !== "web" && candidate !== "control-plane"
     )) {
       const response = await signedFetch({
         service,
@@ -224,7 +226,10 @@ describe("sig1 service-credential authentication", () => {
   });
 
   it("requires a user or signed actor before any service can create a session", async () => {
-    for (const service of Object.keys(SERVICE_SECRET) as ServiceName[]) {
+    for (const service of Object.keys(SERVICE_SECRET).filter(
+      (candidate): candidate is Exclude<ServiceName, "control-plane"> =>
+        candidate !== "control-plane"
+    )) {
       const response = await signedFetch({
         service,
         method: "POST",

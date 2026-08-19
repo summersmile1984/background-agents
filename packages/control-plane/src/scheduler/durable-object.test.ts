@@ -41,6 +41,16 @@ vi.mock("../session/skill-resolution", () => ({
   })),
 }));
 
+// Harness readiness has focused unit and integration coverage. Keep the
+// scheduler suite scoped to admission, fan-out, and session launch behavior.
+vi.mock("../agent-runtime/selection", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    assertAgentRuntimeSelection: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 // Must import AFTER vi.mock so the hoisted mock is in place
 const { SchedulerDO } = await import("./durable-object");
 
@@ -176,6 +186,7 @@ function createMockSessionStub(): DurableObjectStub {
 function createEmptyDbMock(): D1Database {
   return {
     prepare: vi.fn(() => ({
+      first: vi.fn(async () => null),
       bind: vi.fn(() => ({
         first: vi.fn(async () => null),
       })),
@@ -189,6 +200,7 @@ function createIntegrationSettingsDbMock(
 ): D1Database {
   return {
     prepare: vi.fn((query: string) => ({
+      first: vi.fn(async () => null),
       bind: vi.fn((integrationId: string, repo?: string) => ({
         first: vi.fn(async () => {
           if (query.includes("integration_settings")) {

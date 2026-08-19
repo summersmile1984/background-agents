@@ -203,7 +203,9 @@ export function useSessionRename({
             owner.confirmedTitle = title;
             await applyTitleToSessionCaches(mutate, sessionId, title).catch(() => undefined);
             publishOptimisticTitle(owner, undefined);
-            revalidateSessionCaches(mutate);
+            // The authoritative channel already confirmed this title. An
+            // immediate list revalidation can still return the older title
+            // and overwrite the confirmed cache entry.
             deleteIdleOwner(sessionId, owner);
             return true;
           }

@@ -14,6 +14,8 @@ import type { ParticipantService } from "./participant-service";
 import type { CallbackNotificationService } from "./callback-notification-service";
 import { createEarliestAlarmScheduler } from "./alarm/scheduler";
 import type { SessionStatusService } from "./session-status-service";
+import { AgentRuntimeSelectionError } from "../agent-runtime/selection";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 function createParticipant(overrides: Partial<ParticipantRow> = {}): ParticipantRow {
   return {
@@ -119,7 +121,9 @@ it("creates a canonical SHA-256 web prompt fingerprint", async () => {
   ).resolves.toBe(fingerprint);
 });
 
-function buildQueue() {
+function buildQueue(
+  validateAgentRuntimeSelection?: (harness: AgentHarness, model: string) => Promise<void>
+) {
   const log = {
     debug: vi.fn(),
     info: vi.fn(),
@@ -216,7 +220,8 @@ function buildQueue() {
     null,
     "github",
     createEarliestAlarmScheduler({ getAlarm, setAlarm }),
-    EXECUTION_TIMEOUT_MS
+    EXECUTION_TIMEOUT_MS,
+    validateAgentRuntimeSelection
   );
 
   return {
@@ -355,6 +360,30 @@ describe("SessionMessageQueue", () => {
     await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), { content: "hello" });
 
     expect(h.sessionStatus.transition).toHaveBeenCalledWith("active");
+  });
+
+  it("rejects a live model override when its harness route is not ready", async () => {
+    const validate = vi.fn(async () => {
+      throw new AgentRuntimeSelectionError("CREDENTIAL_MISSING", "A credential is required");
+    });
+    const h = buildQueue(validate);
+
+    await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), {
+      clientRequestId: "request-not-ready",
+      content: "hello",
+      model: "openai/gpt-5.3-codex",
+    });
+
+    expect(validate).toHaveBeenCalledWith("opencode", "openai/gpt-5.3-codex");
+    expect(h.repository.createMessageWithAttachments).not.toHaveBeenCalled();
+    expect(h.wsManager.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "error",
+        code: "CREDENTIAL_MISSING",
+        clientRequestId: "request-not-ready",
+      })
+    );
   });
 
   it("deduplicates a correlated web prompt before attachment lookup or mutation", async () => {

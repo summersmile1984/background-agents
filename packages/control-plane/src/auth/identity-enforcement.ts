@@ -120,6 +120,12 @@ export function deriveIdentity(principal: Principal | undefined): DerivedIdentit
         // calls carry a web session token and resolve as user principals.
         return { participantUserId: null, canonicalUserId: null, actor: null, spawnSource: "user" };
       }
+      if (principal.service === "control-plane") {
+        // This service name is reserved for outbound Host administration and
+        // has no inbound verification key. Keep the exhaustive type boundary
+        // identityless even if a synthetic principal reaches a unit test.
+        return { participantUserId: null, canonicalUserId: null, actor: null, spawnSource: null };
+      }
       return {
         participantUserId: principal.actor?.participantUserId ?? null,
         canonicalUserId: principal.actor?.canonicalUserId ?? null,

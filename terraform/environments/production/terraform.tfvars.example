@@ -266,9 +266,17 @@ nextauth_secret = ""
 # - "e2b": direct E2B REST API integration with pause/resume
 sandbox_provider = "modal"
 
-# Default coding-agent harness. A session or Environment can override this.
-# "deepseek" is reserved for the experimental driver and is not shown in the web picker.
+# Default coding-agent harness. The Settings UI can override this in D1 without a redeploy.
 default_agent_harness = "opencode"
+# Must match the harness CLIs actually installed in the sandbox image.
+sandbox_runtime_harnesses = "opencode,codex,claude,deepseek"
+
+# Optional Host model relay. The public URL is used by sandboxes; the admin URL
+# should be a restricted Cloudflare Tunnel hostname or route. The auth secret is
+# a bootstrap trust root and intentionally cannot be changed from the web UI.
+model_relay_public_url       = ""
+model_relay_admin_url        = ""
+model_relay_admin_auth_secret = ""
 
 # Platform for the web app deployment
 # - "vercel": deploy the Next.js app to Vercel (requires vercel_api_token + vercel_team_id)
@@ -359,6 +367,8 @@ enable_service_bindings = false
 
 # Comma-separated list of GitHub usernames allowed to sign in
 allowed_users = ""
+# Optional. When empty, exact allowed_users/allowed_emails entries are deployment admins.
+# deployment_admin_identities = "github:octocat,email:admin@example.com"
 
 # Comma-separated list of email domains allowed to sign in (matches any
 # provider's verified email). Example: "example.com,corp.io"

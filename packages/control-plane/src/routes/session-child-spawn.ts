@@ -14,6 +14,11 @@ import {
   VALID_MODELS,
 } from "@open-inspect/shared/models";
 import { generateId } from "../auth/crypto";
+import {
+  AgentRuntimeSelectionError,
+  assertAgentRuntimeSelection,
+} from "../agent-runtime/selection";
+import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { getEffectiveEnabledModels } from "../db/model-preferences";
 import { SessionIndexStore } from "../db/session-index";
 import { createLogger } from "../logger";
@@ -159,6 +164,24 @@ async function handleSpawnChild(
     return error(`Model "${body.model}" is not enabled`, 400);
   }
   const model = resolveEnabledModel({ model: requestedModel, enabledModels });
+  const agentHarness = spawnContext.agentHarness ?? DEFAULT_AGENT_HARNESS;
+  try {
+    await assertAgentRuntimeSelection({
+      db: ctx.db,
+      env,
+      harness: agentHarness,
+      model,
+      target: {
+        environmentId: parentEnvironmentId,
+        repoId: spawnContext.repoId,
+      },
+    });
+  } catch (cause) {
+    if (cause instanceof AgentRuntimeSelectionError) {
+      return json({ error: cause.message, code: cause.code }, 409);
+    }
+    throw cause;
+  }
   if (body.reasoningEffort !== undefined && !isValidReasoningEffort(model, body.reasoningEffort)) {
     const validEfforts = getReasoningConfig(model)?.efforts;
     const suffix = validEfforts?.length
@@ -210,7 +233,7 @@ async function handleSpawnChild(
     title: body.title,
     model,
     reasoningEffort,
-    agentHarness: spawnContext.agentHarness,
+    agentHarness,
     participantUserId: spawnContext.promptAuthor.userId,
     platformUserId: spawnContext.promptAuthor.canonicalUserId ?? null,
     scmLogin: spawnContext.promptAuthor.scmLogin,

@@ -524,6 +524,9 @@ modal_environment_web_suffix = "your-modal-web-suffix" # Lowercase letters, digi
 # sandbox_provider          = "modal"
 # Harness for new sessions: "opencode" (initial setting), "codex", "claude", or "deepseek"
 # default_agent_harness     = "opencode"
+# Must match the harness CLIs installed in the sandbox image
+# sandbox_runtime_harnesses = "opencode,codex,claude,deepseek"
+# See docs/HARNESSES.md for optional Host relay and administrator settings.
 
 # Daytona (only required when sandbox_provider = "daytona")
 # daytona_api_url           = "https://app.daytona.io/api"
@@ -965,7 +968,12 @@ Go to your fork's Settings → Secrets and variables → Actions, and add:
 | `MODAL_ENVIRONMENT`              | Modal environment name (defaults to `main`)                                                 |
 | `MODAL_ENVIRONMENT_WEB_SUFFIX`   | Modal environment web suffix for endpoint URLs; lowercase letters, digits, dashes, or empty |
 | `SANDBOX_PROVIDER`               | `modal`, `daytona`, or `vercel`                                                             |
-| `DEFAULT_AGENT_HARNESS`          | Optional default: `opencode`, `codex`, or `claude`                                          |
+| `DEFAULT_AGENT_HARNESS`          | Initial default: `opencode`, `codex`, `claude`, or `deepseek`                               |
+| `SANDBOX_RUNTIME_HARNESSES`      | Optional image capability list; defaults to all four maintained Harnesses                   |
+| `DEPLOYMENT_ADMIN_IDENTITIES`    | Optional exact `user:`, `github:`, or `email:` identities allowed to manage shared settings |
+| `MODEL_RELAY_PUBLIC_URL`         | Optional public Host relay HTTPS URL injected into sandboxes                                |
+| `MODEL_RELAY_ADMIN_URL`          | Optional restricted Host relay management HTTPS URL                                         |
+| `MODEL_RELAY_ADMIN_AUTH_SECRET`  | Optional Host/control-plane HMAC bootstrap secret                                           |
 | `DAYTONA_API_URL`                | Daytona API URL _(only if `sandbox_provider = "daytona"`)_                                  |
 | `DAYTONA_API_KEY`                | Daytona API key _(only if `sandbox_provider = "daytona"`)_                                  |
 | `DAYTONA_BASE_SNAPSHOT`          | Daytona base snapshot name _(only if `sandbox_provider = "daytona"`)_                       |
