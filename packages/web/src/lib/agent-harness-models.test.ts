@@ -3,6 +3,7 @@ import type { ModelCategory } from "@open-inspect/shared/models";
 import {
   getAgentHarnessModelOptions,
   getModelIds,
+  getSessionAgentHarnessModelOptions,
   isModelCompatibleWithHarness,
 } from "./agent-harness-models";
 
@@ -44,5 +45,24 @@ describe("agent harness model compatibility", () => {
     const deepseekModels = getModelIds(getAgentHarnessModelOptions(enabledOptions, "deepseek"));
     expect(deepseekModels.length).toBeGreaterThan(0);
     expect(deepseekModels.every((model) => model.startsWith("deepseek/"))).toBe(true);
+  });
+
+  it("locks native follow-up models to the provider selected at session creation", () => {
+    expect(
+      getModelIds(
+        getSessionAgentHarnessModelOptions(enabledOptions, "codex", "deepseek/deepseek-v4-flash")
+      )
+    ).toEqual(["deepseek/deepseek-v4-flash"]);
+    expect(
+      getModelIds(getSessionAgentHarnessModelOptions(enabledOptions, "codex", "openai/gpt-5.4"))
+    ).toEqual(["openai/gpt-5.4"]);
+    expect(
+      getModelIds(getSessionAgentHarnessModelOptions(enabledOptions, "opencode", "openai/gpt-5.4"))
+    ).toEqual([
+      "openai/gpt-5.4",
+      "anthropic/claude-sonnet-4-6",
+      "deepseek/deepseek-v4-flash",
+      "xiaomi/mimo-v2.5",
+    ]);
   });
 });

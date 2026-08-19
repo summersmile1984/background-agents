@@ -380,7 +380,7 @@ export function HarnessesSettings() {
           ? "DeepSeek key validated and rotated on the Host."
           : action === "delete"
             ? "DeepSeek key removed from the Host."
-            : "DeepSeek provider connection succeeded."
+            : "DeepSeek inference test succeeded."
       );
     } catch (hostError) {
       toast.error(hostError instanceof Error ? hostError.message : "Host relay operation failed");
@@ -558,7 +558,7 @@ export function HarnessesSettings() {
             }
             onClick={() => void runHostAction("test")}
           >
-            {hostAction === "test" ? "Testing..." : "Test provider"}
+            {hostAction === "test" ? "Testing inference..." : "Test inference"}
           </Button>
           {data.hostRelay?.deepseek.configured ? (
             <Button
