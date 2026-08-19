@@ -23,6 +23,16 @@ vi.mock("./db/model-preferences", () => ({
   getEffectiveEnabledModels: vi.fn(),
 }));
 
+// Harness readiness has focused unit and integration coverage. Keep these
+// child-spawn tests scoped to inheritance, admission, and prompt enqueueing.
+vi.mock("./agent-runtime/selection", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    assertAgentRuntimeSelection: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 vi.mock("./session/integration-settings-resolution", () => integrationSettingsMocks);
 
 describe("handleSpawnChild prompt enqueue handling", () => {

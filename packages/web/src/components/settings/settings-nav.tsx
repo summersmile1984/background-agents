@@ -34,6 +34,11 @@ const NAV_ITEMS = [
     icon: ModelIcon,
   },
   {
+    id: "harnesses",
+    label: "Harnesses",
+    icon: TerminalIcon,
+  },
+  {
     id: "images",
     label: "Images",
     icon: BoxIcon,

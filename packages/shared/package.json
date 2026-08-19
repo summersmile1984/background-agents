@@ -62,6 +62,10 @@
       "import": "./dist/types/agent-harness.js",
       "types": "./dist/types/agent-harness.d.ts"
     },
+    "./types/agent-runtime": {
+      "import": "./dist/types/agent-runtime.js",
+      "types": "./dist/types/agent-runtime.d.ts"
+    },
     "./types/environments": {
       "import": "./dist/types/environments.js",
       "types": "./dist/types/environments.d.ts"

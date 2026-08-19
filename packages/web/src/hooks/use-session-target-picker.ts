@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { parseRepositoryFullName } from "@open-inspect/shared/types/repositories";
 import type { Environment } from "@open-inspect/shared/types/environments";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { ImageBuildStatus } from "@open-inspect/shared/types/image-builds";
 import type { ComboboxGroup, ComboboxOption } from "@/components/ui/combobox";
 import { useBranches } from "@/hooks/use-branches";
@@ -121,6 +122,8 @@ export interface SessionTargetSelection {
   loadingRepos: boolean;
   /** The selected repository's metadata when the target is a single repo. */
   selectedRepo: Repo | undefined;
+  /** Harness inherited from the selected environment, before the deployment default. */
+  targetDefaultAgentHarness: AgentHarness | null;
   isLaunchable: boolean;
   /** Selection identity for the sandbox-warming config check. */
   configKey: string;
@@ -297,6 +300,7 @@ export function useSessionTargetPicker(): SessionTargetSelection {
     repos,
     loadingRepos,
     selectedRepo,
+    targetDefaultAgentHarness: selectedEnvironment?.defaultAgentHarness ?? null,
     isLaunchable: isSessionTargetLaunchable(sessionTarget),
     configKey: getTargetConfigKey(sessionTarget),
     buildRequestFields,

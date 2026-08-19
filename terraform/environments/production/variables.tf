@@ -580,6 +580,49 @@ variable "default_agent_harness" {
   }
 }
 
+variable "sandbox_runtime_harnesses" {
+  description = "Comma-separated agent harnesses installed in the sandbox image; exposed to readiness and server-side preflight"
+  type        = string
+  default     = "opencode,codex,claude,deepseek"
+
+  validation {
+    condition = trimspace(var.sandbox_runtime_harnesses) != "" && alltrue([
+      for harness in split(",", var.sandbox_runtime_harnesses) :
+      contains(["opencode", "codex", "claude", "deepseek"], trimspace(harness))
+    ])
+    error_message = "sandbox_runtime_harnesses must be a non-empty comma-separated list of opencode, codex, claude, and deepseek."
+  }
+}
+
+variable "model_relay_public_url" {
+  description = "Public HTTPS URL used by sandboxes for ChatGPT and DeepSeek model relay traffic"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.model_relay_public_url) == "" || can(regex("^https://[^/?#]+(/[^?#]*)?$", trimspace(var.model_relay_public_url)))
+    error_message = "model_relay_public_url must be empty or an HTTPS URL without query or fragment."
+  }
+}
+
+variable "model_relay_admin_url" {
+  description = "Restricted HTTPS URL used by the control plane to manage and inspect the Host model relay"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.model_relay_admin_url) == "" || can(regex("^https://[^/?#]+(/[^?#]*)?$", trimspace(var.model_relay_admin_url)))
+    error_message = "model_relay_admin_url must be empty or an HTTPS URL without query or fragment."
+  }
+}
+
+variable "model_relay_admin_auth_secret" {
+  description = "Bootstrap sig1 secret shared by the control plane and Host model relay management endpoint"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "sandbox_inactivity_timeout_ms" {
   description = "Milliseconds of sandbox inactivity before OpenInspect snapshots and stops the sandbox when no clients are connected."
   type        = number
@@ -692,6 +735,12 @@ variable "allowed_emails" {
 
 variable "allowed_github_orgs" {
   description = "Comma-separated list of GitHub organization logins whose active members are allowed to sign in. The signing-in user's OAuth token is checked against GitHub's membership API at sign-in (read:org is requested only when this is set) and requires GitHub App Organization permissions: Members read-only. Leave empty only when another allowlist is set or unsafe_allow_all_users is true."
+  type        = string
+  default     = ""
+}
+
+variable "deployment_admin_identities" {
+  description = "Comma-separated deployment administrators as user:<canonical-id>, github:<login>, or email:<verified-address>. When empty, exact allowed_users and allowed_emails entries are administrators; org/domain/open admission never grants admin rights."
   type        = string
   default     = ""
 }

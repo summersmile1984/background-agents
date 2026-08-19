@@ -72,10 +72,15 @@ export interface Env {
   ALLOWED_EMAIL_DOMAINS?: string;
   ALLOWED_EMAILS?: string;
   ALLOWED_GITHUB_ORGS?: string;
+  DEPLOYMENT_ADMIN_IDENTITIES?: string; // comma-separated user:<id>, github:<login>, or email:<address>
   UNSAFE_ALLOW_ALL_USERS?: string;
   CF_ACCOUNT_ID?: string; // Cloudflare account ID
   SANDBOX_PROVIDER?: string; // "modal" (default), "daytona", "vercel", "opencomputer", or "e2b"
   DEFAULT_AGENT_HARNESS?: string; // opencode (default), codex, claude, or deepseek
+  SANDBOX_RUNTIME_HARNESSES?: string; // optional comma-separated capability manifest
+  MODEL_RELAY_PUBLIC_URL?: string; // public HTTPS relay URL injected into sandboxes
+  MODEL_RELAY_ADMIN_URL?: string; // restricted Host relay management HTTPS URL
+  MODEL_RELAY_ADMIN_AUTH_SECRET?: string; // sig1 bootstrap secret shared only with the Host
   MODAL_WORKSPACE?: string; // Modal workspace name
   MODAL_ENVIRONMENT?: string; // Modal environment name for dashboard URLs
   MODAL_ENVIRONMENT_WEB_SUFFIX?: string; // Modal environment web suffix for endpoint URLs

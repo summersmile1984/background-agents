@@ -19,5 +19,9 @@ export function serviceAuthSecret(env: ServiceKeyEnv, service: ServiceName): str
       return env.SERVICE_AUTH_SECRET_GITHUB_BOT;
     case "linear-bot":
       return env.SERVICE_AUTH_SECRET_LINEAR_BOT;
+    case "control-plane":
+      // Reserved for control-plane → Host calls. The control plane never
+      // accepts itself as an inbound service principal.
+      return undefined;
   }
 }

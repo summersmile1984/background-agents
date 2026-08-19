@@ -65,6 +65,8 @@ import type { RequestContext } from "../routes/shared";
 import { deliverWithRetry } from "../session/callback-delivery";
 import { resolveAgentHarness } from "../session/agent-harness";
 import { EnvironmentStore } from "../db/environments";
+import { AgentRuntimePreferencesStore } from "../db/agent-runtime-preferences";
+import { assertAgentRuntimeSelection } from "../agent-runtime/selection";
 
 /** Max automations to process per tick (backpressure). */
 const MAX_PER_TICK = 25;
@@ -1378,7 +1380,19 @@ export class SchedulerDO extends DurableObject<Env> {
       requested: automation.agent_harness ?? undefined,
       environmentId: target.environmentId,
       environmentStore: new EnvironmentStore(this.db),
+      runtimePreferencesStore: new AgentRuntimePreferencesStore(this.db),
       deploymentDefault: this.env.DEFAULT_AGENT_HARNESS,
+    });
+    await assertAgentRuntimeSelection({
+      db: this.db,
+      env: this.env,
+      harness: agentHarness,
+      model: automation.model,
+      target: {
+        environmentId: target.environmentId,
+        repositories: target.repositories,
+        repoId: target.repoId,
+      },
     });
 
     await initializeSession(

@@ -88,12 +88,16 @@ module "control_plane_worker" {
       { name = "ALLOWED_EMAIL_DOMAINS", value = var.allowed_email_domains },
       { name = "ALLOWED_EMAILS", value = var.allowed_emails },
       { name = "ALLOWED_GITHUB_ORGS", value = var.allowed_github_orgs },
+      { name = "DEPLOYMENT_ADMIN_IDENTITIES", value = var.deployment_admin_identities },
       { name = "UNSAFE_ALLOW_ALL_USERS", value = tostring(var.unsafe_allow_all_users) },
       { name = "WORKER_URL", value = local.control_plane_url },
       { name = "DEPLOYMENT_NAME", value = var.deployment_name },
       { name = "APP_NAME", value = var.app_name },
       { name = "SANDBOX_PROVIDER", value = var.sandbox_provider },
       { name = "DEFAULT_AGENT_HARNESS", value = var.default_agent_harness },
+      { name = "SANDBOX_RUNTIME_HARNESSES", value = var.sandbox_runtime_harnesses },
+      { name = "MODEL_RELAY_PUBLIC_URL", value = var.model_relay_public_url },
+      { name = "MODEL_RELAY_ADMIN_URL", value = var.model_relay_admin_url },
       { name = "SANDBOX_INACTIVITY_TIMEOUT_MS", value = tostring(var.sandbox_inactivity_timeout_ms) },
     ],
     local.github_oauth_enabled ? [
@@ -195,6 +199,9 @@ module "control_plane_worker" {
     ] : [],
     local.use_e2b_backend && trimspace(var.xiaomi_api_key) != "" ? [
       { name = "XIAOMI_API_KEY", value = var.xiaomi_api_key },
+    ] : [],
+    trimspace(var.model_relay_admin_auth_secret) != "" ? [
+      { name = "MODEL_RELAY_ADMIN_AUTH_SECRET", value = var.model_relay_admin_auth_secret },
     ] : [],
     # Slack bot token enables the agent-initiated `slack-notify` endpoint.
     # Shares the variable with the slack-bot worker; bound here so the same

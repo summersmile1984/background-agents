@@ -34,6 +34,7 @@ import { integrationSettingsRoutes } from "./routes/integration-settings";
 import { commitSigningRoutes } from "./routes/commit-signing";
 import { scmSettingsRoutes } from "./routes/scm-settings";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
+import { agentRuntimeRoutes } from "./routes/agent-runtime";
 import { reposRoutes } from "./routes/repos";
 import { secretsRoutes } from "./routes/secrets";
 import { environmentRoutes } from "./routes/environments";
@@ -301,6 +302,9 @@ export const routes: Route[] = [
 
   // Model preferences
   ...modelPreferencesRoutes,
+
+  // Agent harness defaults, credentials, and readiness
+  ...agentRuntimeRoutes,
 
   // Integration settings
   ...integrationSettingsRoutes,

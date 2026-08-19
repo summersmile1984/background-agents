@@ -50,4 +50,5 @@ export const ASSERTION_RIGHTS: Record<ServiceName, ActorNamespace | null> = {
   "slack-bot": "slack",
   "github-bot": "github",
   "linear-bot": "linear",
+  "control-plane": null,
 };

@@ -25,6 +25,7 @@ const SERVICE_SECRET: Record<ServiceName, string> = {
   "slack-bot": SECRETS.SERVICE_AUTH_SECRET_SLACK_BOT,
   "github-bot": SECRETS.SERVICE_AUTH_SECRET_GITHUB_BOT,
   "linear-bot": SECRETS.SERVICE_AUTH_SECRET_LINEAR_BOT,
+  "control-plane": "outbound-only-secret",
 };
 
 function createCtx(identityRow: Record<string, unknown> | null = null): RequestContext {
@@ -95,11 +96,20 @@ describe("authenticate — service credentials", () => {
   });
 
   it("accepts every registered service with its own secret", async () => {
-    for (const service of Object.keys(SERVICE_SECRET) as ServiceName[]) {
+    for (const service of Object.keys(SERVICE_SECRET).filter(
+      (candidate): candidate is Exclude<ServiceName, "control-plane"> =>
+        candidate !== "control-plane"
+    )) {
       const request = await signedRequest({ service, body: "{}" });
       const result = await authenticate(request, createEnv(), createCtx());
       expect(isAuthError(result), service).toBe(false);
     }
+  });
+
+  it("never accepts the outbound-only control-plane service name", async () => {
+    const request = await signedRequest({ service: "control-plane", body: "{}" });
+    const result = await authenticate(request, createEnv(), createCtx());
+    expect(isAuthError(result)).toBe(true);
   });
 
   it("passes bodyless requests through without rebuilding", async () => {

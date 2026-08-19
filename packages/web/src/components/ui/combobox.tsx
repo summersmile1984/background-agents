@@ -7,6 +7,7 @@ export interface ComboboxOption<T = string> {
   value: T;
   label: string;
   description?: string;
+  disabled?: boolean;
 }
 
 export interface ComboboxGroup<T = string> {
@@ -32,6 +33,15 @@ function defaultFilter<T>(option: ComboboxOption<T>, query: string): boolean {
     option.label.toLowerCase().includes(query) ||
     (option.description?.toLowerCase().includes(query) ?? false)
   );
+}
+
+function findEnabledIndex<T>(options: ComboboxOption<T>[], start: number, step: 1 | -1): number {
+  if (options.length === 0) return -1;
+  for (let offset = 0; offset < options.length; offset += 1) {
+    const index = (start + step * offset + options.length) % options.length;
+    if (!options[index].disabled) return index;
+  }
+  return -1;
 }
 
 interface ComboboxProps<T = string> {
@@ -163,6 +173,7 @@ export function Combobox<T = string>({
   const flatOptions = flattenOptions(displayItems);
 
   const hasResults = flatOptions.length > 0;
+  const firstEnabledIndex = findEnabledIndex(flatOptions, 0, 1);
 
   // Reset active index when search query changes (not on every render).
   // Depends on normalizedQuery (a stable string), NOT flatOptions (unstable array ref).
@@ -171,8 +182,8 @@ export function Combobox<T = string>({
       setActiveIndex(-1);
       return;
     }
-    setActiveIndex(flatOptions.length > 0 ? 0 : -1);
-  }, [normalizedQuery, open, flatOptions.length]);
+    setActiveIndex(firstEnabledIndex);
+  }, [firstEnabledIndex, normalizedQuery, open]);
 
   // Set initial active index to the selected value when opening.
   // Note: flatOptions is an unstable dependency (new array each render), but the
@@ -199,10 +210,11 @@ export function Combobox<T = string>({
 
   const handleSelect = useCallback(
     (optionValue: T) => {
+      if (flatOptions.find((option) => option.value === optionValue)?.disabled) return;
       onChange(optionValue);
       setOpen(false);
     },
-    [onChange]
+    [flatOptions, onChange]
   );
 
   const handleKeyDown = useCallback(
@@ -219,23 +231,25 @@ export function Combobox<T = string>({
         case "ArrowDown": {
           e.preventDefault();
           if (flatOptions.length === 0) return;
-          setActiveIndex((prev) => (prev + 1) % flatOptions.length);
+          setActiveIndex((prev) => findEnabledIndex(flatOptions, prev < 0 ? 0 : prev + 1, 1));
           break;
         }
         case "ArrowUp": {
           e.preventDefault();
           if (flatOptions.length === 0) return;
-          setActiveIndex((prev) => (prev <= 0 ? flatOptions.length - 1 : prev - 1));
+          setActiveIndex((prev) =>
+            findEnabledIndex(flatOptions, prev < 0 ? flatOptions.length - 1 : prev - 1, -1)
+          );
           break;
         }
         case "Home": {
           e.preventDefault();
-          if (flatOptions.length > 0) setActiveIndex(0);
+          setActiveIndex(findEnabledIndex(flatOptions, 0, 1));
           break;
         }
         case "End": {
           e.preventDefault();
-          if (flatOptions.length > 0) setActiveIndex(flatOptions.length - 1);
+          setActiveIndex(findEnabledIndex(flatOptions, flatOptions.length - 1, -1));
           break;
         }
         case "Enter": {
@@ -398,10 +412,12 @@ function OptionButton<T>({
       id={id}
       role="option"
       aria-selected={isSelected}
+      aria-disabled={option.disabled || undefined}
+      disabled={option.disabled}
       onClick={onSelect}
       onMouseEnter={onMouseEnter}
       data-option-index={dataIndex}
-      className={`w-full flex items-center justify-between px-3 py-2 text-sm transition ${
+      className={`w-full flex items-center justify-between px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
         isActive ? "bg-muted" : ""
       } ${isSelected ? "text-foreground" : "text-muted-foreground"}`}
     >

@@ -22,6 +22,7 @@ import {
 } from "@open-inspect/shared/models";
 import { resolveModelPreference, type ModelPreference } from "@/lib/model-selection";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
+import { useAgentRuntimeReadiness } from "@/hooks/use-agent-runtime";
 import { useAttachmentDropZone } from "@/hooks/use-attachment-drop-zone";
 import {
   ATTACHMENT_ACCEPT,
@@ -48,7 +49,7 @@ import {
 import type { SessionTargetRequestFields } from "@/lib/session-target";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
-import { AgentHarnessSelector } from "@/components/agent-harness-selector";
+import { AgentHarnessSelector, getAgentHarnessLabel } from "@/components/agent-harness-selector";
 import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
@@ -83,7 +84,7 @@ export default function Home() {
   });
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [prompt, setPrompt] = useState("");
-  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>("opencode");
+  const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(null);
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
   const skillSelectionKey =
     skillSelection.mode === "profile" ? `profile:${skillSelection.profileId}` : skillSelection.mode;
@@ -93,6 +94,7 @@ export default function Home() {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
+  const sessionCreationErrorRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const submitInFlightRef = useRef(false);
   // Keyed by the picker's configKey so environment/ad-hoc selections
@@ -107,7 +109,16 @@ export default function Home() {
   } | null>(null);
   const hasHydratedModelPreferencesRef = useRef(false);
   const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
-  const harnessModelOptions = getAgentHarnessModelOptions(enabledModelOptions, agentHarness);
+  const { data: agentRuntime } = useAgentRuntimeReadiness();
+  const effectiveAgentHarness =
+    agentHarness ??
+    picker.targetDefaultAgentHarness ??
+    agentRuntime?.preferences.defaultAgentHarness ??
+    "opencode";
+  const harnessModelOptions = getAgentHarnessModelOptions(
+    enabledModelOptions,
+    effectiveAgentHarness
+  );
   const harnessModelIds = getModelIds(harnessModelOptions);
   const currentSkillPreviewTarget = session ? skillPreviewTarget(buildRequestFields()) : null;
   const {
@@ -143,6 +154,7 @@ export default function Home() {
     setPendingSessionId(null);
     setIsCreatingSession(false);
     sessionCreationPromise.current = null;
+    sessionCreationErrorRef.current = null;
     pendingConfigRef.current = null;
   }, [
     sessionTarget,
@@ -161,6 +173,7 @@ export default function Home() {
     if (!targetRequestFields) return null;
 
     setIsCreatingSession(true);
+    sessionCreationErrorRef.current = null;
     const currentConfig = {
       target: configKey,
       model: selectedModel,
@@ -204,12 +217,37 @@ export default function Home() {
           }
           return null;
         }
+        let message = "Failed to create session";
+        try {
+          const data = (await res.json()) as { error?: unknown; code?: unknown };
+          if (typeof data.error === "string" && data.error) message = data.error;
+          if (
+            typeof data.code === "string" &&
+            [
+              "HARNESS_DISABLED",
+              "RUNTIME_UNAVAILABLE",
+              "MODEL_INCOMPATIBLE",
+              "CREDENTIAL_MISSING",
+              "CREDENTIAL_EXPIRED",
+              "RELAY_UNAVAILABLE",
+              "PROVIDER_UNAVAILABLE",
+            ].includes(data.code)
+          ) {
+            message += ". Check Settings → Harnesses.";
+          }
+        } catch {
+          // Keep the stable fallback for non-JSON responses.
+        }
+        sessionCreationErrorRef.current = message;
+        setError(message);
         return null;
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           return null;
         }
         console.error("Failed to create session for warming:", error);
+        sessionCreationErrorRef.current = "Failed to create session";
+        setError("Failed to create session");
         return null;
       } finally {
         if (abortControllerRef.current === abortController) {
@@ -307,7 +345,7 @@ export default function Home() {
       }
 
       if (!sessionId) {
-        setError("Failed to create session");
+        setError(sessionCreationErrorRef.current ?? "Failed to create session");
         return;
       }
 
@@ -378,6 +416,7 @@ export default function Home() {
       skillPreviewLoading={skillPreviewLoading}
       skillSuggestions={skillSuggestions}
       agentHarness={agentHarness}
+      effectiveAgentHarness={effectiveAgentHarness}
       setAgentHarness={setAgentHarness}
     />
   );
@@ -405,6 +444,7 @@ function HomeContent({
   skillPreviewLoading,
   skillSuggestions,
   agentHarness,
+  effectiveAgentHarness,
   setAgentHarness,
 }: {
   isAuthenticated: boolean;
@@ -434,6 +474,7 @@ function HomeContent({
   skillPreviewLoading: boolean;
   skillSuggestions: PromptSkillSuggestionSource;
   agentHarness: AgentHarness | null;
+  effectiveAgentHarness: AgentHarness;
   setAgentHarness: (value: AgentHarness | null) => void;
 }) {
   const { isOpen } = useSidebarContext();
@@ -612,8 +653,8 @@ function HomeContent({
 
                     <AgentHarnessSelector
                       value={agentHarness}
-                      onChange={(value) => setAgentHarness(value ?? "opencode")}
-                      allowInherit={false}
+                      onChange={setAgentHarness}
+                      inheritLabel={`Target default (${getAgentHarnessLabel(effectiveAgentHarness)})`}
                       showPrefix
                       disabled={creating}
                     />

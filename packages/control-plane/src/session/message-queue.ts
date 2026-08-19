@@ -13,7 +13,9 @@ import {
 } from "@open-inspect/shared/models";
 import type { SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
 import type { MessageSource } from "@open-inspect/shared/types/sessions";
+import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { MAX_UNFINISHED_PROMPTS } from "@open-inspect/shared/types/prompts";
+import { AgentRuntimeSelectionError } from "../agent-runtime/selection";
 import type { ClientInfo } from "../types";
 import type { SourceControlProviderName } from "../source-control";
 import type { SandboxLifecycle } from "../sandbox/lifecycle/manager";
@@ -161,7 +163,11 @@ export class SessionMessageQueue {
     private readonly sessionIndex: SessionIndexStore | null,
     private readonly scmProvider: SourceControlProviderName,
     private readonly alarmScheduler: AlarmScheduler,
-    private readonly executionTimeoutMs: number
+    private readonly executionTimeoutMs: number,
+    private readonly validateAgentRuntimeSelection?: (
+      harness: AgentHarness,
+      model: string
+    ) => Promise<void>
   ) {}
 
   async handlePromptMessage(
@@ -220,6 +226,15 @@ export class SessionMessageQueue {
         this.wsManager.send(ws, {
           type: "error",
           code: "PROMPT_REQUEST_CONFLICT",
+          message: error.message,
+          clientRequestId: data.clientRequestId,
+        });
+        return;
+      }
+      if (error instanceof AgentRuntimeSelectionError) {
+        this.wsManager.send(ws, {
+          type: "error",
+          code: error.code,
           message: error.message,
           clientRequestId: data.clientRequestId,
         });
@@ -698,6 +713,10 @@ export class SessionMessageQueue {
 
     const effectiveModelForEffort =
       messageModel || this.repository.getSession()?.model || DEFAULT_MODEL;
+    if (this.validateAgentRuntimeSelection) {
+      const harness = this.repository.getSession()?.agent_harness ?? DEFAULT_AGENT_HARNESS;
+      await this.validateAgentRuntimeSelection(harness, effectiveModelForEffort);
+    }
     const messageReasoningEffort = validateReasoningEffort(
       effectiveModelForEffort,
       data.reasoningEffort,

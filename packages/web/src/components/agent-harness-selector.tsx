@@ -2,6 +2,7 @@
 
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { Combobox } from "@/components/ui/combobox";
+import { useAgentRuntimeReadiness } from "@/hooks/use-agent-runtime";
 
 const INHERIT_VALUE = "__default__";
 
@@ -39,7 +40,7 @@ export function getAgentHarnessLabel(value: AgentHarness): string {
 export function AgentHarnessSelector({
   value,
   onChange,
-  inheritLabel = "OpenCode",
+  inheritLabel,
   allowInherit = true,
   showPrefix = false,
   disabled = false,
@@ -51,6 +52,13 @@ export function AgentHarnessSelector({
   showPrefix?: boolean;
   disabled?: boolean;
 }) {
+  const { data } = useAgentRuntimeReadiness();
+  const resolvedInheritLabel =
+    inheritLabel ??
+    (data
+      ? `Deployment default (${getAgentHarnessLabel(data.preferences.defaultAgentHarness)})`
+      : "Deployment default");
+  const availability = new Map(data?.harnesses.map((harness) => [harness.harness, harness]) ?? []);
   return (
     <Combobox
       value={value ?? INHERIT_VALUE}
@@ -62,12 +70,30 @@ export function AgentHarnessSelector({
           ? [
               {
                 value: INHERIT_VALUE,
-                label: inheritLabel,
+                label: resolvedInheritLabel,
                 description: "Resolve from the environment or deployment setting",
               },
             ]
           : []),
-        ...HARNESS_OPTIONS,
+        ...HARNESS_OPTIONS.map((option) => {
+          const readiness = availability.get(option.value);
+          const available =
+            !readiness ||
+            (readiness.enabled &&
+              readiness.runtimeAvailable &&
+              readiness.routes.some((route) => route.ready));
+          const partiallyReady =
+            available && readiness && readiness.routes.some((route) => !route.ready);
+          return {
+            ...option,
+            disabled: !available,
+            description: available
+              ? partiallyReady
+                ? `${option.description} · Some providers need setup`
+                : option.description
+              : `${option.description} · Needs setup in Settings → Harnesses`,
+          };
+        }),
       ]}
       direction="up"
       dropdownWidth="w-64"
@@ -75,7 +101,7 @@ export function AgentHarnessSelector({
       triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
     >
       {showPrefix && <span className="shrink-0 text-xs">Harness:&nbsp;</span>}
-      <span className="truncate">{value ? getAgentHarnessLabel(value) : inheritLabel}</span>
+      <span className="truncate">{value ? getAgentHarnessLabel(value) : resolvedInheritLabel}</span>
     </Combobox>
   );
 }

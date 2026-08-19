@@ -22,6 +22,7 @@ import { resolveAppName } from "@open-inspect/shared/app-name";
 import { timingSafeEqual } from "@open-inspect/shared/auth";
 import { DEFAULT_MODEL } from "@open-inspect/shared/models";
 import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
+import { assertAgentRuntimeSelection } from "../agent-runtime/selection";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl } from "../sandbox/client";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
@@ -534,7 +535,17 @@ export class SessionDO extends DurableObject<Env> {
         this.db ? new SessionIndexStore(this.db) : null,
         resolveScmProviderFromEnv(this.env.SCM_PROVIDER),
         this.alarmScheduler,
-        this.executionTimeoutMs
+        this.executionTimeoutMs,
+        this.db
+          ? async (harness, model) =>
+              assertAgentRuntimeSelection({
+                db: this.db!,
+                env: this.env,
+                harness,
+                model,
+                effectiveSecrets: (await this.getUserEnvVars()) ?? {},
+              })
+          : undefined
       );
     }
 
@@ -1014,6 +1025,7 @@ export class SessionDO extends DurableObject<Env> {
     const config = {
       ...DEFAULT_LIFECYCLE_CONFIG,
       controlPlaneUrl,
+      modelRelayPublicUrl: this.env.MODEL_RELAY_PUBLIC_URL,
       model: DEFAULT_MODEL,
       sessionId,
       inactivity: {

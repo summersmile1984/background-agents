@@ -14,6 +14,22 @@ export {
 export type { AgentHarness } from "./agent-harness";
 
 export {
+  DEFAULT_AGENT_RUNTIME_PREFERENCES,
+  agentRuntimePreferencesSchema,
+  harnessCredentialKindSchema,
+} from "./agent-runtime";
+export type {
+  AgentRuntimePreferences,
+  AgentRuntimeReadinessResponse,
+  HarnessCredentialKind,
+  HarnessCredentialMetadata,
+  HarnessProviderReadiness,
+  HarnessReadiness,
+  HarnessReadinessCode,
+  HostModelRelayStatus,
+} from "./agent-runtime";
+
+export {
   MAX_SESSION_ATTACHMENTS_PER_MESSAGE,
   SESSION_ATTACHMENT_IMAGE_MIME_TYPES,
   SESSION_ATTACHMENT_IMAGE_MAX_BYTES,
