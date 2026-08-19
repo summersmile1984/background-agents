@@ -218,7 +218,7 @@ describe("Home", () => {
     const user = userEvent.setup();
     render(<Home />);
 
-    await user.click(screen.getByRole("button", { name: /harness:.*default harness/i }));
+    await user.click(screen.getByRole("button", { name: /harness:.*opencode/i }));
     await user.click(within(screen.getByRole("listbox")).getByRole("option", { name: /^Codex/ }));
     await user.type(screen.getByPlaceholderText("What do you want to build?"), "Use Codex");
     await user.click(screen.getByRole("button", { name: /send/i }));

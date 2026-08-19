@@ -10,6 +10,7 @@ describe("prepareManagedProviderEnv", () => {
       prepareManagedProviderEnv({
         exposedSecrets: {
           USER_VALUE: "visible",
+          DEEPSEEK_API_KEY: "must-stay-on-host",
           OPENAI_OAUTH_REFRESH_TOKEN: "openai-refresh",
           OPENAI_OAUTH_ACCESS_TOKEN: "openai-access",
           OPENAI_OAUTH_ACCESS_TOKEN_EXPIRES_AT: "123",

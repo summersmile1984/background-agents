@@ -12,6 +12,7 @@ const enabledOptions: ModelCategory[] = [
     models: [
       { id: "openai/gpt-5.4", name: "GPT", description: "" },
       { id: "anthropic/claude-sonnet-4-6", name: "Claude", description: "" },
+      { id: "deepseek/deepseek-v4-flash", name: "DeepSeek", description: "" },
       { id: "xiaomi/mimo-v2.5", name: "MiMo", description: "" },
     ],
   },
@@ -22,6 +23,8 @@ describe("agent harness model compatibility", () => {
     expect(isModelCompatibleWithHarness("openai/gpt-5.4", "codex")).toBe(true);
     expect(isModelCompatibleWithHarness("anthropic/claude-sonnet-4-6", "codex")).toBe(false);
     expect(isModelCompatibleWithHarness("anthropic/claude-sonnet-4-6", "claude")).toBe(true);
+    expect(isModelCompatibleWithHarness("deepseek/deepseek-v4-flash", "codex")).toBe(true);
+    expect(isModelCompatibleWithHarness("deepseek/deepseek-v4-flash", "claude")).toBe(true);
     expect(isModelCompatibleWithHarness("deepseek/deepseek-v4-pro", "deepseek")).toBe(true);
     expect(isModelCompatibleWithHarness("xiaomi/mimo-v2.5", "opencode")).toBe(true);
   });
@@ -29,9 +32,11 @@ describe("agent harness model compatibility", () => {
   it("filters enabled options for a native harness", () => {
     expect(getModelIds(getAgentHarnessModelOptions(enabledOptions, "codex"))).toEqual([
       "openai/gpt-5.4",
+      "deepseek/deepseek-v4-flash",
     ]);
     expect(getModelIds(getAgentHarnessModelOptions(enabledOptions, "claude"))).toEqual([
       "anthropic/claude-sonnet-4-6",
+      "deepseek/deepseek-v4-flash",
     ]);
   });
 

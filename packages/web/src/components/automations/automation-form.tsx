@@ -772,7 +772,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
           disabled={submitting}
         />
         <FieldDescription>
-          An explicit choice overrides each target environment&apos;s default harness.
+          An explicit choice overrides each target environment&apos;s harness setting.
         </FieldDescription>
       </div>
 

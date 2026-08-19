@@ -69,7 +69,7 @@ The most common example:
 | Key                 | Description                                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY` | Required for Claude models when using the **Daytona** or **Vercel** sandbox provider (Modal injects this automatically via its own secrets mechanism) |
-| `DEEPSEEK_API_KEY`  | Required for DeepSeek models with any sandbox provider                                                                                                |
+| `DEEPSEEK_API_KEY`  | Host-only for the self-hosted Cube model relay; never add it as a sandbox secret                                                                      |
 | `ZHIPU_API_KEY`     | Required for Z.AI Coding Plan GLM models with any sandbox provider                                                                                    |
 
 > **Daytona and Vercel sandbox users**: If you plan to use Claude models, you must add
@@ -78,9 +78,8 @@ The most common example:
 
 ### Native harness credentials
 
-Codex and Claude Code can use subscription credentials instead of model API keys. DeepSeek's native
-CodeWhale harness uses its API key. Store these as a global, repository, or Environment secret
-according to the sessions that should receive them:
+Codex and Claude Code can use subscription credentials instead of model API keys. Store these as a
+global, repository, or Environment secret according to the sessions that should receive them:
 
 | Key                                  | Purpose                                                                  |
 | ------------------------------------ | ------------------------------------------------------------------------ |
@@ -89,17 +88,19 @@ according to the sessions that should receive them:
 | `CODEX_AUTH_JSON`                    | Codex `auth.json` as JSON, or the base64 encoding of that JSON           |
 | `CODEX_ACCESS_TOKEN`                 | Enterprise Codex token, loaded through `codex login --with-access-token` |
 | `CODEX_ACCESS_TOKEN_EXPIRES_AT`      | Optional ISO-8601 or Unix expiry metadata used for rotation warnings     |
-| `DEEPSEEK_API_KEY`                   | DeepSeek API key used by the native CodeWhale harness                    |
 
 `setup-token` credentials may be long-lived, but Open-Inspect does not assume a fixed one-year
 lifetime. If expiry metadata is supplied, sessions warn during the final 30 days and after expiry.
 
 These credentials receive stricter handling than ordinary environment variables: image builds drop
-them before repository setup runs; Claude and DeepSeek values move to memory-backed storage before
-services start; Codex login state is removed before snapshots; and agent shell commands do not
-inherit the credential variables. Values remain encrypted in D1 at rest and are never returned to
-the browser. The selected native harness process remains inside the credential trust boundary; this
-containment does not turn subscription credentials into brokered, zero-access tokens.
+them before repository setup runs; Claude values move to memory-backed storage before services
+start; Codex login state is removed before snapshots; and agent shell commands do not inherit the
+credential variables. Values remain encrypted in D1 at rest and are never returned to the browser.
+
+The self-hosted Cube DeepSeek key follows a stricter boundary: keep it in a Host file with mode
+`0600` and point the Host model relay at that file. Sandboxes send their existing per-session token
+to the relay, which validates it with the control plane and replaces it with the provider key. Do
+not save `DEEPSEEK_API_KEY` in global, repository, or Environment secrets.
 
 ### When to use repository secrets
 
@@ -203,7 +204,7 @@ therefore are not available to `setup.sh`; they are injected only into live sess
 | Key                          | Scope  | Purpose                                                      |
 | ---------------------------- | ------ | ------------------------------------------------------------ |
 | `ANTHROPIC_API_KEY`          | Global | Claude API access (required for Daytona or Vercel sandboxes) |
-| `DEEPSEEK_API_KEY`           | Global | DeepSeek API access                                          |
+| `DEEPSEEK_API_KEY`           | Host   | DeepSeek model relay only; never injected into sandboxes     |
 | `ZHIPU_API_KEY`              | Global | Z.AI Coding Plan GLM access                                  |
 | `OPENAI_OAUTH_REFRESH_TOKEN` | Repo   | OpenAI Codex access ([setup guide](OPENAI_MODELS.md))        |
 | `OPENAI_OAUTH_ACCOUNT_ID`    | Repo   | OpenAI Codex access ([setup guide](OPENAI_MODELS.md))        |

@@ -6,8 +6,9 @@ import base64
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
+from ..deepseek_relay import deepseek_relay_url, session_model, uses_deepseek_model
 from ..types import AgentHarness
 from .mcp_config import claude_mcp_config
 
@@ -19,6 +20,21 @@ if TYPE_CHECKING:
 
 class ClaudeHarnessDriver:
     harness = AgentHarness.CLAUDE
+
+    _AUTONOMOUS_TOOLS: ClassVar[tuple[str, ...]] = (
+        "Bash",
+        "Edit",
+        "Glob",
+        "Grep",
+        "NotebookEdit",
+        "Read",
+        "Task",
+        "TodoWrite",
+        "WebFetch",
+        "WebSearch",
+        "Write",
+        "mcp__open_inspect__*",
+    )
 
     def __init__(
         self,
@@ -33,6 +49,25 @@ class ClaudeHarnessDriver:
         self._workspace_path = workspace_path
         self._log = log
         self._environment = dict(environment or os.environ)
+        if uses_deepseek_model(self._environment):
+            relay_url = deepseek_relay_url(self._environment, "anthropic")
+            sandbox_token = self._environment.get("SANDBOX_AUTH_TOKEN", "").strip()
+            if not relay_url or not sandbox_token:
+                raise RuntimeError("DeepSeek Claude Code sessions require the Host model relay")
+            model = session_model(self._environment).removeprefix("deepseek/")
+            for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+                self._environment.pop(key, None)
+            self._environment.update(
+                {
+                    "ANTHROPIC_BASE_URL": relay_url,
+                    "ANTHROPIC_AUTH_TOKEN": sandbox_token,
+                    "ANTHROPIC_MODEL": model,
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+                    "CLAUDE_CODE_SUBAGENT_MODEL": model,
+                }
+            )
         self._mcp_servers = mcp_servers
         self._query_function = query_function
         self._options_class = options_class
@@ -153,8 +188,9 @@ class ClaudeHarnessDriver:
     def _build_options(self, prompt: HarnessPrompt) -> Any:
         kwargs: dict[str, Any] = {
             "cwd": self._workspace_path,
-            "permission_mode": "bypassPermissions",
-            "include_partial_messages": True,
+            "permission_mode": "acceptEdits",
+            "allowed_tools": list(self._AUTONOMOUS_TOOLS),
+            "include_partial_messages": not uses_deepseek_model(self._environment),
             "system_prompt": {"type": "preset", "preset": "claude_code"},
             "env": self._environment,
             "mcp_servers": claude_mcp_config(self._mcp_servers),
@@ -193,11 +229,19 @@ class ClaudeHarnessDriver:
             return None
         if "/" not in model:
             return model
-        return model.split("/", 1)[1] if model.startswith("anthropic/") else None
+        return model.split("/", 1)[1] if model.startswith(("anthropic/", "deepseek/")) else None
 
     @staticmethod
     def _stream_text_delta(event: object) -> str | None:
-        if not isinstance(event, dict) or event.get("type") != "content_block_delta":
+        if not isinstance(event, dict):
+            return None
+        if event.get("type") == "content_block_start":
+            content_block = event.get("content_block")
+            if not isinstance(content_block, dict) or content_block.get("type") != "text":
+                return None
+            text = content_block.get("text")
+            return text if isinstance(text, str) and text else None
+        if event.get("type") != "content_block_delta":
             return None
         delta = event.get("delta")
         if not isinstance(delta, dict) or delta.get("type") != "text_delta":

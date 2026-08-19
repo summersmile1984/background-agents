@@ -437,6 +437,12 @@ bridge. OpenCode remains the default; native adapters translate Codex app-server
 SDK, and DeepSeek CodeWhale app-server events into the same client-facing stream. This keeps the web
 client and bot integrations independent of the selected harness.
 
+When the selected model is DeepSeek, all four harnesses use a Host-side model relay: OpenCode and
+CodeWhale use Chat Completions, Codex uses Responses, and Claude Code uses Anthropic Messages. Each
+sandbox authenticates to the relay with its existing per-session sandbox token. The relay validates
+the token with the session Durable Object and only then injects the Host-only DeepSeek provider key.
+The provider key is never part of the sandbox environment, repository image, or snapshot.
+
 The adapter preserves every structured event its native API exposes. The pinned CodeWhale 0.9.8
 stdio stream currently provides assistant text and turn completion but not structured tool-call or
 token-usage events, so DeepSeek sessions still show live text and repository diffs while their
@@ -620,18 +626,18 @@ rotation is persisted back to the global, repository, or environment scope that 
 [Using Grok with a SuperGrok Subscription](./GROK_MODELS.md).
 
 Native Codex and Claude Code harness sessions may instead receive `CODEX_AUTH_JSON`,
-`CODEX_ACCESS_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN`. The DeepSeek CodeWhale harness uses
-`DEEPSEEK_API_KEY`. The runtime materializes native-harness credentials only for the selected
-harness, excludes them from agent shell commands and image builds, and removes disk-backed login
-state before filesystem snapshots. Optional `*_EXPIRES_AT` metadata drives rotation warnings. The
-selected native harness process necessarily remains in the credential trust boundary; the runtime
-containment above is not a brokered, zero-access credential design.
+`CODEX_ACCESS_TOKEN`, or `CLAUDE_CODE_OAUTH_TOKEN` when they use their own subscription backends.
+DeepSeek provider access is different: its API key remains on the Host model relay, while sandboxes
+use their revocable session token. The runtime excludes native login credentials from agent shell
+commands and image builds and removes disk-backed login state before filesystem snapshots. Optional
+`*_EXPIRES_AT` metadata drives rotation warnings.
 
 > **Daytona and Vercel users**: LLM API keys (e.g., `ANTHROPIC_API_KEY` for Claude models) must be
 > added as global secrets. Modal injects these automatically via its own secrets mechanism.
 >
-> **Opt-in model providers**: DeepSeek models require `DEEPSEEK_API_KEY`, and Z.AI Coding Plan
-> models require `ZHIPU_API_KEY`, as a global secret with any sandbox provider. SuperGrok models
+> **Opt-in model providers**: in the self-hosted Cube deployment, DeepSeek models require the
+> Host-side model relay described in `packages/e2b-infra/README.md`; do not add the provider key as
+> an Open-Inspect secret. Z.AI Coding Plan models still require `ZHIPU_API_KEY`. SuperGrok models
 > require managed xAI OAuth credentials and must be enabled under **Settings > Models**.
 
 See [Secrets Management](./SECRETS.md) for setup instructions.

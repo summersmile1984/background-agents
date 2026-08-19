@@ -81,8 +81,6 @@ def test_codewhale_mcp_config_supports_builtin_local_and_remote_servers():
             "-u",
             "DEEPSEEK_API_KEY",
             "-u",
-            "OPENINSPECT_DEEPSEEK_TOKEN_FILE",
-            "-u",
             "CODEWHALE_HOME",
             "-u",
             "CODEWHALE_MCP_CONFIG",

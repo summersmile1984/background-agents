@@ -94,7 +94,7 @@ ENV HOME=/root \
     PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app \
     NODE_PATH=/usr/lib/node_modules \
-    SANDBOX_VERSION=e2b-v5-codewhale-harness
+    SANDBOX_VERSION=e2b-v16-deepseek-multi-harness
 
 # NOTE: file staging (sandbox_runtime, oi-launch.py), WORKDIR, and the start/ready
 # commands are applied by build-template.py via the E2B Template SDK

@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..deepseek_relay import deepseek_relay_url, session_model
 from ..types import AgentHarness
 from .json_rpc import JsonRpcProcess
 from .mcp_config import codewhale_mcp_config
@@ -53,6 +54,20 @@ class DeepSeekHarnessDriver:
         self._state_path.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._log = log
         self._environment = dict(environment or os.environ)
+        relay_url = deepseek_relay_url(self._environment, "openai")
+        sandbox_token = self._environment.get("SANDBOX_AUTH_TOKEN", "").strip()
+        if not relay_url or not sandbox_token:
+            raise RuntimeError("DeepSeek CodeWhale sessions require the Host model relay")
+        model = session_model(self._environment).removeprefix("deepseek/")
+        for key in (
+            "CODEWHALE_BASE_URL",
+            "CODEWHALE_MODEL",
+            "CODEWHALE_PROVIDER",
+            "DEEPSEEK_API_KEY",
+            "DEEPSEEK_BASE_URL",
+            "DEEPSEEK_MODEL",
+        ):
+            self._environment.pop(key, None)
         self._environment.update(
             {
                 "CODEWHALE_HOME": str(self._state_path),
@@ -63,9 +78,28 @@ class DeepSeekHarnessDriver:
                 "CODEWHALE_TELEMETRY": "false",
             }
         )
+        memory_root = Path("/dev/shm") if Path("/dev/shm").is_dir() else None
+        self._owned_config_dir = Path(
+            tempfile.mkdtemp(prefix="open-inspect-codewhale-config-", dir=memory_root)
+        )
+        self._owned_config_dir.chmod(0o700)
+        self._config_path = self._owned_config_dir / "config.toml"
+        self._config_path.write_text(
+            "\n".join(
+                (
+                    'provider = "deepseek"',
+                    "",
+                    "[providers.deepseek]",
+                    f"model = {json.dumps(model)}",
+                    f"base_url = {json.dumps(relay_url)}",
+                    'api_key_env = "SANDBOX_AUTH_TOKEN"',
+                    "",
+                )
+            )
+        )
+        self._config_path.chmod(0o600)
         self._owned_mcp_dir: Path | None = None
         if mcp_config_path is None:
-            memory_root = Path("/dev/shm") if Path("/dev/shm").is_dir() else None
             self._owned_mcp_dir = Path(
                 tempfile.mkdtemp(prefix="open-inspect-codewhale-", dir=memory_root)
             )
@@ -79,7 +113,13 @@ class DeepSeekHarnessDriver:
         self._environment["CODEWHALE_MCP_CONFIG"] = str(mcp_path)
 
         self._rpc = rpc or JsonRpcProcess(
-            ["codewhale", "app-server", "--stdio"],
+            [
+                "codewhale",
+                "app-server",
+                "--config",
+                str(self._config_path),
+                "--stdio",
+            ],
             cwd=workspace_path,
             env=self._environment,
             log=log,
@@ -122,6 +162,7 @@ class DeepSeekHarnessDriver:
         self._active_request = request_task
         response_ended = False
         active_response_id: str | None = None
+        cumulative_text = ""
         try:
             while not response_ended:
                 if request_task.done():
@@ -155,7 +196,12 @@ class DeepSeekHarnessDriver:
                 elif event_type == "response_delta" and response_id == active_response_id:
                     delta = event.get("delta")
                     if isinstance(delta, str) and delta:
-                        yield {"type": "token", "content": delta, "messageId": prompt.message_id}
+                        cumulative_text += delta
+                        yield {
+                            "type": "token",
+                            "content": cumulative_text,
+                            "messageId": prompt.message_id,
+                        }
                 elif event_type == "response_end" and response_id == active_response_id:
                     response_ended = True
 
@@ -194,6 +240,7 @@ class DeepSeekHarnessDriver:
         await self._rpc.close()
         if self._owned_mcp_dir:
             shutil.rmtree(self._owned_mcp_dir, ignore_errors=True)
+        shutil.rmtree(self._owned_config_dir, ignore_errors=True)
 
     async def _ensure_thread(self, model: str | None) -> None:
         if self._thread_prepared:

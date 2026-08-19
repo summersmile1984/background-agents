@@ -19,6 +19,7 @@ const HARNESS_CREDENTIAL_KEYS = new Set([
   "CODEX_ACCESS_TOKEN_EXPIRES_AT",
   "DEEPSEEK_API_KEY",
 ]);
+const HOST_ONLY_PROVIDER_KEYS = new Set(["DEEPSEEK_API_KEY"]);
 
 interface ManagedProviderEnvOptions {
   exposedSecrets: Record<string, string>;
@@ -30,7 +31,9 @@ export function prepareManagedProviderEnv({
   brokerSecrets,
 }: ManagedProviderEnvOptions): Record<string, string> {
   const env = Object.fromEntries(
-    Object.entries(exposedSecrets).filter(([key]) => !CONTROL_PLANE_OAUTH_KEYS.has(key))
+    Object.entries(exposedSecrets).filter(
+      ([key]) => !CONTROL_PLANE_OAUTH_KEYS.has(key) && !HOST_ONLY_PROVIDER_KEYS.has(key)
+    )
   );
   if (brokerSecrets.OPENAI_OAUTH_REFRESH_TOKEN) env.OPENAI_OAUTH_MANAGED = "1";
   if (brokerSecrets.XAI_OAUTH_REFRESH_TOKEN) env.XAI_OAUTH_MANAGED = "1";

@@ -18,7 +18,7 @@ class _Log:
         pass
 
 
-async def test_deepseek_memory_token_is_restored_only_for_bridge_child(monkeypatch):
+async def test_deepseek_provider_key_is_never_restored_for_bridge_child(monkeypatch):
     config = SimpleNamespace(
         sandbox_id="sandbox-1",
         control_plane_url="https://control.example.test",
@@ -29,9 +29,11 @@ async def test_deepseek_memory_token_is_restored_only_for_bridge_child(monkeypat
     )
     process = SimpleNamespace(returncode=None, stdout=None)
     create_process = AsyncMock(return_value=process)
-    monkeypatch.setattr(
-        "sandbox_runtime.agent_bridge_process.read_deepseek_token",
-        lambda _environment: "deepseek-secret",
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "must-not-enter-child")
+    monkeypatch.setenv("SANDBOX_AUTH_TOKEN", "sandbox-token")
+    monkeypatch.setenv(
+        "SESSION_CONFIG",
+        '{"session_id":"session-1","model":"deepseek/deepseek-v4-flash"}',
     )
     monkeypatch.setattr(
         "sandbox_runtime.agent_bridge_process.asyncio.create_subprocess_exec", create_process
@@ -41,5 +43,6 @@ async def test_deepseek_memory_token_is_restored_only_for_bridge_child(monkeypat
     await AgentBridgeProcess(config, _Log()).start()
 
     child_environment = create_process.await_args.kwargs["env"]
-    assert child_environment["DEEPSEEK_API_KEY"] == "deepseek-secret"
+    assert "DEEPSEEK_API_KEY" not in child_environment
+    assert child_environment["SANDBOX_AUTH_TOKEN"] == "sandbox-token"
     assert create_process.await_args.args[-1] == "deepseek"

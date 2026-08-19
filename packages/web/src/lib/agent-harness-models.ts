@@ -1,16 +1,18 @@
 import { MODEL_OPTIONS, normalizeModelId, type ModelCategory } from "@open-inspect/shared/models";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
-const MODEL_PROVIDER_BY_HARNESS: Partial<Record<AgentHarness, string>> = {
-  codex: "openai",
-  claude: "anthropic",
-  deepseek: "deepseek",
+const MODEL_PROVIDERS_BY_HARNESS: Partial<Record<AgentHarness, readonly string[]>> = {
+  codex: ["openai", "deepseek"],
+  claude: ["anthropic", "deepseek"],
+  deepseek: ["deepseek"],
 };
 
 export function isModelCompatibleWithHarness(model: string, harness: AgentHarness): boolean {
   if (harness === "opencode") return true;
-  const provider = MODEL_PROVIDER_BY_HARNESS[harness];
-  return provider ? normalizeModelId(model).startsWith(`${provider}/`) : false;
+  const providers = MODEL_PROVIDERS_BY_HARNESS[harness];
+  return providers
+    ? providers.some((provider) => normalizeModelId(model).startsWith(`${provider}/`))
+    : false;
 }
 
 function filterOptions(options: ModelCategory[], harness: AgentHarness): ModelCategory[] {

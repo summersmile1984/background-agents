@@ -6,7 +6,8 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from .constants import OPENCODE_PORT
-from .harness_credentials import read_claude_token, read_deepseek_token
+from .deepseek_relay import uses_deepseek_model
+from .harness_credentials import read_claude_token
 from .process_output import iter_process_lines
 
 if TYPE_CHECKING:
@@ -36,12 +37,16 @@ class AgentBridgeProcess:
             return
 
         child_environment = dict(os.environ)
+        # The real DeepSeek provider key is Host-only. Native drivers derive a
+        # session-scoped relay credential from SANDBOX_AUTH_TOKEN instead.
+        child_environment.pop("DEEPSEEK_API_KEY", None)
         claude_token = read_claude_token(child_environment)
-        if claude_token and self.agent_harness.value == "claude":
+        if (
+            claude_token
+            and self.agent_harness.value == "claude"
+            and not uses_deepseek_model(child_environment)
+        ):
             child_environment["CLAUDE_CODE_OAUTH_TOKEN"] = claude_token
-        deepseek_token = read_deepseek_token(child_environment)
-        if deepseek_token and self.agent_harness.value == "deepseek":
-            child_environment["DEEPSEEK_API_KEY"] = deepseek_token
         self._process = await asyncio.create_subprocess_exec(
             "python",
             "-m",
