@@ -219,6 +219,7 @@ jobs:
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
           TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
+          TF_VAR_deployment_admin_identities: ${{ secrets.DEPLOYMENT_ADMIN_IDENTITIES }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ secrets.ENABLE_GITHUB_BOT || 'false' }}"
           TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
@@ -232,6 +233,11 @@ jobs:
           TF_VAR_web_platform: "${{ secrets.WEB_PLATFORM || 'vercel' }}"
           TF_VAR_enable_durable_object_bindings: "${{ secrets.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ secrets.SANDBOX_PROVIDER || 'modal' }}"
+          TF_VAR_default_agent_harness: "${{ secrets.DEFAULT_AGENT_HARNESS || 'opencode' }}"
+          TF_VAR_sandbox_runtime_harnesses: "${{ secrets.SANDBOX_RUNTIME_HARNESSES || 'opencode,codex,claude,deepseek' }}"
+          TF_VAR_model_relay_public_url: ${{ secrets.MODEL_RELAY_PUBLIC_URL }}
+          TF_VAR_model_relay_admin_url: ${{ secrets.MODEL_RELAY_ADMIN_URL }}
+          TF_VAR_model_relay_admin_auth_secret: ${{ secrets.MODEL_RELAY_ADMIN_AUTH_SECRET }}
           TF_VAR_daytona_api_url: ${{ secrets.DAYTONA_API_URL }}
           TF_VAR_daytona_api_key: ${{ secrets.DAYTONA_API_KEY }}
           TF_VAR_daytona_base_snapshot: ${{ secrets.DAYTONA_BASE_SNAPSHOT }}
@@ -373,6 +379,7 @@ jobs:
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
           TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
+          TF_VAR_deployment_admin_identities: ${{ secrets.DEPLOYMENT_ADMIN_IDENTITIES }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ secrets.ENABLE_GITHUB_BOT || 'false' }}"
           TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
@@ -386,6 +393,11 @@ jobs:
           TF_VAR_web_platform: "${{ secrets.WEB_PLATFORM || 'vercel' }}"
           TF_VAR_enable_durable_object_bindings: "${{ secrets.ENABLE_DURABLE_OBJECT_BINDINGS || 'true' }}"
           TF_VAR_sandbox_provider: "${{ secrets.SANDBOX_PROVIDER || 'modal' }}"
+          TF_VAR_default_agent_harness: "${{ secrets.DEFAULT_AGENT_HARNESS || 'opencode' }}"
+          TF_VAR_sandbox_runtime_harnesses: "${{ secrets.SANDBOX_RUNTIME_HARNESSES || 'opencode,codex,claude,deepseek' }}"
+          TF_VAR_model_relay_public_url: ${{ secrets.MODEL_RELAY_PUBLIC_URL }}
+          TF_VAR_model_relay_admin_url: ${{ secrets.MODEL_RELAY_ADMIN_URL }}
+          TF_VAR_model_relay_admin_auth_secret: ${{ secrets.MODEL_RELAY_ADMIN_AUTH_SECRET }}
           TF_VAR_daytona_api_url: ${{ secrets.DAYTONA_API_URL }}
           TF_VAR_daytona_api_key: ${{ secrets.DAYTONA_API_KEY }}
           TF_VAR_daytona_base_snapshot: ${{ secrets.DAYTONA_BASE_SNAPSHOT }}
