@@ -10,7 +10,12 @@ function routeFor(method: string, path: string) {
   return routes.find((route) => route.method === method && route.pattern.test(path));
 }
 
-function createEnv() {
+function createEnv(
+  options: {
+    deploymentScmProvider?: "github" | "gitlab";
+    pinnedScmProvider?: "github" | "gitea" | "gitlab";
+  } = {}
+) {
   const fetch = vi.fn(async (request: Request) => {
     if (new URL(request.url).pathname === "/internal/verify-sandbox-token") {
       const body = (await request.json()) as { token?: string };
@@ -20,7 +25,14 @@ function createEnv() {
   });
   const statement = {
     bind: vi.fn(() => statement),
-    first: vi.fn(async () => null),
+    first: vi.fn(async () =>
+      options.pinnedScmProvider
+        ? {
+            scm_connection_id: `scm-${options.pinnedScmProvider}`,
+            provider: options.pinnedScmProvider,
+          }
+        : null
+    ),
     all: vi.fn(async () => ({ results: [] })),
     run: vi.fn(async () => ({ meta: { changes: 0 } })),
   };
@@ -31,7 +43,7 @@ function createEnv() {
     idFromName,
     env: {
       ...TEST_SERVICE_SECRETS,
-      SCM_PROVIDER: "gitlab",
+      SCM_PROVIDER: options.deploymentScmProvider ?? "gitlab",
       GITLAB_ACCESS_TOKEN: "glpat-test",
       DB: {
         prepare: vi.fn(() => statement),
@@ -158,6 +170,49 @@ describe("SCM credentials router provider gate", () => {
     await expect(response.json()).resolves.toEqual({ enabled: false });
     expect(fetch).toHaveBeenCalledOnce();
     expect(new URL(fetch.mock.calls[0][0].url).pathname).toBe("/internal/verify-sandbox-token");
+  });
+
+  it("disables signing for a pinned Gitea connection on a GitHub deployment", async () => {
+    const { env, fetch } = createEnv({
+      deploymentScmProvider: "github",
+      pinnedScmProvider: "gitea",
+    });
+
+    const response = await handleRequest(
+      new Request("https://test.local/sessions/session-1/commit-signing", {
+        headers: { Authorization: "Bearer sandbox-token" },
+      }),
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ enabled: false });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("rejects signing payloads for a pinned Gitea connection", async () => {
+    const { env } = createEnv({
+      deploymentScmProvider: "github",
+      pinnedScmProvider: "gitea",
+    });
+
+    const response = await handleRequest(
+      new Request("https://test.local/sessions/session-1/commit-signing", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer sandbox-token",
+          "X-Open-Inspect-Signing-Fingerprint": "SHA256:test",
+        },
+        body: "payload",
+      }),
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: "Commit signing is disabled" });
   });
 
   it("rejects service authentication for the signing-key broker", async () => {

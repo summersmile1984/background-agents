@@ -7,7 +7,7 @@ import {
 } from "../auth/openssh-ed25519";
 import { CommitSigningStore } from "../db/commit-signing";
 import type { SqlDatabase } from "../db/sql-database";
-import { resolveScmProviderFromEnv } from "../source-control";
+import { resolveScmProviderFromEnv, type SourceControlProviderName } from "../source-control";
 import type { Env } from "../types";
 import {
   error,
@@ -22,6 +22,38 @@ import {
 } from "./shared";
 
 const MAX_SIGNING_PAYLOAD_BYTES = 1024 * 1024;
+
+interface SessionSigningProviderRow {
+  scm_connection_id: string | null;
+  provider: SourceControlProviderName | null;
+}
+
+async function resolveSessionSigningProvider(
+  env: Env,
+  db: SqlDatabase,
+  sessionId: string
+): Promise<SourceControlProviderName> {
+  const row = await db
+    .prepare(
+      `SELECT s.scm_connection_id, c.provider
+       FROM sessions s
+       LEFT JOIN scm_connections c ON c.id = s.scm_connection_id
+       WHERE s.id = ?`
+    )
+    .bind(sessionId)
+    .first<SessionSigningProviderRow>();
+
+  // Legacy sessions predate pinned connections and continue to use the
+  // deployment provider. A pinned but missing connection must fail closed:
+  // falling back to a GitHub deployment could enable signing for another forge.
+  if (!row || !row.scm_connection_id) {
+    return resolveScmProviderFromEnv(env.SCM_PROVIDER);
+  }
+  if (!row.provider) {
+    throw new Error("Pinned source-control connection is unavailable");
+  }
+  return row.provider;
+}
 
 function noStore(response: Response): Response {
   const headers = new Headers(response.headers);
@@ -142,11 +174,15 @@ async function handleGetSandboxCommitSigning(
   const sessionId = match.groups?.id;
   if (!sessionId) return noStore(error("Session ID required", 400));
 
-  // The bridge runs on every supported SCM deployment. Signing is GitHub-only,
+  // The bridge runs on every supported SCM connection. Signing is GitHub-only,
   // so other providers receive the explicit disabled state required for safe
-  // unsigned execution instead of failing the session at the provider gate.
-  if (resolveScmProviderFromEnv(env.SCM_PROVIDER) !== "github") {
-    return noStore(json({ enabled: false }));
+  // unsigned execution instead of inheriting the deployment's default provider.
+  try {
+    if ((await resolveSessionSigningProvider(env, ctx.db, sessionId)) !== "github") {
+      return noStore(json({ enabled: false }));
+    }
+  } catch {
+    return noStore(error("Commit signing configuration unavailable", 503));
   }
 
   const store = createStore(env, ctx.db);
@@ -168,8 +204,12 @@ async function handlePostSandboxCommitSigning(
 ): Promise<Response> {
   const sessionId = match.groups?.id;
   if (!sessionId) return noStore(error("Session ID required", 400));
-  if (resolveScmProviderFromEnv(env.SCM_PROVIDER) !== "github") {
-    return noStore(error("Commit signing is disabled", 409));
+  try {
+    if ((await resolveSessionSigningProvider(env, ctx.db, sessionId)) !== "github") {
+      return noStore(error("Commit signing is disabled", 409));
+    }
+  } catch {
+    return noStore(error("Commit signing unavailable", 503));
   }
 
   const requestedFingerprint = request.headers.get("X-Open-Inspect-Signing-Fingerprint");
