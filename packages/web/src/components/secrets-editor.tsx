@@ -138,7 +138,7 @@ function resolveScopePolicy(
         owner && name ? encodeRepositoryPathSegments({ repoOwner: owner, repoName: name }) : "";
       return {
         apiBase: repositoryKey
-          ? `/api/repos/${encodeURIComponent(repositoryKey)}/secrets`
+          ? `/api/repos/repository/${encodeURIComponent(repositoryKey)}/secrets`
           : `/api/repos/${repoPath}/secrets`,
         ready: Boolean(repositoryKey || (owner && name)),
         description: `Values are never shown after save. Secrets apply to ${repoLabel || "the selected repo"}.`,

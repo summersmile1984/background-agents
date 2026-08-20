@@ -10,7 +10,7 @@ export function useBranches(repoOwner: string, repoName: string, repositoryKey?:
 
   const key = session
     ? repositoryKey
-      ? `/api/repos/${encodeURIComponent(repositoryKey)}/branches`
+      ? `/api/repos/repository/${encodeURIComponent(repositoryKey)}/branches`
       : repoOwner && repoName
         ? `/api/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/branches`
         : null
