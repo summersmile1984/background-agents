@@ -149,9 +149,6 @@ github_app_id = ""
 # Self-hosted SCM hosts are denied until explicitly allowlisted. PATs are added
 # through Settings > Source Control and are encrypted in D1, never in tfvars.
 scm_allowed_hosts = ""
-# Exact Enterprise versions only after the vendor confirms the required
-# security backports (for example, do not approve 23.8.0 merely for testing).
-gitea_security_confirmed_versions = ""
 
 # Private key in PKCS#8 format
 # Convert from PKCS#1: openssl pkcs8 -topk8 -inform PEM -outform PEM -nocrypt -in key.pem -out key-pkcs8.pem

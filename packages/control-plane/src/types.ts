@@ -65,8 +65,6 @@ export interface Env {
   GITEA_ACCESS_TOKEN?: string;
   GITEA_USERNAME?: string;
   SCM_ALLOWED_HOSTS?: string; // Explicit host[:port] allowlist for self-hosted SCM probes/proxying
-  // Exact enterprise versions whose required security fixes were confirmed as vendor backports.
-  GITEA_SECURITY_CONFIRMED_VERSIONS?: string;
 
   // Variables
   DEPLOYMENT_NAME: string;

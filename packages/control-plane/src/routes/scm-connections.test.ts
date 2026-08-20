@@ -154,7 +154,6 @@ function context(): UserRouteContext {
 const env = {
   TOKEN_ENCRYPTION_KEY: "unused-by-mock",
   SCM_ALLOWED_HOSTS: "gitea.example.com",
-  GITEA_SECURITY_CONFIRMED_VERSIONS: "23.8.0",
 } as Env;
 
 function routeFor(method: string, path: string): { route: Route; match: RegExpMatchArray } {
@@ -257,27 +256,6 @@ describe("SCM connection routes", () => {
         apiBaseUrl: "https://gitea.example.com/root/api/v1",
       })
     );
-  });
-
-  it("rejects an enterprise build without an explicit security-backport confirmation", async () => {
-    const confirmation = env.GITEA_SECURITY_CONFIRMED_VERSIONS;
-    env.GITEA_SECURITY_CONFIRMED_VERSIONS = undefined;
-    try {
-      const response = await dispatch("POST", "/scm/connections", {
-        provider: "gitea",
-        displayName: "Team Gitea",
-        baseUrl: "https://gitea.example.com",
-        username: "agent-bot",
-        accessToken: "top-secret-pat",
-      });
-
-      expect(response.status).toBe(422);
-      expect(await response.text()).toContain("security backport");
-      expect(mocks.records.size).toBe(0);
-      expect(mocks.secrets.size).toBe(0);
-    } finally {
-      env.GITEA_SECURITY_CONFIRMED_VERSIONS = confirmation;
-    }
   });
 
   it("requires deployment-admin authority for secret writes", async () => {

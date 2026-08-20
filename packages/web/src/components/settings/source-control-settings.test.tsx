@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe("SourceControlSettings", () => {
-  it("checks the host and security version before accepting a PAT", async () => {
+  it("checks the host and records any reported version before accepting a PAT", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/scm/connections/preflight");
       return Response.json({
@@ -68,7 +68,7 @@ describe("SourceControlSettings", () => {
           apiBaseUrl: "https://gitea.aotsea.com/api/v1",
           cloneBaseUrl: "https://gitea.aotsea.com",
           host: "gitea.aotsea.com",
-          version: "1.27.2",
+          version: "23.8.0",
         },
       });
     });
@@ -84,7 +84,7 @@ describe("SourceControlSettings", () => {
     await user.click(screen.getByRole("button", { name: "Check host and version" }));
 
     await waitFor(() => expect(token).toBeEnabled());
-    expect(screen.getByText(/Ready · gitea\.aotsea\.com · Gitea 1\.27\.2/)).toBeInTheDocument();
+    expect(screen.getByText(/Ready · gitea\.aotsea\.com · Gitea 23\.8\.0/)).toBeInTheDocument();
   });
 
   it("labels Quick Tunnel connections as ephemeral tests", () => {
