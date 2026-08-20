@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { RepoIcon, FolderIcon, SearchIcon, ChevronDownIcon } from "@/components/ui/icons";
 import type { Repo } from "@/hooks/use-repos";
 import { repoSelectionValue } from "@/lib/repository-selection";
+import { sourceControlConnectionLabel, sourceControlHostname } from "@/lib/scm-presentation";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,7 +49,15 @@ export function RepositoryMultiSelect({
   const filteredRepos = useMemo(
     () =>
       normalizedQuery
-        ? repos.filter((repo) => repo.fullName.toLowerCase().includes(normalizedQuery))
+        ? repos.filter(
+            (repo) =>
+              repo.fullName.toLowerCase().includes(normalizedQuery) ||
+              repo.connection?.displayName.toLowerCase().includes(normalizedQuery) ||
+              repo.connection?.provider.toLowerCase().includes(normalizedQuery) ||
+              sourceControlHostname(repo.connection?.baseUrl ?? "")
+                .toLowerCase()
+                .includes(normalizedQuery)
+          )
         : repos,
     [repos, normalizedQuery]
   );
@@ -70,6 +79,12 @@ export function RepositoryMultiSelect({
       ),
     [repos, selected]
   );
+  const lockedConnection = useMemo(() => {
+    const first = selected
+      .map((key) => repos.find((repo) => repoSelectionValue(repo) === key))
+      .find((repo): repo is Repo => Boolean(repo?.connection));
+    return first?.connection ?? null;
+  }, [repos, selected]);
 
   const handleToggle = (repo: Repo) => {
     const key = repoSelectionValue(repo);
@@ -120,6 +135,12 @@ export function RepositoryMultiSelect({
               className="pl-8"
             />
           </div>
+          {lockedConnection ? (
+            <p className="mt-2 px-0.5 text-xs text-muted-foreground">
+              Source locked to {sourceControlConnectionLabel(lockedConnection)}. One session cannot
+              mix repositories from different source-control connections.
+            </p>
+          ) : null}
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
           {filteredRepos.map((repo) => {
@@ -161,10 +182,15 @@ export function RepositoryMultiSelect({
                 <FolderIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">
                   {repo.owner}/{repo.name}
+                  {connectionMismatch ? (
+                    <span className="ml-2 text-[11px] text-amber-600 dark:text-amber-400">
+                      different source
+                    </span>
+                  ) : null}
                 </span>
                 {repo.connection?.displayName ? (
                   <span className="text-xs text-muted-foreground">
-                    {repo.connection.displayName}
+                    {sourceControlConnectionLabel(repo.connection)}
                   </span>
                 ) : null}
                 {repo.private && <span className="text-xs text-muted-foreground">private</span>}

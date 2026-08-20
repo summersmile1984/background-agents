@@ -127,13 +127,68 @@ describe("MetadataSection", () => {
       />
     );
 
-    expect(screen.getByRole("link", { name: "acme/web" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "acme/api" })).toBeInTheDocument();
+    expect(screen.getByText("acme/web")).toBeInTheDocument();
+    expect(screen.getByText("acme/api")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "acme/web" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "acme/api" })).not.toBeInTheDocument();
     expect(screen.getByText("primary")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "#1" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "#2" })).toBeInTheDocument();
     expect(screen.getByText("open")).toBeInTheDocument();
     expect(screen.getByText("merged")).toBeInTheDocument();
+  });
+
+  it("uses provider-owned repository URLs and shows the pinned source", () => {
+    const state = {
+      ...member("team", "backend", 0),
+      repositoryKey: "repo_gitea_1",
+      connectionId: "scm_gitea_1",
+      branchName: "agent/change",
+    };
+    render(
+      <MetadataSection
+        createdAt={Date.now()}
+        baseBranch="main"
+        branchName="agent/change"
+        repoOwner="team"
+        repoName="backend"
+        repositories={[state]}
+        repositoryCatalog={[
+          {
+            id: 1,
+            repositoryKey: "repo_gitea_1",
+            connectionId: "scm_gitea_1",
+            provider: "gitea",
+            fullName: "team/backend",
+            owner: "team",
+            name: "backend",
+            description: null,
+            private: true,
+            defaultBranch: "main",
+            webUrl: "https://gitea.aotsea.com/team/backend",
+            cloneUrl: "https://gitea.aotsea.com/team/backend.git",
+            connection: {
+              id: "scm_gitea_1",
+              provider: "gitea",
+              displayName: "Aotsea",
+              baseUrl: "https://gitea.aotsea.com",
+            },
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "team/backend" })).toHaveAttribute(
+      "href",
+      "https://gitea.aotsea.com/team/backend"
+    );
+    expect(screen.getByText("Gitea · Aotsea")).toBeInTheDocument();
+    const branchLinks = screen.getAllByRole("link", { name: /main|agent\/change/ });
+    expect(
+      branchLinks.every((link) =>
+        link.getAttribute("href")?.startsWith("https://gitea.aotsea.com/")
+      )
+    ).toBe(true);
   });
 
   it("renders every PR chip for a member holding several PRs", () => {

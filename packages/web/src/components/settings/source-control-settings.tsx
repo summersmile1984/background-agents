@@ -5,6 +5,7 @@ import useSWR, { mutate } from "swr";
 import { toast } from "sonner";
 import type {
   SourceControlConnectionDetails,
+  SourceControlConnectionPreflight,
   SourceControlConnectionProbe,
 } from "@open-inspect/shared/types/source-control";
 import { browserApiFetch } from "@/lib/browser-api-fetch";
@@ -12,6 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  isEphemeralSourceControlUrl,
+  sourceControlHostname,
+  sourceControlProviderLabel,
+} from "@/lib/scm-presentation";
 
 const CONNECTIONS_API = "/api/scm/connections" as const;
 const MIGRATION_PREFLIGHT_API = "/api/scm/migration/preflight" as const;
@@ -54,6 +60,28 @@ function healthClass(health: SourceControlConnectionDetails["health"]): string {
   return "bg-amber-500";
 }
 
+function checkedLabel(lastCheckedAt: number | null): string {
+  if (lastCheckedAt === null) return "Never checked";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - lastCheckedAt) / 60_000));
+  if (elapsedMinutes < 1) return "Checked just now";
+  if (elapsedMinutes < 60) return `Checked ${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Checked ${elapsedHours}h ago`;
+  return `Checked ${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+function enabledCapabilityLabels(connection: SourceControlConnectionDetails): string[] {
+  const labels: string[] = [];
+  if (connection.capabilities.listRepositories) labels.push("Repositories");
+  if (connection.capabilities.listBranches) labels.push("Branches");
+  if (connection.capabilities.createPullRequest) labels.push("Pull requests");
+  if (connection.capabilities.draftPullRequest) labels.push("Draft PRs");
+  if (connection.capabilities.webhooks) labels.push("Webhooks");
+  if (connection.capabilities.userOAuth) labels.push("User OAuth");
+  if (connection.capabilities.commitSigning) labels.push("Commit signing");
+  return labels;
+}
+
 function ConnectionCard({
   connection,
   canManage,
@@ -64,6 +92,8 @@ function ConnectionCard({
   onEdit: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const ephemeral = isEphemeralSourceControlUrl(connection.baseUrl);
+  const capabilities = enabledCapabilityLabels(connection);
 
   async function act(kind: "test" | "disable") {
     if (kind === "disable" && !window.confirm(`Disable ${connection.displayName}?`)) return;
@@ -101,24 +131,50 @@ function ConnectionCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">{connection.displayName}</h3>
-            <span className="text-xs uppercase text-muted-foreground">{connection.provider}</span>
+            <span className="text-xs text-muted-foreground">
+              {sourceControlProviderLabel(connection.provider)}
+            </span>
+            <span
+              className={`border px-1.5 py-0.5 text-[11px] ${
+                ephemeral
+                  ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                  : "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+              }`}
+            >
+              {ephemeral ? "Ephemeral test" : "Persistent host"}
+            </span>
             {connection.isDefault ? (
               <span className="border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
                 Default
               </span>
             ) : null}
           </div>
-          <p className="mt-1 break-all text-xs text-muted-foreground">{connection.baseUrl}</p>
+          <p className="mt-1 break-all text-xs text-muted-foreground">
+            {sourceControlHostname(connection.baseUrl)}
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <span className={`h-2 w-2 rounded-full ${healthClass(connection.health)}`} />
               {connection.health}
             </span>
             <span>{connection.version ? `Gitea ${connection.version}` : "Version unknown"}</span>
+            <span>{checkedLabel(connection.lastCheckedAt)}</span>
             <span>
               {connection.credentialConfigured ? "Credential stored" : "Credential missing"}
             </span>
           </div>
+          {capabilities.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Connection capabilities">
+              {capabilities.map((capability) => (
+                <span
+                  key={capability}
+                  className="border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {capability}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {connection.lastErrorCode ? (
             <p className="mt-2 text-xs text-destructive">{connection.lastErrorCode}</p>
           ) : null}
@@ -157,15 +213,64 @@ function ConnectionForm({
 }) {
   const [displayName, setDisplayName] = useState(existing?.displayName ?? "Gitea");
   const [baseUrl, setBaseUrl] = useState(existing?.baseUrl ?? "");
-  const [username, setUsername] = useState(existing?.username ?? "");
   const [accessToken, setAccessToken] = useState("");
   const [isDefault, setIsDefault] = useState(existing?.isDefault ?? false);
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [saving, setSaving] = useState(false);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<SourceControlConnectionPreflight | null>(
+    existing?.version
+      ? {
+          status: "ready",
+          baseUrl: existing.baseUrl,
+          apiBaseUrl: existing.apiBaseUrl,
+          cloneBaseUrl: existing.cloneBaseUrl,
+          host: sourceControlHostname(existing.baseUrl),
+          version: existing.version,
+        }
+      : null
+  );
+
+  async function checkHost() {
+    if (!baseUrl.trim()) {
+      toast.error("Enter the Gitea base URL first.");
+      return;
+    }
+    setPreflightBusy(true);
+    setPreflightError(null);
+    try {
+      const response = await browserApiFetch("/api/scm/connections/preflight", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "gitea", baseUrl }),
+      });
+      const data = (await response.json()) as {
+        preflight?: SourceControlConnectionPreflight;
+        error?: string;
+      };
+      if (!response.ok || !data.preflight) {
+        throw new Error(data.error ?? "Gitea host preflight failed");
+      }
+      setBaseUrl(data.preflight.baseUrl);
+      setPreflight(data.preflight);
+      toast.success(`Gitea ${data.preflight.version} is reachable and permitted.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Gitea host preflight failed";
+      setPreflight(null);
+      setPreflightError(message);
+    } finally {
+      setPreflightBusy(false);
+    }
+  }
 
   async function save() {
-    if (!displayName.trim() || !baseUrl.trim() || !username.trim()) {
-      toast.error("Name, base URL, and service username are required.");
+    if (!displayName.trim() || !baseUrl.trim()) {
+      toast.error("Name and base URL are required.");
+      return;
+    }
+    if (!preflight || preflight.baseUrl !== baseUrl) {
+      toast.error("Check the host and version before saving.");
       return;
     }
     if (!existing && !accessToken) {
@@ -180,7 +285,6 @@ function ConnectionForm({
             expectedRevision: existing.revision,
             displayName,
             baseUrl,
-            username,
             enabled,
             ...(accessToken ? { accessToken } : {}),
             ...(isDefault ? { isDefault: true as const } : {}),
@@ -189,7 +293,6 @@ function ConnectionForm({
             provider: "gitea" as const,
             displayName,
             baseUrl,
-            username,
             accessToken,
             isDefault,
           };
@@ -222,77 +325,126 @@ function ConnectionForm({
           The PAT is encrypted by the control plane and is never returned to the browser or sandbox.
         </p>
       </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="scm-display-name">Display name</Label>
-          <Input
-            id="scm-display-name"
-            className="mt-1.5"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            disabled={saving}
-          />
+      <div className="mt-5 space-y-5">
+        <div className="border-l-2 border-border pl-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            1 · Host and identity
+          </p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="scm-display-name">Display name</Label>
+              <Input
+                id="scm-display-name"
+                className="mt-1.5"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                disabled={saving}
+              />
+            </div>
+            <div>
+              <Label htmlFor="scm-base-url">Gitea base URL</Label>
+              <Input
+                id="scm-base-url"
+                className="mt-1.5"
+                type="url"
+                placeholder="https://gitea.example.com"
+                value={baseUrl}
+                onChange={(event) => {
+                  setBaseUrl(event.target.value);
+                  setPreflight(null);
+                  setPreflightError(null);
+                }}
+                disabled={saving || preflightBusy}
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void checkHost()}
+              disabled={saving || preflightBusy || !baseUrl.trim()}
+            >
+              {preflightBusy ? "Checking…" : "Check host and version"}
+            </Button>
+            {preflight ? (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+                Ready · {preflight.host} · Gitea {preflight.version}
+              </span>
+            ) : null}
+            {preflightError ? (
+              <span className="text-xs text-destructive">{preflightError}</span>
+            ) : null}
+          </div>
         </div>
-        <div>
-          <Label htmlFor="scm-username">Service username</Label>
-          <Input
-            id="scm-username"
-            className="mt-1.5"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            disabled={saving}
-            autoComplete="off"
-          />
+
+        <div className={`border-l-2 pl-4 ${preflight ? "border-border" : "border-border/40"}`}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            2 · Service credential
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            The authenticated Gitea username and visible repository count are discovered from the
+            PAT during the final test.
+          </p>
+          <div className="mt-3">
+            <Label htmlFor="scm-token">
+              {existing ? "Replacement PAT (optional)" : "Personal access token"}
+            </Label>
+            <Input
+              id="scm-token"
+              className="mt-1.5 font-mono"
+              type="password"
+              value={accessToken}
+              onChange={(event) => setAccessToken(event.target.value)}
+              disabled={saving || !preflight}
+              autoComplete="new-password"
+              placeholder={existing ? "Leave blank to keep the stored token" : "Paste PAT"}
+            />
+            {existing?.username ? (
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Current service account: {existing.username}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor="scm-base-url">Gitea base URL</Label>
-          <Input
-            id="scm-base-url"
-            className="mt-1.5"
-            type="url"
-            placeholder="https://gitea.example.com"
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            disabled={saving}
-          />
+
+        <div className={`border-l-2 pl-4 ${preflight ? "border-border" : "border-border/40"}`}>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            3 · Enable and confirm
+          </p>
+          <div className="mt-3 flex flex-wrap gap-5">
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <Switch
+                checked={isDefault}
+                onCheckedChange={setIsDefault}
+                disabled={saving || existing?.isDefault}
+              />
+              Default connection
+            </label>
+            {existing ? (
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <Switch checked={enabled} onCheckedChange={setEnabled} disabled={saving} />
+                Enabled
+              </label>
+            ) : null}
+          </div>
+          {preflight ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              The connection will use {preflight.baseUrl}. Credentials remain server-side; sandboxes
+              access repositories through a session-scoped Git proxy.
+            </p>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Complete the host check before entering credentials or enabling this connection.
+            </p>
+          )}
         </div>
-        <div className="sm:col-span-2">
-          <Label htmlFor="scm-token">
-            {existing ? "Replacement PAT (optional)" : "Personal access token"}
-          </Label>
-          <Input
-            id="scm-token"
-            className="mt-1.5 font-mono"
-            type="password"
-            value={accessToken}
-            onChange={(event) => setAccessToken(event.target.value)}
-            disabled={saving}
-            autoComplete="new-password"
-            placeholder={existing ? "Leave blank to keep the stored token" : "Paste PAT"}
-          />
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-5">
-        <label className="flex items-center gap-2 text-sm text-foreground">
-          <Switch
-            checked={isDefault}
-            onCheckedChange={setIsDefault}
-            disabled={saving || existing?.isDefault}
-          />
-          Default connection
-        </label>
-        {existing ? (
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <Switch checked={enabled} onCheckedChange={setEnabled} disabled={saving} />
-            Enabled
-          </label>
-        ) : null}
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="outline" onClick={onDone} disabled={saving}>
           Cancel
         </Button>
-        <Button onClick={() => void save()} disabled={saving}>
+        <Button onClick={() => void save()} disabled={saving || preflightBusy || !preflight}>
           {saving ? "Testing…" : "Test and save"}
         </Button>
       </div>
