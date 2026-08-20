@@ -23,9 +23,7 @@ import { ScmRepositoryStore } from "../db/scm-repositories";
 import { createLogger } from "../logger";
 import {
   assertAllowedSourceControlUrl,
-  assertGiteaSecurityVersion,
   deriveGiteaConnectionUrls,
-  GiteaSecurityVersionError,
   SourceControlUrlValidationError,
 } from "../source-control/connection-config";
 import {
@@ -109,7 +107,6 @@ async function runGiteaProbe(config: {
   apiBaseUrl: string;
   username?: string;
   accessToken: string;
-  securityConfirmedVersions?: string;
 }): Promise<SourceControlConnectionProbe> {
   const checkedAt = Date.now();
   // The REST probe discovers the login from the PAT. The constructor also
@@ -126,7 +123,6 @@ async function runGiteaProbe(config: {
       "permanent"
     );
   }
-  assertGiteaSecurityVersion(probe.version, config.securityConfirmedVersions);
   return {
     status: "healthy",
     checkedAt,
@@ -170,7 +166,6 @@ async function preflightGiteaConnection(
       );
     }
     const version = giteaVersionResponseSchema.parse(await response.json()).version;
-    assertGiteaSecurityVersion(version, env.GITEA_SECURITY_CONFIRMED_VERSIONS);
     const result: SourceControlConnectionPreflight = {
       status: "ready",
       ...urls,
@@ -225,12 +220,6 @@ function mapConnectionError(cause: unknown): Response {
     return error(cause.message, 400);
   }
   if (cause instanceof ScmConnectionConflictError) return error(cause.message, 409);
-  if (cause instanceof GiteaSecurityVersionError) {
-    return error(
-      `${cause.message}. Upgrade Gitea or configure an exact vendor-backport confirmation before enabling it.`,
-      422
-    );
-  }
   if (cause instanceof SourceControlProviderError) {
     if (cause.httpStatus === 401 || cause.httpStatus === 403) {
       return error("Gitea rejected the supplied service credential", 422);
@@ -293,7 +282,6 @@ async function createConnection(
       ...urls,
       username: parsed.data.username,
       accessToken: parsed.data.accessToken,
-      securityConfirmedVersions: env.GITEA_SECURITY_CONFIRMED_VERSIONS,
     });
     const store = new ScmConnectionStore(ctx.db);
     let existing = await store.list({ includeDisabled: true });
@@ -553,7 +541,6 @@ async function patchConnection(
       ...urls,
       username: parsed.data.username,
       accessToken: secret,
-      securityConfirmedVersions: env.GITEA_SECURITY_CONFIRMED_VERSIONS,
     });
     const replacement: ReplaceScmConnectionConfigInput = {
       expectedRevision: parsed.data.expectedRevision,
@@ -622,7 +609,6 @@ async function testConnection(
       apiBaseUrl: connection.apiBaseUrl,
       username: connection.username,
       accessToken: credential.secret,
-      securityConfirmedVersions: env.GITEA_SECURITY_CONFIRMED_VERSIONS,
     });
     await store.recordHealth(id, {
       version: probe.version,

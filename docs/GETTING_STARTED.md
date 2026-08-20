@@ -948,9 +948,8 @@ curl -I "$(terraform output -raw web_app_url)"
 
 1. Add the exact Gitea `host[:port]` to `scm_allowed_hosts` in `terraform.tfvars`, then apply
    Terraform. Do not put the PAT in Terraform.
-2. Upgrade Gitea to a security-supported version. For an Enterprise build that reports an older
-   community base, obtain written vendor confirmation of the required backports before adding that
-   exact version to `gitea_security_confirmed_versions`.
+2. Keep the Gitea instance on a vendor-supported release and review its security advisories. The
+   detected version is recorded for diagnostics but does not block connection setup.
 3. In Open-Inspect, open **Settings → Source Control**. If the migration card appears, run bounded
    batches until the preflight is clean. Unresolved active repositories must be repaired before a
    second connection is allowed.

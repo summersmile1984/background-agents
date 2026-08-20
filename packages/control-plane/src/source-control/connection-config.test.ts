@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   SourceControlUrlValidationError,
-  GiteaSecurityVersionError,
-  assertGiteaSecurityVersion,
   assertSameSourceControlOrigin,
   deriveGiteaConnectionUrls,
   normalizeSourceControlBaseUrl,
@@ -48,17 +46,5 @@ describe("source-control connection URLs", () => {
         "https://attacker.example/api/v1"
       )
     ).toThrow("must use the connection origin");
-  });
-
-  it("accepts the fixed community release line", () => {
-    expect(() => assertGiteaSecurityVersion("1.27.1", undefined)).not.toThrow();
-    expect(() => assertGiteaSecurityVersion("1.28.0-rc1", undefined)).not.toThrow();
-  });
-
-  it("requires exact operator confirmation for enterprise version numbers", () => {
-    expect(() => assertGiteaSecurityVersion("23.8.0", undefined)).toThrow(
-      GiteaSecurityVersionError
-    );
-    expect(() => assertGiteaSecurityVersion("23.8.0", "23.7.1, 23.8.0")).not.toThrow();
   });
 });

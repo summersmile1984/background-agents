@@ -99,7 +99,6 @@ module "control_plane_worker" {
       { name = "MODEL_RELAY_PUBLIC_URL", value = var.model_relay_public_url },
       { name = "MODEL_RELAY_ADMIN_URL", value = var.model_relay_admin_url },
       { name = "SCM_ALLOWED_HOSTS", value = var.scm_allowed_hosts },
-      { name = "GITEA_SECURITY_CONFIRMED_VERSIONS", value = var.gitea_security_confirmed_versions },
       { name = "SANDBOX_INACTIVITY_TIMEOUT_MS", value = tostring(var.sandbox_inactivity_timeout_ms) },
     ],
     local.github_oauth_enabled ? [

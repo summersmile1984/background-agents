@@ -569,8 +569,8 @@ export function SourceControlSettings() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Self-hosted hosts must also be present in the deployment allowlist. Enterprise Gitea
-        versions require an exact operator-confirmed security backport before they can be enabled.
+        Self-hosted hosts must also be present in the deployment allowlist. The detected Gitea
+        version is recorded for diagnostics but does not restrict connection setup.
       </p>
     </div>
   );

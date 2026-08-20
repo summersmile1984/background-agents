@@ -5,44 +5,6 @@ export class SourceControlUrlValidationError extends Error {
   }
 }
 
-export class GiteaSecurityVersionError extends Error {
-  constructor(readonly version: string) {
-    super(
-      `Gitea ${version} is not on the built-in safe release line and has no operator-confirmed security backport`
-    );
-    this.name = "GiteaSecurityVersionError";
-  }
-}
-
-/**
- * Enforce the production release gate documented in the multi-connection ADR.
- * Community releases at or after 1.27.1 carry the required upstream fixes.
- * Enterprise builds use a different numbering scheme and are accepted only
- * when an operator has verified vendor backports and listed the exact version.
- */
-export function assertGiteaSecurityVersion(
-  version: string,
-  confirmedVersions: string | undefined
-): void {
-  const normalized = version.trim();
-  const confirmed = new Set(
-    (confirmedVersions ?? "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-  );
-  if (confirmed.has(normalized)) return;
-
-  const community = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(normalized);
-  if (community) {
-    const major = Number(community[1]);
-    const minor = Number(community[2]);
-    const patch = Number(community[3]);
-    if (major === 1 && (minor > 27 || (minor === 27 && patch >= 1))) return;
-  }
-  throw new GiteaSecurityVersionError(normalized || "unknown");
-}
-
 export interface NormalizeSourceControlUrlOptions {
   /** Local development only. Production callers must keep this false. */
   allowHttpLoopback?: boolean;

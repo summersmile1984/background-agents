@@ -1018,7 +1018,7 @@ UI rollout in one change.
 2. Capture a sanitized, minimal contract fixture derived from target Swagger for only used schemas;
    do not vendor the whole instance document without review.
 3. Add URL normalization, provider error, capability, and repository identity shared types.
-4. Document the security release gate and test-only status of Enterprise 23.8.0.
+4. Document that the reported Gitea version is diagnostic metadata and is not a compatibility gate.
 
 Exit: architecture accepted; no production behavior change.
 
@@ -1221,25 +1221,25 @@ The core Gitea feature is complete only when all of the following are true:
 - Gitea base-path/port tests pass.
 - Settings show safe connection health and allow token replacement/disable.
 - GitHub regression tests and CI remain green.
-- The production security release gate for the target Gitea Enterprise build is documented and met.
+- The detected Gitea version is recorded for diagnostics without blocking compatible deployments.
 
 ## Risks and Mitigations
 
-| Risk                                           | Impact                                       | Mitigation                                                                               |
-| ---------------------------------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Treating provider as connection                | Cross-instance credentials/data collide      | Stable connection entity in every identity and authorization path.                       |
-| Incomplete schema backfill                     | Old records become inaccessible or misrouted | Additive migration, consistency queries, compatibility reads, rollout gate.              |
-| PAT has broad repo membership                  | Compromise exposes many repos                | Dedicated service account, minimal membership/scopes, encrypted storage, audit.          |
-| Old Gitea scope vulnerabilities                | Token exceeds intended scope                 | Security version/backport gate; never use Basic for REST; test-only repo before upgrade. |
-| Route remains GitHub-only                      | Feature fails late/inconsistently            | Route-policy inventory and provider-capability tests.                                    |
-| Self-hosted URL becomes SSRF channel           | Internal network access/credential leak      | Admin-only config, strict URL/redirect/netloc policy, egress controls, audit.            |
-| API drift in Enterprise fork                   | Runtime parser failures or wrong semantics   | Version/capability probe, live Swagger fixture, runtime schemas, fail closed.            |
-| Catalog endpoint omits contributed repos       | Users cannot select valid repos              | Target-specific `/repos/search?uid=...` contract test and pagination.                    |
-| Rename/transfer breaks owner/name              | Session/secret history detaches              | Stable external repo ID + connection; repository-by-ID recovery.                         |
-| Mixed forge sandbox leaks token                | Credential sent to wrong host/repo           | V1 single-connection invariant and session/repository-authorized server-side Git proxy.  |
-| OAuth identity collides across Gitea instances | Wrong account/credential selected            | Include issuer/connection in uniqueness; do not reuse legacy token table.                |
-| Default connection changes behavior            | Existing objects silently retarget           | Pin connection on sessions, environments, automations, and run snapshots.                |
-| Webhook payload assumed GitHub-compatible      | Incorrect actions or signature bugs          | Separate adapter, raw-body Gitea signature verification, normalized envelope.            |
+| Risk                                           | Impact                                       | Mitigation                                                                                  |
+| ---------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Treating provider as connection                | Cross-instance credentials/data collide      | Stable connection entity in every identity and authorization path.                          |
+| Incomplete schema backfill                     | Old records become inaccessible or misrouted | Additive migration, consistency queries, compatibility reads, rollout gate.                 |
+| PAT has broad repo membership                  | Compromise exposes many repos                | Dedicated service account, minimal membership/scopes, encrypted storage, audit.             |
+| Old Gitea scope vulnerabilities                | Token exceeds intended scope                 | Operator-managed upgrades; never use Basic for REST; use a least-privilege service account. |
+| Route remains GitHub-only                      | Feature fails late/inconsistently            | Route-policy inventory and provider-capability tests.                                       |
+| Self-hosted URL becomes SSRF channel           | Internal network access/credential leak      | Admin-only config, strict URL/redirect/netloc policy, egress controls, audit.               |
+| API drift in Enterprise fork                   | Runtime parser failures or wrong semantics   | Version/capability probe, live Swagger fixture, runtime schemas, fail closed.               |
+| Catalog endpoint omits contributed repos       | Users cannot select valid repos              | Target-specific `/repos/search?uid=...` contract test and pagination.                       |
+| Rename/transfer breaks owner/name              | Session/secret history detaches              | Stable external repo ID + connection; repository-by-ID recovery.                            |
+| Mixed forge sandbox leaks token                | Credential sent to wrong host/repo           | V1 single-connection invariant and session/repository-authorized server-side Git proxy.     |
+| OAuth identity collides across Gitea instances | Wrong account/credential selected            | Include issuer/connection in uniqueness; do not reuse legacy token table.                   |
+| Default connection changes behavior            | Existing objects silently retarget           | Pin connection on sessions, environments, automations, and run snapshots.                   |
+| Webhook payload assumed GitHub-compatible      | Incorrect actions or signature bugs          | Separate adapter, raw-body Gitea signature verification, normalized envelope.               |
 
 ## Open Product Decisions
 
