@@ -25,8 +25,21 @@ const mocks = vi.hoisted(() => ({
     description: string | null;
     private: boolean;
     defaultBranch: string;
+    connection?: {
+      id: string;
+      provider: "github" | "gitea";
+      displayName: string;
+      baseUrl: string;
+    };
   }>,
   loadingReposValue: false,
+  repoConnectionsValue: [] as Array<{
+    id: string;
+    provider: "github" | "gitea";
+    displayName: string;
+    baseUrl: string;
+  }>,
+  repoConnectionErrorsValue: [] as Array<{ connectionId: string; code: string }>,
   environmentsLoadingValue: false,
   environmentsValue: [] as Array<{
     id: string;
@@ -97,7 +110,13 @@ vi.mock("@/components/sidebar-layout", () => ({
 }));
 
 vi.mock("@/hooks/use-repos", () => ({
-  useRepos: () => ({ repos: mocks.reposValue, loading: mocks.loadingReposValue }),
+  useRepos: () => ({
+    repos: mocks.reposValue,
+    connections: mocks.repoConnectionsValue,
+    connectionErrors: mocks.repoConnectionErrorsValue,
+    loading: mocks.loadingReposValue,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/hooks/use-branches", () => ({
@@ -134,6 +153,8 @@ beforeAll(() => {
 beforeEach(() => {
   mocks.reposValue = [repo];
   mocks.loadingReposValue = false;
+  mocks.repoConnectionsValue = [];
+  mocks.repoConnectionErrorsValue = [];
   mocks.environmentsLoadingValue = false;
   mocks.environmentsValue = [];
   mocks.routerPush.mockReset();
@@ -249,6 +270,58 @@ describe("Home", () => {
     expect(body).toMatchObject({ repositoryKey: "repo_gitea_1", branch: "main" });
     expect(body).not.toHaveProperty("repoOwner");
     expect(body).not.toHaveProperty("repoName");
+  });
+
+  it("shows the source explicitly and filters repositories when switching to Gitea", async () => {
+    const githubConnection = {
+      id: "scm_github_1",
+      provider: "github" as const,
+      displayName: "GitHub",
+      baseUrl: "https://github.com",
+    };
+    const giteaConnection = {
+      id: "scm_gitea_1",
+      provider: "gitea" as const,
+      displayName: "Aotsea",
+      baseUrl: "https://gitea.aotsea.com",
+    };
+    mocks.repoConnectionsValue = [githubConnection, giteaConnection];
+    mocks.reposValue = [
+      {
+        ...repo,
+        repositoryKey: "repo_github_1",
+        connectionId: githubConnection.id,
+        connection: githubConnection,
+      },
+      {
+        ...repo,
+        id: 2,
+        fullName: "team/backend-service",
+        owner: "team",
+        name: "backend-service",
+        repositoryKey: "repo_gitea_1",
+        connectionId: giteaConnection.id,
+        connection: giteaConnection,
+      },
+    ];
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const source = await screen.findByRole("button", { name: /source.*github.*github/i });
+    await user.click(source);
+    await user.click(
+      within(screen.getByRole("listbox")).getByRole("option", { name: /gitea.*aotsea/i })
+    );
+
+    const target = screen.getByRole("button", { name: /select repo/i });
+    await user.click(target);
+    const targetList = screen.getByRole("listbox");
+    expect(
+      within(targetList).queryByRole("option", { name: /open-inspect\/background-agents/i })
+    ).not.toBeInTheDocument();
+    await user.click(within(targetList).getByRole("option", { name: /team\/backend-service/i }));
+
+    expect(screen.getByRole("button", { name: /team\/backend-service/i })).toBeInTheDocument();
   });
 
   it("invalidates a warmed session when the managed skill selection changes", async () => {
@@ -442,18 +515,21 @@ describe("Home", () => {
     await screen.findByRole("button", { name: /full-stack/i });
   });
 
-  it("falls back to the repo default when the stored environment was deleted", async () => {
+  it("requires a fresh choice when the stored environment was deleted", async () => {
     localStorage.setItem("open-inspect-last-selected-repo", "env:deleted-env");
     render(<Home />);
 
-    await screen.findByRole("button", { name: /background-agents/i });
+    await screen.findByRole("button", { name: /select repo/i });
+    expect(screen.getByText(/previous target is unavailable/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send/i })).toBeDisabled();
   });
 
-  it("falls back to the repo default on a malformed stored value", async () => {
+  it("requires a fresh choice for a malformed stored value", async () => {
     localStorage.setItem("open-inspect-last-selected-repo", "env:");
     render(<Home />);
 
-    await screen.findByRole("button", { name: /background-agents/i });
+    await screen.findByRole("button", { name: /select repo/i });
+    expect(screen.getByText(/previous target is unavailable/i)).toBeInTheDocument();
   });
 
   it("still restores a stored repository fullName (legacy value)", async () => {

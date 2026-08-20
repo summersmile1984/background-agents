@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type {
   SourceControlConnectionDetails,
+  SourceControlConnectionPreflight,
   SourceControlConnectionProbe,
 } from "@open-inspect/shared/types/source-control";
 import { generateId } from "../auth/crypto";
@@ -47,13 +48,14 @@ import {
 } from "./shared";
 
 const logger = createLogger("router:scm-connections");
+const GITEA_PREFLIGHT_TIMEOUT_MS = 10_000;
 
 const createConnectionSchema = z
   .object({
     provider: z.literal("gitea"),
     displayName: z.string().trim().min(1).max(100),
     baseUrl: z.string().trim().min(1).max(2_048),
-    username: z.string().trim().min(1).max(255),
+    username: z.string().trim().min(1).max(255).optional(),
     accessToken: z.string().min(1).max(8_192),
     isDefault: z.boolean().optional(),
   })
@@ -77,6 +79,15 @@ const backfillSchema = z
   })
   .strict();
 
+const preflightConnectionSchema = z
+  .object({
+    provider: z.literal("gitea"),
+    baseUrl: z.string().trim().min(1).max(2_048),
+  })
+  .strict();
+
+const giteaVersionResponseSchema = z.object({ version: z.string().trim().min(1) });
+
 function connectionId(match: RegExpMatchArray): string | Response {
   const id = match.groups?.id;
   return id ? decodeURIComponent(id) : error("Connection id is required", 400);
@@ -96,14 +107,20 @@ function allowedGiteaUrls(env: Env, baseUrl: string) {
 async function runGiteaProbe(config: {
   baseUrl: string;
   apiBaseUrl: string;
-  username: string;
+  username?: string;
   accessToken: string;
   securityConfirmedVersions?: string;
 }): Promise<SourceControlConnectionProbe> {
   const checkedAt = Date.now();
-  const provider = new GiteaSourceControlProvider(config);
+  // The REST probe discovers the login from the PAT. The constructor also
+  // needs a Git-HTTP username, but it is not used by probe(); replace it with
+  // the discovered login before persisting the connection.
+  const provider = new GiteaSourceControlProvider({
+    ...config,
+    username: config.username ?? "token-owner",
+  });
   const probe = await provider.probe();
-  if (probe.login.toLowerCase() !== config.username.toLowerCase()) {
+  if (config.username && probe.login.toLowerCase() !== config.username.toLowerCase()) {
     throw new SourceControlProviderError(
       "Gitea service username does not match the authenticated token owner.",
       "permanent"
@@ -118,6 +135,52 @@ async function runGiteaProbe(config: {
     visibleRepositoryCount: probe.visibleRepositoryCount,
     errorCode: null,
   };
+}
+
+async function preflightGiteaConnection(
+  request: Request,
+  env: Env,
+  ctx: UserRouteContext
+): Promise<Response> {
+  const rejection = await requireAdmin(env, ctx);
+  if (rejection) return rejection;
+  const raw = await parseJsonBody<unknown>(request);
+  if (raw instanceof Response) return raw;
+  const parsed = preflightConnectionSchema.safeParse(raw);
+  if (!parsed.success) {
+    return error(parsed.error.issues[0]?.message ?? "Invalid connection preflight", 400);
+  }
+
+  try {
+    const urls = allowedGiteaUrls(env, parsed.data.baseUrl);
+    const response = await fetch(`${urls.apiBaseUrl}/version`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(GITEA_PREFLIGHT_TIMEOUT_MS),
+    });
+    if (response.status >= 300 && response.status < 400) {
+      throw new SourceControlProviderError("Gitea version endpoint redirected.", "permanent");
+    }
+    if (!response.ok) {
+      throw SourceControlProviderError.fromFetchError(
+        `Gitea version preflight failed (${response.status}).`,
+        new Error("Gitea version preflight failed"),
+        response.status
+      );
+    }
+    const version = giteaVersionResponseSchema.parse(await response.json()).version;
+    assertGiteaSecurityVersion(version, env.GITEA_SECURITY_CONFIRMED_VERSIONS);
+    const result: SourceControlConnectionPreflight = {
+      status: "ready",
+      ...urls,
+      host: new URL(urls.baseUrl).host,
+      version,
+    };
+    return json({ preflight: result });
+  } catch (cause) {
+    return mapConnectionError(cause);
+  }
 }
 
 function publicConnection(
@@ -265,7 +328,7 @@ async function createConnection(
         ...urls,
         authMode: "pat",
         credentialSource: "encrypted_d1",
-        username: parsed.data.username,
+        username: probe.serviceUser,
         capabilities: GITEA_CAPABILITIES,
         enabled: true,
         isDefault: parsed.data.isDefault === true || existing.length === 0,
@@ -486,11 +549,9 @@ async function patchConnection(
     const secret = parsed.data.accessToken ?? (await credentials.get(id, "service_token"))?.secret;
     if (!secret) return error("SCM connection has no usable service credential", 422);
     const urls = allowedGiteaUrls(env, parsed.data.baseUrl ?? current.baseUrl);
-    const username = parsed.data.username ?? current.username;
-    if (!username) return error("Gitea service username is required", 400);
     const probe = await runGiteaProbe({
       ...urls,
-      username,
+      username: parsed.data.username,
       accessToken: secret,
       securityConfirmedVersions: env.GITEA_SECURITY_CONFIRMED_VERSIONS,
     });
@@ -501,7 +562,7 @@ async function patchConnection(
       ...urls,
       authMode: "pat",
       credentialSource: "encrypted_d1",
-      username,
+      username: probe.serviceUser,
       capabilities: GITEA_CAPABILITIES,
       enabled: parsed.data.enabled ?? current.enabled,
     };
@@ -604,6 +665,11 @@ export const scmConnectionRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_HUMAN_USER
     method: "POST",
     pattern: parsePattern("/scm/migration/backfill"),
     handler: async (request, env, _match, ctx) => runBackfill(request, env, ctx),
+  },
+  {
+    method: "POST",
+    pattern: parsePattern("/scm/connections/preflight"),
+    handler: async (request, env, _match, ctx) => preflightGiteaConnection(request, env, ctx),
   },
   {
     method: "GET",

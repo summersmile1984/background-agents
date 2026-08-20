@@ -230,7 +230,13 @@ async function handleListRepos(
   if (requestedConnectionId && connectionErrors.length > 0) {
     return error("Failed to fetch repositories for the selected connection", 503);
   }
-  return json({ repos, cached: allCached, cachedAt, connectionErrors });
+  return json({
+    repos,
+    connections: connections.map(connectionSummary),
+    cached: allCached,
+    cachedAt,
+    connectionErrors,
+  });
 }
 
 /**

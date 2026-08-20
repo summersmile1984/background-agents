@@ -9,7 +9,12 @@ import type { ImageBuildStatus } from "@open-inspect/shared/types/image-builds";
 import type { ComboboxGroup, ComboboxOption } from "@/components/ui/combobox";
 import { useBranches } from "@/hooks/use-branches";
 import { useEnvironments } from "@/hooks/use-environments";
-import { useRepos, type Repo } from "@/hooks/use-repos";
+import {
+  useRepos,
+  type Repo,
+  type RepoConnection,
+  type RepoConnectionError,
+} from "@/hooks/use-repos";
 import { repoSelectionValue } from "@/lib/repository-selection";
 import {
   IMAGE_BUILDS_KEY,
@@ -99,6 +104,15 @@ export function describeRepository(
   return withAnnotation(base, prebuildAnnotation(prebuildEnabledRepoScopeIds.has(scopeId), status));
 }
 
+function environmentConnectionId(environment: Environment): string | null {
+  const ids = new Set(
+    environment.repositories
+      .map((repository) => repository.connectionId)
+      .filter((id): id is string => Boolean(id))
+  );
+  return ids.size === 1 ? [...ids][0] : null;
+}
+
 /** Render contract for SessionTargetPicker: the target/branch/multi-select controls. */
 export interface SessionTargetPickerProps {
   sessionTarget: SessionTarget | null;
@@ -113,6 +127,14 @@ export interface SessionTargetPickerProps {
   loadingBranches: boolean;
   repos: Repo[];
   loadingRepos: boolean;
+  sourceConnections: RepoConnection[];
+  selectedSourceConnectionId: string;
+  onSourceConnectionChange: (connectionId: string) => void;
+  connectionErrors: RepoConnectionError[];
+  onRefreshRepositories: () => void;
+  selectionNotice: string | null;
+  repositoryLoadFailed: boolean;
+  catalogCachedAt: string | null;
 }
 
 /** Launch-facing selection state for the page: warming identity and request construction. */
@@ -141,10 +163,31 @@ export interface SessionTargetSelection {
  * via `pickerProps`; the page keeps model, prompt, and warming.
  */
 export function useSessionTargetPicker(): SessionTargetSelection {
-  const { repos, loading: loadingRepos } = useRepos();
+  const {
+    repos,
+    connections = [],
+    connectionErrors = [],
+    cached = false,
+    cachedAt = null,
+    loading: loadingRepos,
+    error: repositoryLoadError,
+    refresh: refreshRepositories = () => Promise.resolve(undefined),
+  } = useRepos();
   const { environments, loading: loadingEnvironments } = useEnvironments();
   const [sessionTarget, setSessionTarget] = useState<SessionTarget | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
+  const [selectedSourceConnectionId, setSelectedSourceConnectionId] = useState("");
+  const [selectionInitialized, setSelectionInitialized] = useState(false);
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
+
+  const sourceConnections = useMemo(() => {
+    if (connections.length > 0) return connections;
+    const deduplicated = new Map<string, RepoConnection>();
+    for (const repo of repos) {
+      if (repo.connection) deduplicated.set(repo.connection.id, repo.connection);
+    }
+    return [...deduplicated.values()];
+  }, [connections, repos]);
 
   const selectedRepo =
     sessionTarget?.kind === "repo"
@@ -188,7 +231,7 @@ export function useSessionTargetPicker(): SessionTargetSelection {
   // environment must not fall through to the repo default while environments
   // are still loading — wait for the fetch to settle before deciding.
   useEffect(() => {
-    if (sessionTarget) return;
+    if (selectionInitialized || sessionTarget) return;
 
     const storedValue = localStorage.getItem(LAST_SELECTED_TARGET_STORAGE_KEY);
     const storedTarget = storedValue ? parseTargetSelectValue(storedValue, null) : null;
@@ -197,27 +240,49 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       if (loadingEnvironments) return;
       if (environments.some((environment) => environment.id === storedTarget.environmentId)) {
         setSessionTarget(storedTarget);
+        const environment = environments.find(
+          (candidate) => candidate.id === storedTarget.environmentId
+        );
+        setSelectedSourceConnectionId(
+          (environment && environmentConnectionId(environment)) ?? sourceConnections[0]?.id ?? ""
+        );
+        setSelectionInitialized(true);
         return;
       }
-      // The stored environment was deleted — fall through to the repo default.
     }
 
     if (repos.length > 0) {
-      // A stored `env:<id>` value never matches a fullName, so a deleted
-      // environment lands on repos[0] here like any other stale value.
       const storedRepo = repos.find(
         (repo) => repoSelectionValue(repo) === storedValue || repo.fullName === storedValue
       );
+      if (storedValue && !storedRepo) {
+        setSelectedSourceConnectionId(sourceConnections[0]?.id ?? "");
+        setSelectionNotice("Your previous target is unavailable. Choose a source and repository.");
+        setSelectionInitialized(true);
+        return;
+      }
       const repo = storedRepo ?? repos[0];
       setSessionTarget({ kind: "repo", repoFullName: repoSelectionValue(repo) });
       setSelectedBranch(repo.defaultBranch);
+      setSelectedSourceConnectionId(repo.connectionId ?? sourceConnections[0]?.id ?? "");
+      setSelectionInitialized(true);
       return;
     }
 
-    if (!loadingRepos) {
+    if (!loadingRepos && !loadingEnvironments) {
       setSessionTarget({ kind: "none" });
+      setSelectedSourceConnectionId(sourceConnections[0]?.id ?? "");
+      setSelectionInitialized(true);
     }
-  }, [loadingRepos, repos, loadingEnvironments, environments, sessionTarget]);
+  }, [
+    loadingRepos,
+    repos,
+    loadingEnvironments,
+    environments,
+    sessionTarget,
+    selectionInitialized,
+    sourceConnections,
+  ]);
 
   // Persist launchable, restorable selections: repos and environments. Ad-hoc
   // lists and "no repository" keep whatever was stored before them.
@@ -230,7 +295,16 @@ export function useSessionTargetPicker(): SessionTargetSelection {
     (value: string) => {
       const nextTarget = parseTargetSelectValue(value, sessionTarget);
       setSessionTarget(nextTarget);
+      setSelectionInitialized(true);
+      setSelectionNotice(null);
       if (nextTarget.kind !== "repo") {
+        if (nextTarget.kind === "environment") {
+          const environment = environments.find(
+            (candidate) => candidate.id === nextTarget.environmentId
+          );
+          const connectionId = environment && environmentConnectionId(environment);
+          if (connectionId) setSelectedSourceConnectionId(connectionId);
+        }
         setSelectedBranch("");
         return;
       }
@@ -239,13 +313,31 @@ export function useSessionTargetPicker(): SessionTargetSelection {
           repoSelectionValue(candidate) === nextTarget.repoFullName ||
           candidate.fullName === nextTarget.repoFullName
       );
-      if (repo) setSelectedBranch(repo.defaultBranch);
+      if (repo) {
+        setSelectedBranch(repo.defaultBranch);
+        if (repo.connectionId) setSelectedSourceConnectionId(repo.connectionId);
+      }
     },
-    [repos, sessionTarget]
+    [environments, repos, sessionTarget]
   );
 
-  const onMultiSelectionChange = useCallback((repoFullNames: string[]) => {
-    setSessionTarget({ kind: "repos", repoFullNames });
+  const onMultiSelectionChange = useCallback(
+    (repoFullNames: string[]) => {
+      setSessionTarget({ kind: "repos", repoFullNames });
+      setSelectionInitialized(true);
+      setSelectionNotice(null);
+      const first = repos.find((repo) => repoSelectionValue(repo) === repoFullNames[0]);
+      if (first?.connectionId) setSelectedSourceConnectionId(first.connectionId);
+    },
+    [repos]
+  );
+
+  const onSourceConnectionChange = useCallback((connectionId: string) => {
+    setSelectedSourceConnectionId(connectionId);
+    setSessionTarget(null);
+    setSelectedBranch("");
+    setSelectionNotice(null);
+    setSelectionInitialized(true);
   }, []);
 
   const buildRequestFields = useCallback((): SessionTargetRequestFields | null => {
@@ -280,7 +372,7 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       case "none":
         return NO_REPOSITORY_LABEL;
       case "repo":
-        return selectedRepo?.name ?? sessionTarget.repoFullName;
+        return selectedRepo?.fullName ?? sessionTarget.repoFullName;
       case "environment":
         return selectedEnvironment?.name ?? "Environment";
       case "repos": {
@@ -293,6 +385,15 @@ export function useSessionTargetPicker(): SessionTargetSelection {
     }
   })();
 
+  const visibleRepos = selectedSourceConnectionId
+    ? repos.filter((repo) => !repo.connectionId || repo.connectionId === selectedSourceConnectionId)
+    : repos;
+  const visibleEnvironments = selectedSourceConnectionId
+    ? environments.filter((environment) => {
+        const connectionId = environmentConnectionId(environment);
+        return connectionId === null || connectionId === selectedSourceConnectionId;
+      })
+    : environments;
   const repositoryOptions: ComboboxOption[] = [
     {
       value: NO_REPOSITORY_OPTION_VALUE,
@@ -304,19 +405,19 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       label: "Multiple repositories",
       description: "Pick an ad-hoc set of repositories",
     },
-    ...repos.map((repo) => ({
+    ...visibleRepos.map((repo) => ({
       value: repoSelectionValue(repo),
-      label: repo.name,
-      description: `${repo.connection?.displayName ? `${repo.connection.displayName} · ` : ""}${describeRepository(repo, imageStatusByScope, prebuildEnabledRepoScopeIds)}`,
+      label: repo.fullName,
+      description: describeRepository(repo, imageStatusByScope, prebuildEnabledRepoScopeIds),
     })),
   ];
   // One unified list: environments (when any exist) alongside the repositories.
   const targetOptions: ComboboxOption[] | ComboboxGroup[] =
-    environments.length > 0
+    visibleEnvironments.length > 0
       ? [
           {
             category: "Environments",
-            options: environments.map((environment) => ({
+            options: visibleEnvironments.map((environment) => ({
               value: environmentOptionValue(environment.id),
               label: environment.name,
               description: describeEnvironment(environment, imageStatusByScope),
@@ -349,6 +450,14 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       loadingBranches,
       repos,
       loadingRepos,
+      sourceConnections,
+      selectedSourceConnectionId,
+      onSourceConnectionChange,
+      connectionErrors,
+      onRefreshRepositories: () => void refreshRepositories(),
+      selectionNotice,
+      repositoryLoadFailed: Boolean(repositoryLoadError),
+      catalogCachedAt: cached ? cachedAt : null,
     },
   };
 }

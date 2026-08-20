@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScmConnectionRecord } from "../db/scm-connections";
 import type { Env } from "../types";
 import type { Route, UserRouteContext } from "./shared";
@@ -191,6 +191,49 @@ describe("SCM connection routes", () => {
       visibleRepositoryCount: 3,
     });
     mocks.preflightReady = true;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("preflights an allowlisted Gitea host before receiving a credential", async () => {
+    const fetchMock = vi.fn(async () => Response.json({ version: "23.8.0" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await dispatch("POST", "/scm/connections/preflight", {
+      provider: "gitea",
+      baseUrl: "https://gitea.example.com/root/",
+    });
+    const body = (await response.json()) as {
+      preflight: { baseUrl: string; apiBaseUrl: string; host: string; version: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://gitea.example.com/root/api/v1/version",
+      expect.objectContaining({ method: "GET", redirect: "manual" })
+    );
+    expect(body.preflight).toMatchObject({
+      baseUrl: "https://gitea.example.com/root",
+      apiBaseUrl: "https://gitea.example.com/root/api/v1",
+      host: "gitea.example.com",
+      version: "23.8.0",
+    });
+    expect(mocks.probe).not.toHaveBeenCalled();
+    expect(mocks.secrets.size).toBe(0);
+  });
+
+  it("discovers the service username from the PAT owner", async () => {
+    const response = await dispatch("POST", "/scm/connections", {
+      provider: "gitea",
+      displayName: "Team Gitea",
+      baseUrl: "https://gitea.example.com",
+      accessToken: "top-secret-pat",
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.records.get("scm_generated")?.username).toBe("agent-bot");
   });
 
   it("creates a probed Gitea connection without returning its PAT", async () => {

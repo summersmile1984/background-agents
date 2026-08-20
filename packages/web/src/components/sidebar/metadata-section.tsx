@@ -6,7 +6,8 @@ import { formatModelName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatSessionCost } from "@/lib/session-cost";
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
-import { getRepositoryBranchUrl, getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
+import { getRepositoryBranchUrl } from "@/lib/scm";
+import { sourceControlConnectionLabel } from "@/lib/scm-presentation";
 import type { Repo } from "@/hooks/use-repos";
 import { NO_REPOSITORY_LABEL } from "@/lib/repo-label";
 import type { Artifact, SandboxEvent } from "@/types/session";
@@ -139,10 +140,12 @@ export function MetadataSection({
   const branchUrl = branchName
     ? primaryCatalogRepository
       ? getRepositoryBranchUrl(primaryCatalogRepository, branchName)
-      : repoOwner && repoName
-        ? getScmBranchUrl(repoOwner, repoName, branchName)
-        : null
+      : null
     : null;
+  const baseBranchUrl =
+    baseBranch && primaryCatalogRepository
+      ? getRepositoryBranchUrl(primaryCatalogRepository, baseBranch)
+      : null;
   const hasRepositoryMetadata = repoOwner !== undefined && repoName !== undefined;
 
   const handleCopyBranch = async () => {
@@ -276,13 +279,9 @@ export function MetadataSection({
           {baseBranch && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <BranchIcon className="w-4 h-4" />
-              {repoOwner && repoName ? (
+              {repoOwner && repoName && baseBranchUrl ? (
                 <a
-                  href={
-                    (primaryCatalogRepository &&
-                      getRepositoryBranchUrl(primaryCatalogRepository, baseBranch)) ||
-                    getScmBranchUrl(repoOwner, repoName, baseBranch)
-                  }
+                  href={baseBranchUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-accent truncate max-w-[180px] hover:underline"
@@ -336,18 +335,27 @@ export function MetadataSection({
           {hasRepositoryMetadata && (
             <div className="flex items-center gap-2 text-sm">
               <RepoIcon className="w-4 h-4 text-muted-foreground" />
-              {repoOwner && repoName ? (
+              {repoOwner && repoName && primaryCatalogRepository ? (
                 <a
-                  href={primaryCatalogRepository?.webUrl ?? getScmRepoUrl(repoOwner, repoName)}
+                  href={primaryCatalogRepository.webUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-accent hover:underline"
                 >
                   {repoOwner}/{repoName}
                 </a>
+              ) : repoOwner && repoName ? (
+                <span className="text-foreground">
+                  {repoOwner}/{repoName}
+                </span>
               ) : (
                 <span className="text-muted-foreground">{NO_REPOSITORY_LABEL}</span>
               )}
+              {primaryCatalogRepository?.connection ? (
+                <Badge variant="info" className="text-[10px]">
+                  {sourceControlConnectionLabel(primaryCatalogRepository.connection)}
+                </Badge>
+              ) : null}
             </div>
           )}
         </>
@@ -376,21 +384,35 @@ export function MetadataSection({
             const repoBranchUrl = repo.branchName
               ? catalogRepository
                 ? getRepositoryBranchUrl(catalogRepository, repo.branchName)
-                : getScmBranchUrl(repo.repoOwner, repo.repoName, repo.branchName)
+                : null
               : null;
             return (
               <div key={`${repo.repoOwner}/${repo.repoName}`} className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
                   <RepoIcon className="w-4 h-4 text-muted-foreground" />
-                  <a
-                    href={catalogRepository?.webUrl ?? getScmRepoUrl(repo.repoOwner, repo.repoName)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-accent hover:underline truncate max-w-[170px]"
-                    title={`${repo.repoOwner}/${repo.repoName}`}
-                  >
-                    {repo.repoOwner}/{repo.repoName}
-                  </a>
+                  {catalogRepository ? (
+                    <a
+                      href={catalogRepository.webUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-accent hover:underline truncate max-w-[170px]"
+                      title={`${repo.repoOwner}/${repo.repoName}`}
+                    >
+                      {repo.repoOwner}/{repo.repoName}
+                    </a>
+                  ) : (
+                    <span
+                      className="text-foreground truncate max-w-[170px]"
+                      title={`${repo.repoOwner}/${repo.repoName}`}
+                    >
+                      {repo.repoOwner}/{repo.repoName}
+                    </span>
+                  )}
+                  {catalogRepository?.connection ? (
+                    <Badge variant="info" className="text-[10px]">
+                      {sourceControlConnectionLabel(catalogRepository.connection)}
+                    </Badge>
+                  ) : null}
                   {index === 0 && (
                     <Badge variant="info" className="text-[10px]">
                       primary

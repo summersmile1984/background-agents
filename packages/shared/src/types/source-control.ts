@@ -74,6 +74,18 @@ export const sourceControlConnectionProbeSchema = z.object({
 });
 export type SourceControlConnectionProbe = z.infer<typeof sourceControlConnectionProbeSchema>;
 
+export const sourceControlConnectionPreflightSchema = z.object({
+  status: z.literal("ready"),
+  baseUrl: z.string().url(),
+  apiBaseUrl: z.string().url(),
+  cloneBaseUrl: z.string().url(),
+  host: z.string().min(1),
+  version: z.string().min(1),
+});
+export type SourceControlConnectionPreflight = z.infer<
+  typeof sourceControlConnectionPreflightSchema
+>;
+
 export const REPOSITORY_RESOLUTION_STATUSES = ["resolved", "unresolved", "removed"] as const;
 export const repositoryResolutionStatusSchema = z.enum(REPOSITORY_RESOLUTION_STATUSES);
 export type RepositoryResolutionStatus = z.infer<typeof repositoryResolutionStatusSchema>;
