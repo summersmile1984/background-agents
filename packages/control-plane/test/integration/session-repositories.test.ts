@@ -127,8 +127,22 @@ describe("D1 session index repositories", () => {
     const { sessions } = await store.list();
     expect(sessions).toHaveLength(1);
     expect(sessions[0].repositories).toEqual([
-      { repoOwner: "acme", repoName: "frontend", repoId: 1, baseBranch: "main" },
-      { repoOwner: "acme", repoName: "backend", repoId: 2, baseBranch: "develop" },
+      {
+        repositoryKey: null,
+        connectionId: null,
+        repoOwner: "acme",
+        repoName: "frontend",
+        repoId: 1,
+        baseBranch: "main",
+      },
+      {
+        repositoryKey: null,
+        connectionId: null,
+        repoOwner: "acme",
+        repoName: "backend",
+        repoId: 2,
+        baseBranch: "develop",
+      },
     ]);
   });
 

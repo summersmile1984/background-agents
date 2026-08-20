@@ -44,6 +44,8 @@ function makeRecord(overrides?: Partial<SessionPullRequestRecord>): SessionPullR
   return {
     artifactId: "artifact-1",
     sessionId: "session-1",
+    scmConnectionId: null,
+    repositoryId: null,
     repositoryExternalId: "9001",
     repoOwner: "acme",
     repoName: "web",

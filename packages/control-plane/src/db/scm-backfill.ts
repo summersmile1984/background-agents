@@ -5,7 +5,7 @@ const LEASE_DURATION_MS = 60_000;
 export const DEFAULT_SCM_BACKFILL_BATCH_SIZE = 25;
 export const MAX_SCM_BACKFILL_BATCH_SIZE = 100;
 
-const LEGACY_LOCATIONS_CTE = `WITH legacy_locations_primary(path_key, owner, name) AS (
+const LEGACY_LOCATIONS_CTE = `WITH legacy_locations_primary(path_key, owner, name) AS MATERIALIZED (
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM sessions
   WHERE repo_owner IS NOT NULL
@@ -22,7 +22,8 @@ const LEGACY_LOCATIONS_CTE = `WITH legacy_locations_primary(path_key, owner, nam
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM automation_repositories
   WHERE scm_connection_id IS NULL OR repository_id IS NULL
-  UNION ALL
+),
+legacy_locations_secondary(path_key, owner, name) AS MATERIALIZED (
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM automation_runs
   WHERE repo_owner IS NOT NULL
@@ -30,14 +31,14 @@ const LEGACY_LOCATIONS_CTE = `WITH legacy_locations_primary(path_key, owner, nam
   UNION ALL
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM repo_metadata WHERE repository_id IS NULL
-),
-legacy_locations_secondary(path_key, owner, name) AS (
+  UNION ALL
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM repo_secrets WHERE repository_id IS NULL
   UNION ALL
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM session_pull_requests WHERE repository_id IS NULL
-  UNION ALL
+),
+legacy_locations_tertiary(path_key, owner, name) AS MATERIALIZED (
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM skill_assignments
   WHERE scope_type = 'repository' AND repository_id IS NULL
@@ -62,10 +63,12 @@ legacy_locations_secondary(path_key, owner, name) AS (
         AND r.path_key = lower(CAST(j.value AS TEXT))
     )
 ),
-legacy_locations(path_key, owner, name) AS (
+legacy_locations(path_key, owner, name) AS MATERIALIZED (
   SELECT path_key, owner, name FROM legacy_locations_primary
   UNION ALL
   SELECT path_key, owner, name FROM legacy_locations_secondary
+  UNION ALL
+  SELECT path_key, owner, name FROM legacy_locations_tertiary
 )`;
 
 export interface LegacyRepositoryLocation {

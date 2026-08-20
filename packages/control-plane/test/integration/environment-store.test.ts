@@ -54,8 +54,22 @@ describe("EnvironmentStore", () => {
     expect(environment.description).toBe("web + api");
     expect(environment.prebuildEnabled).toBe(true);
     expect(environment.repositories).toEqual([
-      { repoOwner: "acme", repoName: "web", repoId: 1, baseBranch: "main" },
-      { repoOwner: "acme", repoName: "api", repoId: 2, baseBranch: "develop" },
+      {
+        repositoryKey: null,
+        connectionId: null,
+        repoOwner: "acme",
+        repoName: "web",
+        repoId: 1,
+        baseBranch: "main",
+      },
+      {
+        repositoryKey: null,
+        connectionId: null,
+        repoOwner: "acme",
+        repoName: "api",
+        repoId: 2,
+        baseBranch: "develop",
+      },
     ]);
   });
 
