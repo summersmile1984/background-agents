@@ -38,6 +38,10 @@ _SECRET_ENV_NAMES = (
 )
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _CODEX_BASE_URL_ENV = "CODEX_OPENAI_BASE_URL"
+_BUILTIN_MCP_ENV_NAMES = (
+    "CONTROL_PLANE_URL",
+    "SANDBOX_AUTH_TOKEN",
+)
 
 
 class CodexHarnessDriver:
@@ -358,12 +362,31 @@ class CodexHarnessDriver:
         }
 
     def _thread_config(self) -> dict[str, object]:
+        builtin_environment = {
+            key: self._environment[key]
+            for key in _BUILTIN_MCP_ENV_NAMES
+            if self._environment.get(key)
+        }
+        try:
+            session_config = json.loads(self._environment.get("SESSION_CONFIG", "{}"))
+        except json.JSONDecodeError:
+            session_config = {}
+        if isinstance(session_config, dict):
+            session_id = session_config.get("session_id") or session_config.get("sessionId")
+            if isinstance(session_id, str) and session_id:
+                builtin_environment["OPEN_INSPECT_SESSION_ID"] = session_id
         return {
             "shell_environment_policy": {
                 "inherit": "all",
                 "exclude": list(_SECRET_ENV_NAMES),
             },
-            "mcp_servers": codex_mcp_config(self._mcp_servers),
+            # Keep the session token out of Codex shell commands while granting
+            # it only to the built-in platform MCP subprocess. User-configured
+            # MCP servers never receive these values.
+            "mcp_servers": codex_mcp_config(
+                self._mcp_servers,
+                builtin_environment,
+            ),
         }
 
     def _drain_notifications(self) -> None:

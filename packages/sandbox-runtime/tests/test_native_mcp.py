@@ -6,6 +6,7 @@ import sandbox_runtime.native_mcp as native_mcp
 from sandbox_runtime.harness.mcp_config import (
     claude_mcp_config,
     codewhale_mcp_config,
+    codex_mcp_config,
     load_session_mcp_servers,
 )
 
@@ -95,6 +96,43 @@ def test_codewhale_mcp_config_supports_builtin_local_and_remote_servers():
     }
 
 
+def test_codex_builtin_mcp_receives_only_explicit_platform_environment():
+    config = codex_mcp_config(
+        (
+            {
+                "name": "user server",
+                "type": "local",
+                "command": ["user-mcp"],
+            },
+        ),
+        {
+            "CONTROL_PLANE_URL": "https://control.example.test",
+            "OPEN_INSPECT_SESSION_ID": "session-1",
+            "SANDBOX_AUTH_TOKEN": "sandbox-token",
+        },
+    )
+
+    assert config["open_inspect"]["env"] == {
+        "CONTROL_PLANE_URL": "https://control.example.test",
+        "OPEN_INSPECT_SESSION_ID": "session-1",
+        "SANDBOX_AUTH_TOKEN": "sandbox-token",
+    }
+    assert "env" not in config["user_server"]
+
+
 def test_session_id_accepts_wire_and_legacy_casing():
     assert native_mcp._session_id('{"session_id":"session-1"}') == "session-1"
     assert native_mcp._session_id('{"sessionId":"session-2"}') == "session-2"
+
+
+def test_control_plane_client_prefers_minimal_explicit_session_id():
+    client = native_mcp.ControlPlaneToolClient(
+        {
+            "CONTROL_PLANE_URL": "https://control.example.test",
+            "SANDBOX_AUTH_TOKEN": "sandbox-token",
+            "OPEN_INSPECT_SESSION_ID": "session-explicit",
+            "SESSION_CONFIG": '{"session_id":"session-config"}',
+        }
+    )
+
+    assert client.session_id == "session-explicit"

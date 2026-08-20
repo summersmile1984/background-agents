@@ -97,6 +97,11 @@ async def test_codex_driver_translates_app_server_notifications():
     driver = CodexHarnessDriver(
         workspace_path="/workspace",
         log=Log(),
+        environment={
+            "CONTROL_PLANE_URL": "https://control.example.test",
+            "SANDBOX_AUTH_TOKEN": "sandbox-token",
+            "SESSION_CONFIG": '{"session_id":"session-1"}',
+        },
         rpc=rpc,
         mcp_servers=(
             {
@@ -132,6 +137,11 @@ async def test_codex_driver_translates_app_server_notifications():
         "-m",
         "sandbox_runtime.native_mcp",
     ]
+    assert thread_request["config"]["mcp_servers"]["open_inspect"]["env"] == {
+        "CONTROL_PLANE_URL": "https://control.example.test",
+        "OPEN_INSPECT_SESSION_ID": "session-1",
+        "SANDBOX_AUTH_TOKEN": "sandbox-token",
+    }
     assert thread_request["config"]["mcp_servers"]["docs_search"] == {
         "url": "https://mcp.example.test/mcp",
         "http_headers": {"X-Key": "secret"},
@@ -139,6 +149,7 @@ async def test_codex_driver_translates_app_server_notifications():
     assert (
         "CODEX_OPENAI_BASE_URL" in thread_request["config"]["shell_environment_policy"]["exclude"]
     )
+    assert "SANDBOX_AUTH_TOKEN" in thread_request["config"]["shell_environment_policy"]["exclude"]
 
 
 def test_codex_driver_configures_https_model_relay():

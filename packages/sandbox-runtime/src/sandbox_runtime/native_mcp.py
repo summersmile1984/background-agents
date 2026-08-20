@@ -35,7 +35,9 @@ class ControlPlaneToolClient:
         env = environment or dict(os.environ)
         self.base_url = env.get("CONTROL_PLANE_URL", "http://localhost:8787").rstrip("/")
         self.token = env.get("SANDBOX_AUTH_TOKEN", "")
-        self.session_id = _session_id(env.get("SESSION_CONFIG", "{}"))
+        self.session_id = env.get("OPEN_INSPECT_SESSION_ID", "").strip() or _session_id(
+            env.get("SESSION_CONFIG", "{}")
+        )
 
     async def request(
         self, method: str, path: str, *, body: dict[str, object] | None = None

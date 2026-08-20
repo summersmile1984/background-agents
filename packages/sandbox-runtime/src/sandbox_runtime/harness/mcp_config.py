@@ -33,8 +33,16 @@ def load_session_mcp_servers(environment: Mapping[str, str]) -> tuple[Mapping[st
     return tuple(server for server in servers if isinstance(server, dict))
 
 
-def codex_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
-    config = {BUILTIN_MCP_NAME: _codex_local(BUILTIN_MCP_COMMAND, {})}
+def codex_mcp_config(
+    servers: Sequence[Mapping[str, Any]],
+    builtin_environment: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    config = {
+        BUILTIN_MCP_NAME: _codex_local(
+            BUILTIN_MCP_COMMAND,
+            _string_map(builtin_environment),
+        )
+    }
     for index, server in enumerate(servers):
         if server.get("enabled") is False:
             continue
