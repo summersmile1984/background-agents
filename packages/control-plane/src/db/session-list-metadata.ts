@@ -3,7 +3,10 @@ import type { SessionListRepository } from "@open-inspect/shared/types/repositor
 import { SessionPullRequestStore } from "./session-pull-request-store";
 import type { SqlDatabase } from "./sql-database";
 
-const MAX_D1_QUERY_PARAMETERS = 100;
+// The PR summary reads legacy and stable tables with the same ID list, so one
+// chunk consumes two bindings per session. Keep the combined query at D1's
+// 100-parameter ceiling.
+const MAX_D1_QUERY_PARAMETERS = 50;
 
 interface SessionRepositoryRow {
   session_id: string;

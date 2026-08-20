@@ -5,7 +5,7 @@ const LEASE_DURATION_MS = 60_000;
 export const DEFAULT_SCM_BACKFILL_BATCH_SIZE = 25;
 export const MAX_SCM_BACKFILL_BATCH_SIZE = 100;
 
-const LEGACY_LOCATIONS_CTE = `WITH legacy_locations(path_key, owner, name) AS (
+const LEGACY_LOCATIONS_CTE = `WITH legacy_locations_primary(path_key, owner, name) AS (
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM sessions
   WHERE repo_owner IS NOT NULL
@@ -30,7 +30,8 @@ const LEGACY_LOCATIONS_CTE = `WITH legacy_locations(path_key, owner, name) AS (
   UNION ALL
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM repo_metadata WHERE repository_id IS NULL
-  UNION ALL
+),
+legacy_locations_secondary(path_key, owner, name) AS (
   SELECT lower(repo_owner) || '/' || lower(repo_name), repo_owner, repo_name
   FROM repo_secrets WHERE repository_id IS NULL
   UNION ALL
@@ -60,6 +61,11 @@ const LEGACY_LOCATIONS_CTE = `WITH legacy_locations(path_key, owner, name) AS (
         AND r.connection_id = ?
         AND r.path_key = lower(CAST(j.value AS TEXT))
     )
+),
+legacy_locations(path_key, owner, name) AS (
+  SELECT path_key, owner, name FROM legacy_locations_primary
+  UNION ALL
+  SELECT path_key, owner, name FROM legacy_locations_secondary
 )`;
 
 export interface LegacyRepositoryLocation {
