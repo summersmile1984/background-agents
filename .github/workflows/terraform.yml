@@ -207,6 +207,8 @@ jobs:
           TF_VAR_github_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_scm_allowed_hosts: ${{ secrets.SCM_ALLOWED_HOSTS }}
+          TF_VAR_gitea_security_confirmed_versions: ${{ secrets.GITEA_SECURITY_CONFIRMED_VERSIONS }}
           TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           TF_VAR_github_app_installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
@@ -375,6 +377,8 @@ jobs:
           TF_VAR_github_client_secret: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
           TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          TF_VAR_scm_allowed_hosts: ${{ secrets.SCM_ALLOWED_HOSTS }}
+          TF_VAR_gitea_security_confirmed_versions: ${{ secrets.GITEA_SECURITY_CONFIRMED_VERSIONS }}
           TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           TF_VAR_github_app_installation_id: ${{ secrets.GH_APP_INSTALLATION_ID }}
