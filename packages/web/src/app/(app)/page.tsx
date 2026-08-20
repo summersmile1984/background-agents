@@ -51,12 +51,14 @@ import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion"
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { AgentHarnessSelector, getAgentHarnessLabel } from "@/components/agent-harness-selector";
 import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
+import type { Repo } from "@/hooks/use-repos";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
 
 function skillPreviewTarget(
-  fields: SessionTargetRequestFields | null
+  fields: SessionTargetRequestFields | null,
+  repos: Repo[]
 ): Omit<SkillResolutionPreviewInput, "selection"> | null {
   if (!fields) return null;
   if ("environmentId" in fields) return { environmentId: fields.environmentId };
@@ -67,6 +69,24 @@ function skillPreviewTarget(
         baseBranch: null,
       })),
     };
+  }
+  if ("repositoryKey" in fields) {
+    const repo = repos.find((candidate) => candidate.repositoryKey === fields.repositoryKey);
+    return repo ? { repoOwner: repo.owner, repoName: repo.name } : {};
+  }
+  if ("repositoryKeys" in fields) {
+    const selected = fields.repositoryKeys
+      .map((key) => repos.find((candidate) => candidate.repositoryKey === key))
+      .filter((repo): repo is Repo => Boolean(repo));
+    return selected.length === fields.repositoryKeys.length
+      ? {
+          repositories: selected.map((repo) => ({
+            repoOwner: repo.owner,
+            repoName: repo.name,
+            baseBranch: null,
+          })),
+        }
+      : {};
   }
   return fields.repoOwner && fields.repoName
     ? { repoOwner: fields.repoOwner, repoName: fields.repoName }
@@ -120,7 +140,9 @@ export default function Home() {
     effectiveAgentHarness
   );
   const harnessModelIds = getModelIds(harnessModelOptions);
-  const currentSkillPreviewTarget = session ? skillPreviewTarget(buildRequestFields()) : null;
+  const currentSkillPreviewTarget = session
+    ? skillPreviewTarget(buildRequestFields(), picker.repos)
+    : null;
   const {
     preview: skillPreview,
     loading: skillPreviewLoading,

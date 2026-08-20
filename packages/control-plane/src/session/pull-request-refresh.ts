@@ -12,8 +12,11 @@
 
 import type { SessionArtifact } from "@open-inspect/shared/types/artifacts";
 import type { SessionPullRequestStore } from "../db/session-pull-request-store";
-import type { PullRequestSnapshot, SourceControlProvider } from "../source-control";
-import { parsePullRequestArtifactMetadata } from "./pull-request-snapshot";
+import type { SourceControlProvider } from "../source-control";
+import {
+  parsePullRequestArtifactMetadata,
+  type PullRequestSnapshotInput,
+} from "./pull-request-snapshot";
 import { applyPullRequestSnapshot } from "./pull-request-snapshot-apply";
 import type { ArtifactRepository } from "./artifact-repository";
 import type { SessionRow } from "./types";
@@ -44,6 +47,8 @@ interface RefreshTarget {
   repoOwner: string;
   repoName: string;
   repositoryExternalId: string | undefined;
+  scmConnectionId: string | undefined;
+  repositoryId: string | undefined;
 }
 
 function resolveRefreshTarget(
@@ -65,6 +70,9 @@ function resolveRefreshTarget(
     repoName,
     repositoryExternalId:
       typeof metadata.repositoryExternalId === "string" ? metadata.repositoryExternalId : undefined,
+    scmConnectionId:
+      typeof metadata.scmConnectionId === "string" ? metadata.scmConnectionId : undefined,
+    repositoryId: typeof metadata.repositoryId === "string" ? metadata.repositoryId : undefined,
   };
 }
 
@@ -104,14 +112,19 @@ export async function refreshSessionPullRequests(
       continue;
     }
 
-    let snapshot: PullRequestSnapshot;
+    let snapshot: PullRequestSnapshotInput;
     try {
-      snapshot = await sourceControlProvider.getPullRequest({
+      const providerSnapshot = await sourceControlProvider.getPullRequest({
         owner: target.repoOwner,
         name: target.repoName,
         number: target.prNumber,
         repositoryExternalId: target.repositoryExternalId,
       });
+      snapshot = {
+        ...providerSnapshot,
+        scmConnectionId: target.scmConnectionId,
+        repositoryId: target.repositoryId,
+      };
     } catch (error) {
       failures.push({
         artifactId: artifact.id,

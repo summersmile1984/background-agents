@@ -31,6 +31,13 @@ export class OpenComputerImageBuildAdapter implements ImageBuildAdapter {
       callbackToken: plan.callbackToken,
       userEnvVars: plan.userEnvVars,
       cloneToken: plan.cloneAuth.type === "credential_helper" ? plan.cloneAuth.token : undefined,
+      ...(plan.cloneAuth.type === "credential_helper" && plan.cloneAuth.cloneBaseUrl
+        ? {
+            cloneHost: plan.cloneAuth.host,
+            cloneUsername: plan.cloneAuth.username,
+            cloneBaseUrl: plan.cloneAuth.cloneBaseUrl,
+          }
+        : {}),
       buildExecutionTimeoutSeconds: Math.ceil(plan.buildTimeoutMs / 1000),
       providerSessionTimeoutSeconds: resolveImageBuildProviderSessionTimeoutSeconds(
         plan.buildTimeoutMs

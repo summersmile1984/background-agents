@@ -29,6 +29,29 @@ export function isEnvironmentId(value: string): boolean {
  */
 export const environmentRepositoriesInputSchema = sessionRepositoriesInputSchema;
 
+export const environmentRepositoryKeysInputSchema = z
+  .array(
+    z.strictObject({
+      repositoryKey: z.string().trim().min(1).max(128),
+      baseBranch: z.string().trim().min(1).nullable().optional(),
+    })
+  )
+  .min(1)
+  .max(10)
+  .superRefine((repositories, context) => {
+    const seen = new Set<string>();
+    repositories.forEach((repository, index) => {
+      if (seen.has(repository.repositoryKey)) {
+        context.addIssue({
+          code: "custom",
+          path: [index, "repositoryKey"],
+          message: "duplicate repository key",
+        });
+      }
+      seen.add(repository.repositoryKey);
+    });
+  });
+
 /**
  * Slack channel ids associated with an environment (mirrors
  * RepoMetadata.channelAssociations). Ids are opaque Slack identifiers, so the
@@ -39,23 +62,35 @@ const environmentChannelAssociationsSchema = z
   .array(z.string().trim().min(1).max(64))
   .max(MAX_ENVIRONMENT_CHANNEL_ASSOCIATIONS);
 
-export const createEnvironmentInputSchema = z.object({
-  name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH),
-  description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
-  prebuildEnabled: z.boolean().optional(),
-  defaultAgentHarness: agentHarnessSchema.nullish(),
-  channelAssociations: environmentChannelAssociationsSchema.optional(),
-  repositories: environmentRepositoriesInputSchema,
-});
+export const createEnvironmentInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH),
+    description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
+    prebuildEnabled: z.boolean().optional(),
+    defaultAgentHarness: agentHarnessSchema.nullish(),
+    channelAssociations: environmentChannelAssociationsSchema.optional(),
+    repositories: environmentRepositoriesInputSchema.optional(),
+    repositoryKeys: environmentRepositoryKeysInputSchema.optional(),
+  })
+  .refine((value) => Boolean(value.repositories) !== Boolean(value.repositoryKeys), {
+    path: ["repositoryKeys"],
+    message: "provide exactly one of repositories or repositoryKeys",
+  });
 
-export const updateEnvironmentInputSchema = z.object({
-  name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH).optional(),
-  description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
-  prebuildEnabled: z.boolean().optional(),
-  defaultAgentHarness: agentHarnessSchema.nullish(),
-  channelAssociations: environmentChannelAssociationsSchema.optional(),
-  repositories: environmentRepositoriesInputSchema.optional(),
-});
+export const updateEnvironmentInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(MAX_ENVIRONMENT_NAME_LENGTH).optional(),
+    description: z.string().trim().max(MAX_ENVIRONMENT_DESCRIPTION_LENGTH).nullish(),
+    prebuildEnabled: z.boolean().optional(),
+    defaultAgentHarness: agentHarnessSchema.nullish(),
+    channelAssociations: environmentChannelAssociationsSchema.optional(),
+    repositories: environmentRepositoriesInputSchema.optional(),
+    repositoryKeys: environmentRepositoryKeysInputSchema.optional(),
+  })
+  .refine((value) => !(value.repositories && value.repositoryKeys), {
+    path: ["repositoryKeys"],
+    message: "repositories and repositoryKeys are mutually exclusive",
+  });
 
 export type CreateEnvironmentInput = z.input<typeof createEnvironmentInputSchema>;
 export type UpdateEnvironmentInput = z.input<typeof updateEnvironmentInputSchema>;
@@ -66,6 +101,8 @@ export type UpdateEnvironmentInput = z.input<typeof updateEnvironmentInputSchema
  * it); repoId is nullable to tolerate rows written before a repo resolved.
  */
 export const environmentRepositorySchema = z.object({
+  repositoryKey: z.string().nullable().optional(),
+  connectionId: z.string().nullable().optional(),
   repoOwner: z.string(),
   repoName: z.string(),
   repoId: z.number().nullable(),

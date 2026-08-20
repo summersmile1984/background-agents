@@ -33,6 +33,7 @@ import { signInProviderRoutes } from "./routes/sign-in-providers";
 import { integrationSettingsRoutes } from "./routes/integration-settings";
 import { commitSigningRoutes } from "./routes/commit-signing";
 import { scmSettingsRoutes } from "./routes/scm-settings";
+import { scmConnectionRoutes } from "./routes/scm-connections";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
 import { agentRuntimeRoutes } from "./routes/agent-runtime";
 import { reposRoutes } from "./routes/repos";
@@ -313,6 +314,7 @@ export const routes: Route[] = [
   ...commitSigningRoutes,
 
   // SCM (source-control) settings
+  ...scmConnectionRoutes,
   ...scmSettingsRoutes,
 
   // Automations

@@ -55,6 +55,7 @@ import {
   type SourceControlProvider,
   type GitPushSpec,
 } from "../source-control";
+import { SourceControlConnectionRegistry } from "../source-control/connection-registry";
 import type { SessionRepositoryState } from "@open-inspect/shared/types/repositories";
 import type { Env, ClientInfo } from "../types";
 import type { SqlDatabase } from "../db/sql-database";
@@ -200,6 +201,7 @@ export class SessionDO extends DurableObject<Env> {
   private _lifecycleManager: SandboxLifecycleManager | null = null;
   // Source control provider (lazily initialized)
   private _sourceControlProvider: SourceControlProvider | null = null;
+  private _sourceControlConnectionRegistry: SourceControlConnectionRegistry | null = null;
   // Participant service (lazily initialized)
   private _participantService: ParticipantService | null = null;
   // Callback notification service (lazily initialized)
@@ -394,6 +396,54 @@ export class SessionDO extends DurableObject<Env> {
       this._sourceControlProvider = this.createSourceControlProvider();
     }
     return this._sourceControlProvider;
+  }
+
+  private get sourceControlConnectionRegistry(): SourceControlConnectionRegistry {
+    if (!this._sourceControlConnectionRegistry) {
+      if (!this.db) throw new Error("SCM connection resolution requires the global database");
+      this._sourceControlConnectionRegistry = new SourceControlConnectionRegistry(this.env, {
+        db: this.db,
+      });
+    }
+    return this._sourceControlConnectionRegistry;
+  }
+
+  private async sourceControlProviderForSessionMember(
+    member: SessionRepositoryEntry
+  ): Promise<SourceControlProvider> {
+    const session = this.getSession();
+    const connectionId =
+      member.row?.scm_connection_id ??
+      (member.isPrimary ? session?.scm_connection_id : null) ??
+      null;
+    if (!connectionId) return this.sourceControlProvider;
+    return (await this.sourceControlConnectionRegistry.getConnection(connectionId)).provider;
+  }
+
+  private buildScmProxyPushSpec(config: {
+    sessionId: string;
+    repositoryKey: string;
+    repoOwner: string;
+    repoName: string;
+    sourceRef: string;
+    targetBranch: string;
+    force: boolean;
+  }): GitPushSpec {
+    const controlPlaneUrl =
+      this.env.WORKER_URL ||
+      `https://open-inspect-control-plane.${this.env.CF_ACCOUNT_ID || "workers"}.workers.dev`;
+    const remoteUrl =
+      `${controlPlaneUrl.replace(/\/+$/, "")}/git/session/` +
+      `${encodeURIComponent(config.sessionId)}/${encodeURIComponent(config.repositoryKey)}.git`;
+    return {
+      remoteUrl,
+      redactedRemoteUrl: remoteUrl,
+      refspec: `${config.sourceRef}:refs/heads/${config.targetBranch}`,
+      targetBranch: config.targetBranch,
+      repoOwner: config.repoOwner,
+      repoName: config.repoName,
+      force: config.force,
+    };
   }
 
   /**
@@ -739,6 +789,9 @@ export class SessionDO extends DurableObject<Env> {
             artifactRepository: this.artifactRepository,
             claims: this.prCreationClaims,
             sourceControlProvider: this.sourceControlProvider,
+            resolveSourceControlProvider: (target) =>
+              this.sourceControlProviderForSessionMember(target),
+            buildScmProxyPushSpec: (config) => this.buildScmProxyPushSpec(config),
             log,
             generateId: () => generateId(),
             pushBranchToRemote: (pushSpec) => this.pushBranchToRemote(pushSpec),
@@ -765,12 +818,15 @@ export class SessionDO extends DurableObject<Env> {
   /** Fire a background read-through refresh; failures only log. */
   private schedulePullRequestRefresh(trigger: "open" | "manual"): void {
     this.backgroundJobs.submit(
-      refreshSessionPullRequests(
-        this.sessionCoreRepository,
-        this.artifactRepository,
-        this.sourceControlProvider,
-        this.db ? new SessionPullRequestStore(this.db) : null
-      )
+      this.resolveSessionSourceControlProvider()
+        .then((provider) =>
+          refreshSessionPullRequests(
+            this.sessionCoreRepository,
+            this.artifactRepository,
+            provider,
+            this.db ? new SessionPullRequestStore(this.db) : null
+          )
+        )
         .then(({ updated, failures }) => {
           for (const artifact of updated) {
             this.broadcast({ type: "artifact_updated", artifact });
@@ -796,6 +852,13 @@ export class SessionDO extends DurableObject<Env> {
     );
   }
 
+  private async resolveSessionSourceControlProvider(): Promise<SourceControlProvider> {
+    const session = this.getSession();
+    if (!session?.scm_connection_id) return this.sourceControlProvider;
+    return (await this.sourceControlConnectionRegistry.getConnection(session.scm_connection_id))
+      .provider;
+  }
+
   private get participantsHandler(): ParticipantsHandler {
     if (!this._participantsHandler) {
       this._participantsHandler = createParticipantsHandler({
@@ -815,7 +878,10 @@ export class SessionDO extends DurableObject<Env> {
   private async resolveScmSettings(repo: RepoIdentity): Promise<ScmSettings> {
     if (!this.db) return {};
     const scmSettingsStore = new ScmSettingsStore(this.db);
-    return scmSettingsStore.getResolvedSettings(`${repo.repoOwner}/${repo.repoName}`);
+    return scmSettingsStore.getResolvedSettings(
+      `${repo.repoOwner}/${repo.repoName}`,
+      repo.repositoryKey ?? null
+    );
   }
 
   private get alarmHandler(): AlarmHandler {
@@ -909,13 +975,23 @@ export class SessionDO extends DurableObject<Env> {
       getSandbox: () => this.sandboxRepository.getSandbox(),
       getSandboxWithCircuitBreaker: () => this.sandboxRepository.getSandboxWithCircuitBreaker(),
       getSession: () => this.sessionCoreRepository.getSession(),
-      getSessionRepositories: () =>
-        this.sessionCoreRepository.getSessionRepositories().map((entry) => ({
+      getSessionRepositories: () => {
+        const pinnedSession = this.sessionCoreRepository.getSession();
+        return this.sessionCoreRepository.getSessionRepositories().map((entry) => ({
+          repositoryKey:
+            entry.row?.repository_id ??
+            (entry.isPrimary ? pinnedSession?.repository_id : null) ??
+            null,
+          connectionId:
+            entry.row?.scm_connection_id ??
+            (entry.isPrimary ? pinnedSession?.scm_connection_id : null) ??
+            null,
           repoOwner: entry.repoOwner,
           repoName: entry.repoName,
           baseBranch: entry.baseBranch ?? "main",
           baseSha: entry.row?.base_sha ?? null,
-        })),
+        }));
+      },
       getUserEnvVars: () => this.getUserEnvVars(),
       updateSandboxStatus: (status) => this.updateSandboxStatus(status),
       updateSandboxForSpawn: (data) => this.sandboxRepository.updateSandboxForSpawn(data),
@@ -1005,12 +1081,18 @@ export class SessionDO extends DurableObject<Env> {
       const tokenPresent = !!this.env.SLACK_BOT_TOKEN;
       const settingsStore = new IntegrationSettingsStore(this.db);
       slackAgentNotifyLookup = {
-        isEnabledForRepo: async (repoOwner, repoName) => {
+        isEnabledForRepo: async (repoOwner, repoName, repositoryId) => {
           if (!tokenPresent) return false;
           const settings =
             repoOwner && repoName
-              ? (await settingsStore.getResolvedConfig("slack", `${repoOwner}/${repoName}`))
-                  .settings
+              ? (
+                  await settingsStore.getResolvedConfig(
+                    "slack",
+                    `${repoOwner}/${repoName}`,
+                    undefined,
+                    repositoryId
+                  )
+                ).settings
               : ((await settingsStore.getGlobal("slack"))?.defaults ?? {});
           return resolveSlackSettings(settings).agentNotificationsEnabled;
         },
@@ -1759,6 +1841,12 @@ export class SessionDO extends DurableObject<Env> {
     const prUrlForRepo = this.getPrUrlLookup();
     return this.sessionCoreRepository.getSessionRepositories().map((member) => ({
       position: member.position,
+      repositoryKey:
+        member.row?.repository_id ?? (member.isPrimary ? session?.repository_id : null) ?? null,
+      connectionId:
+        member.row?.scm_connection_id ??
+        (member.isPrimary ? session?.scm_connection_id : null) ??
+        null,
       repoOwner: member.repoOwner,
       repoName: member.repoName,
       repoId: member.row ? member.row.repo_id : (session?.repo_id ?? null),
@@ -1827,7 +1915,8 @@ export class SessionDO extends DurableObject<Env> {
       throw new Error("Session has no repository context");
     }
 
-    const result = await this.sourceControlProvider.checkRepositoryAccess({
+    const provider = await this.resolveSessionSourceControlProvider();
+    const result = await provider.checkRepositoryAccess({
       owner: session.repo_owner,
       name: session.repo_name,
     });
@@ -1918,6 +2007,10 @@ export class SessionDO extends DurableObject<Env> {
     member: SessionRepositoryEntry,
     repoStore: RepoSecretsStore
   ): Promise<Record<string, string>> {
+    const repositoryId = member.row?.repository_id;
+    if (repositoryId) {
+      return repoStore.getDecryptedSecretsByRepositoryId(repositoryId);
+    }
     const repoId =
       member.row?.repo_id ?? (member.isPrimary ? await this.ensureRepoId(session) : null);
     if (repoId === null) {

@@ -95,6 +95,9 @@ function fakeDb(tables: {
       if (sql.includes("FROM repo_metadata")) {
         return { results: tables.enabledRepos ?? [] };
       }
+      if (sql.includes("FROM scm_repository_metadata")) {
+        return { results: [] };
+      }
       throw new Error(`unexpected all(): ${sql}`);
     },
   });

@@ -29,6 +29,8 @@ import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/t
 
 /** Snake_case wire twin of {@link SessionRepositoryInfo} (runtime SessionRepositoryConfig). */
 export interface SessionRepositoryConfigPayload {
+  repository_key?: string;
+  connection_id?: string;
   repo_owner: string;
   repo_name: string;
   branch: string;
@@ -100,6 +102,8 @@ export function toRepositoryConfigPayload(
   repository: SessionRepositoryInfo
 ): SessionRepositoryConfigPayload {
   return {
+    ...(repository.repositoryKey ? { repository_key: repository.repositoryKey } : {}),
+    ...(repository.connectionId ? { connection_id: repository.connectionId } : {}),
     repo_owner: repository.repoOwner,
     repo_name: repository.repoName,
     branch: repository.baseBranch,
@@ -187,7 +191,7 @@ export interface ScmCloneIdentity {
   readonly secretHosts: readonly string[];
 }
 
-const SCM_CLONE_IDENTITIES: Record<SourceControlProviderName, ScmCloneIdentity> = {
+const SCM_CLONE_IDENTITIES: Partial<Record<SourceControlProviderName, ScmCloneIdentity>> = {
   github: {
     host: "github.com",
     cloneUsername: "x-access-token",
@@ -205,9 +209,16 @@ const SCM_CLONE_IDENTITIES: Record<SourceControlProviderName, ScmCloneIdentity> 
   },
 };
 
-/** Clone identity for an SCM provider (full github/gitlab/bitbucket mapping). */
+/**
+ * Legacy deployment-provider clone identity. Self-hosted Gitea has no global
+ * hostname and must resolve its connection-specific proxy identity instead.
+ */
 export function scmCloneIdentity(scmProvider: SourceControlProviderName): ScmCloneIdentity {
-  return SCM_CLONE_IDENTITIES[scmProvider];
+  const identity = SCM_CLONE_IDENTITIES[scmProvider];
+  if (!identity) {
+    throw new Error(`SCM provider '${scmProvider}' requires connection-aware clone routing`);
+  }
+  return identity;
 }
 
 /** Set `VCS_HOST`/`VCS_CLONE_USERNAME` (and the clone token, when given) on an env map. */
@@ -310,7 +321,19 @@ export function buildSandboxEnvVars(
     envVars.AGENT_SLACK_NOTIFY_ENABLED = "true";
   }
 
-  applyScmCloneEnv(envVars, options.scmIdentity);
+  const proxyBaseUrl = config.scmGitProxyBaseUrl?.trim().replace(/\/+$/, "");
+  const cloneIdentity = proxyBaseUrl
+    ? {
+        host: new URL(proxyBaseUrl).host,
+        cloneUsername: "open-inspect-capability",
+        secretHosts: [new URL(proxyBaseUrl).host],
+      }
+    : options.scmIdentity;
+  applyScmCloneEnv(envVars, cloneIdentity);
+  if (proxyBaseUrl) {
+    envVars.VCS_CLONE_BASE_URL = proxyBaseUrl;
+    envVars.OI_SCM_PROXY_MODE = "1";
+  }
 
   // Note: this builder never sets VCS_CLONE_TOKEN / GITHUB_TOKEN /
   // GITHUB_APP_TOKEN as system vars. Git operations in the sandbox
@@ -366,6 +389,7 @@ export interface ImageBuildEnvVarsOptions {
   scmIdentity: ScmCloneIdentity;
   /** One-shot clone token delivered as `VCS_CLONE_TOKEN`. */
   cloneToken?: string;
+  cloneBaseUrl?: string;
   /**
    * User env vars (repo secrets), or a provider-composed base layer
    * (OpenComputer layers provider LLM credentials underneath user secrets).
@@ -412,5 +436,9 @@ export function buildImageBuildEnvVars(options: ImageBuildEnvVarsOptions): Recor
   });
 
   applyScmCloneEnv(envVars, options.scmIdentity, options.cloneToken);
+  if (options.cloneBaseUrl) {
+    envVars.VCS_CLONE_BASE_URL = options.cloneBaseUrl.replace(/\/+$/, "");
+    envVars.OI_SCM_PROXY_MODE = "1";
+  }
   return envVars;
 }

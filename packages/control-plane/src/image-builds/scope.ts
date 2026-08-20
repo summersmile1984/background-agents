@@ -31,7 +31,15 @@ import {
 import type { Env } from "../types";
 import { ImageBuildPlanningError, ImageBuildScopeNotFoundError } from "./errors";
 import { computeRepositoriesFingerprint } from "./fingerprint";
-import { parseRepoScopeId, repoImageBuildScope, type ImageBuildScope } from "./model";
+import {
+  parseRepoScopeId,
+  parseRepoScopeRepositoryKey,
+  repoImageBuildScope,
+  repoImageBuildScopeByRepositoryKey,
+  type ImageBuildScope,
+} from "./model";
+import { ScmRepositoryStore } from "../db/scm-repositories";
+import { SourceControlConnectionRegistry } from "../source-control/connection-registry";
 import type { ImageBuildRepository } from "./types";
 import type { SqlDatabase } from "../db/sql-database";
 
@@ -89,10 +97,28 @@ export async function resolveScopeTarget(
       }
 
       const repositories: ImageBuildRepository[] = repositoryRows.map((row) => ({
+        ...(row.repository_id ? { repositoryKey: row.repository_id } : {}),
+        ...(row.scm_connection_id ? { connectionId: row.scm_connection_id } : {}),
         repoOwner: row.repo_owner,
         repoName: row.repo_name,
         baseBranch: row.base_branch,
       }));
+      const stableCount = repositories.filter(
+        (repository) => repository.repositoryKey && repository.connectionId
+      ).length;
+      if (stableCount > 0 && stableCount !== repositories.length) {
+        throw new ImageBuildPlanningError(
+          `Environment has incomplete source-control identity: ${scope.id}`
+        );
+      }
+      if (
+        stableCount > 0 &&
+        new Set(repositories.map((repository) => repository.connectionId)).size !== 1
+      ) {
+        throw new ImageBuildPlanningError(
+          `Environment mixes source-control connections: ${scope.id}`
+        );
+      }
 
       return {
         kind: "environment",
@@ -101,6 +127,43 @@ export async function resolveScopeTarget(
       };
     }
     case "repo": {
+      const repositoryKey = parseRepoScopeRepositoryKey(scope.id);
+      if (repositoryKey) {
+        const repository = await new ScmRepositoryStore(db).get(repositoryKey);
+        if (
+          !repository ||
+          repository.resolutionStatus !== "resolved" ||
+          repository.removedAt != null ||
+          !repository.defaultBranch
+        ) {
+          throw new ImageBuildScopeNotFoundError(scope.kind, scope.id);
+        }
+        const { provider } = await new SourceControlConnectionRegistry(env, { db }).getConnection(
+          repository.connectionId
+        );
+        const access = await provider.checkRepositoryAccess({
+          owner: repository.owner,
+          name: repository.name,
+        });
+        if (!access || String(access.repoId) !== repository.externalId) {
+          throw new ImageBuildScopeNotFoundError(scope.kind, scope.id);
+        }
+        const repositories: ImageBuildRepository[] = [
+          {
+            repositoryKey: repository.id,
+            connectionId: repository.connectionId,
+            repoOwner: access.repoOwner,
+            repoName: access.repoName,
+            baseBranch: repository.defaultBranch || access.defaultBranch || "main",
+          },
+        ];
+        return {
+          kind: "repo",
+          repositories,
+          repositoriesFingerprint: await computeRepositoriesFingerprint(repositories),
+          repoId: access.repoId,
+        };
+      }
       const repo = parseRepoScopeId(scope.id);
       if (!repo) {
         throw new ImageBuildPlanningError(`Malformed repo scope id: ${scope.id}`);
@@ -171,6 +234,10 @@ export async function resolveScopeEnabled(
       return environment?.prebuild_enabled === 1;
     }
     case "repo": {
+      const repositoryKey = parseRepoScopeRepositoryKey(scope.id);
+      if (repositoryKey) {
+        return new RepoMetadataStore(db).getImageBuildEnabledByRepositoryId(repositoryKey);
+      }
       const repo = parseRepoScopeId(scope.id);
       if (!repo) return false;
       return new RepoMetadataStore(db).getImageBuildEnabled(repo.repoOwner, repo.repoName);
@@ -186,7 +253,11 @@ export async function listEnabledScopes(db: SqlDatabase): Promise<ImageBuildScop
     .map((row) => ({ kind: "environment" as const, id: row.id }));
 
   const repos = await new RepoMetadataStore(db).getImageBuildEnabledRepos();
-  const repoScopes = repos.map((repo) => repoImageBuildScope(repo.repoOwner, repo.repoName));
+  const repoScopes = repos.map((repo) =>
+    repo.repositoryKey
+      ? repoImageBuildScopeByRepositoryKey(repo.repositoryKey)
+      : repoImageBuildScope(repo.repoOwner, repo.repoName)
+  );
 
   return [...environmentScopes, ...repoScopes];
 }
@@ -226,7 +297,9 @@ export async function listEnabledScopeUnits(
   const enabledRepos = await new RepoMetadataStore(db).getImageBuildEnabledRepos();
   const repoUnits = await Promise.all(
     enabledRepos.map(async (repo): Promise<EnabledScopeUnit | null> => {
-      const scope = repoImageBuildScope(repo.repoOwner, repo.repoName);
+      const scope = repo.repositoryKey
+        ? repoImageBuildScopeByRepositoryKey(repo.repositoryKey)
+        : repoImageBuildScope(repo.repoOwner, repo.repoName);
       try {
         const target = await resolveScopeTarget(env, db, scope);
         return {
@@ -260,9 +333,25 @@ export async function resolveScopeSandboxSettings(
 ): Promise<Awaited<ReturnType<typeof resolveSandboxSettings>>> {
   switch (scope.kind) {
     case "environment":
-      return resolveSandboxSettings(db, primary.repoOwner, primary.repoName, scope.id);
+      return primary.repositoryKey
+        ? resolveSandboxSettings(
+            db,
+            primary.repoOwner,
+            primary.repoName,
+            scope.id,
+            primary.repositoryKey
+          )
+        : resolveSandboxSettings(db, primary.repoOwner, primary.repoName, scope.id);
     case "repo":
-      return resolveSandboxSettings(db, primary.repoOwner, primary.repoName);
+      return primary.repositoryKey
+        ? resolveSandboxSettings(
+            db,
+            primary.repoOwner,
+            primary.repoName,
+            undefined,
+            primary.repositoryKey
+          )
+        : resolveSandboxSettings(db, primary.repoOwner, primary.repoName);
   }
 }
 
@@ -357,9 +446,10 @@ async function loadScopeSecretSources(
     case "repo": {
       let repoSecrets: Record<string, string> = {};
       try {
-        repoSecrets = await new RepoSecretsStore(db, encryptionKey).getDecryptedSecrets(
-          target.repoId
-        );
+        const store = new RepoSecretsStore(db, encryptionKey);
+        repoSecrets = target.repositories[0]?.repositoryKey
+          ? await store.getDecryptedSecretsByRepositoryId(target.repositories[0].repositoryKey)
+          : await store.getDecryptedSecrets(target.repoId);
       } catch (e) {
         logger.warn("image_build.repo_secrets_failed", {
           error: errorMessage(e),

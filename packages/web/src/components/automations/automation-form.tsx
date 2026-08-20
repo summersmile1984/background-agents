@@ -11,7 +11,6 @@ import {
   type TriggerConfig,
 } from "@open-inspect/shared/triggers";
 import { MAX_AUTOMATION_REPOSITORIES } from "@open-inspect/shared/types/automations";
-import type { AutomationRepositoryInput } from "@open-inspect/shared/types/automations";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import {
   DEFAULT_MODEL,
@@ -53,6 +52,8 @@ import { AgentHarnessSelector } from "@/components/agent-harness-selector";
 import { useAutomationTargets } from "./use-automation-targets";
 import { cn } from "@/lib/utils";
 import { NO_REPOSITORY_LABEL, formatRepositoriesLabel } from "@/lib/repo-label";
+import { repoSelectionValue } from "@/lib/repository-selection";
+import type { AutomationRepositorySelection } from "./automation-target-selection";
 
 const COMMON_TIMEZONES = [
   "UTC",
@@ -106,7 +107,8 @@ function FieldDescription({
 export interface AutomationFormValues {
   name: string;
   /** Full repository selection; submit always sends it (empty = repo-less). */
-  repositories?: AutomationRepositoryInput[];
+  repositories?: AutomationRepositorySelection[];
+  repositoryKeys?: Array<{ repositoryKey: string; baseBranch?: string }>;
   /**
    * Environment selection; submit always sends it (empty = none). Each firing
    * opens one workspace session per selected environment, alongside the
@@ -184,6 +186,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
     clearTargets,
     toggleSelectionMode,
     buildRepositoriesPayload,
+    buildRepositoryKeysPayload,
   } = useAutomationTargets({
     initialRepositories,
     initialEnvironmentIds: initialValues?.environmentIds ?? [],
@@ -194,7 +197,8 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
   // Branch options for the sole selected repository (the only branch-pickable shape).
   const { branches, loading: loadingBranches } = useBranches(
     selectedRepository?.repoOwner ?? "",
-    selectedRepository?.repoName ?? ""
+    selectedRepository?.repoName ?? "",
+    selectedRepoNames[0]?.startsWith("repo:") ? selectedRepoNames[0].slice(5) : undefined
   );
 
   const isSlack = triggerType === "slack_event";
@@ -304,8 +308,10 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
       instructions: instructions.trim(),
       triggerType,
       // Always send the full selection — an empty list means repo-less.
-      repositories: buildRepositoriesPayload(),
     };
+    const repositoryKeys = buildRepositoryKeysPayload();
+    if (repositoryKeys.length > 0) values.repositoryKeys = repositoryKeys;
+    else values.repositories = buildRepositoriesPayload();
 
     if (!isSchedule) {
       // Don't send schedule fields for non-schedule types
@@ -352,7 +358,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
     if (selectedRepoNames.length === 1 && selectedEnvironmentIds.length === 0) {
       const selectedRepoName = selectedRepoNames[0];
       return (
-        repos.find((repo) => repo.fullName.toLowerCase() === selectedRepoName)?.fullName ??
+        repos.find((repo) => repoSelectionValue(repo) === selectedRepoName)?.fullName ??
         selectedRepoName
       );
     }
@@ -592,15 +598,29 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
                 </button>
               )}
               {filteredRepos.map((repo) => {
-                const checked = selectedRepoNames.includes(repo.fullName.toLowerCase());
-                const disabled =
-                  multipleSelectionEnabled &&
+                const selectionValue = repoSelectionValue(repo);
+                const checked = selectedRepoNames.includes(selectionValue);
+                const selectedConnectionIds = new Set(
+                  selectedRepoNames.flatMap((value) => {
+                    const selected = repos.find(
+                      (candidate) => repoSelectionValue(candidate) === value
+                    );
+                    return selected?.connectionId ? [selected.connectionId] : [];
+                  })
+                );
+                const connectionMismatch =
                   !checked &&
-                  targetCount >= MAX_AUTOMATION_REPOSITORIES;
+                  selectedConnectionIds.size > 0 &&
+                  (!repo.connectionId || !selectedConnectionIds.has(repo.connectionId));
+                const disabled =
+                  connectionMismatch ||
+                  (multipleSelectionEnabled &&
+                    !checked &&
+                    targetCount >= MAX_AUTOMATION_REPOSITORIES);
 
                 return multipleSelectionEnabled ? (
                   <label
-                    key={repo.fullName}
+                    key={selectionValue}
                     className={cn(
                       "flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
                       checked ? "bg-muted text-foreground" : "hover:bg-muted/60",
@@ -611,7 +631,7 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
                       type="checkbox"
                       checked={checked}
                       disabled={disabled}
-                      onChange={() => handleRepoToggle(repo.fullName)}
+                      onChange={() => handleRepoToggle(selectionValue)}
                       className="h-4 w-4 rounded border-border accent-accent"
                     />
                     <FolderIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -623,8 +643,8 @@ export function AutomationForm({ mode, initialValues, onSubmit, submitting }: Au
                 ) : (
                   <button
                     type="button"
-                    key={repo.fullName}
-                    onClick={() => handleRepoToggle(repo.fullName)}
+                    key={selectionValue}
+                    onClick={() => handleRepoToggle(selectionValue)}
                     className={cn(
                       "flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
                       checked ? "bg-muted text-foreground" : "hover:bg-muted/60"

@@ -64,8 +64,13 @@ const NAV_ITEMS = [
     icon: TerminalIcon,
   },
   {
+    id: "source-control",
+    label: "Source Control",
+    icon: GitPrIcon,
+  },
+  {
     id: "scm",
-    label: "SCM Settings",
+    label: "PR Defaults",
     icon: GitPrIcon,
   },
   {

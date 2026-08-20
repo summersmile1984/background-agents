@@ -21,9 +21,11 @@ import {
   type ResolvedImageBuildTarget,
 } from "./scope";
 import type { ImageBuildCloneAuth, ImageBuildPlan } from "./types";
+import { ScmGitCapabilityStore } from "../db/scm-git-capabilities";
 
 const logger = createLogger("image-builds:planner");
 const MS_PER_SECOND = 1000;
+const IMAGE_BUILD_GIT_CAPABILITY_TTL_MS = 2 * 60 * 60 * 1000;
 
 /** The single-use callback token every build authenticates with (planner mints, workflow verifies). */
 export interface PlannedCallbackAuth {
@@ -81,7 +83,7 @@ export class ImageBuildPlanner {
     const [sandboxSettings, userEnvVars, cloneAuth] = await Promise.all([
       resolveScopeSandboxSettings(this.db, params.scope, primary),
       loadScopeBuildSecrets(this.env, this.db, params.scope, params.target),
-      this.resolveCloneAuth(params.scope),
+      this.resolveCloneAuth(params.buildId, params.scope, params.target),
     ]);
 
     const basePlan = {
@@ -110,8 +112,41 @@ export class ImageBuildPlanner {
     };
   }
 
-  private async resolveCloneAuth(scope: ImageBuildScope): Promise<ImageBuildCloneAuth> {
+  private async resolveCloneAuth(
+    buildId: string,
+    scope: ImageBuildScope,
+    target: ResolvedImageBuildTarget
+  ): Promise<ImageBuildCloneAuth> {
     try {
+      const stable = target.repositories.filter(
+        (repository) => repository.repositoryKey && repository.connectionId
+      );
+      if (stable.length > 0) {
+        if (stable.length !== target.repositories.length) {
+          throw new Error("Image build target has incomplete source-control identity");
+        }
+        const connectionIds = new Set(stable.map((repository) => repository.connectionId!));
+        if (connectionIds.size !== 1) {
+          throw new Error("Image build target mixes source-control connections");
+        }
+        if (!this.env.WORKER_URL) throw new Error("WORKER_URL is required for SCM build proxy");
+        const cloneBaseUrl = `${this.env.WORKER_URL.replace(/\/+$/, "")}/git/build/${encodeURIComponent(buildId)}`;
+        const capability = await new ScmGitCapabilityStore(this.db).issue({
+          audience: "image_build_git",
+          subjectId: buildId,
+          connectionId: [...connectionIds][0],
+          repositoryIds: stable.map((repository) => repository.repositoryKey!),
+          allowedOperation: "read",
+          expiresAt: Date.now() + IMAGE_BUILD_GIT_CAPABILITY_TTL_MS,
+        });
+        return {
+          type: "credential_helper",
+          host: new URL(cloneBaseUrl).host,
+          username: capability,
+          token: capability,
+          cloneBaseUrl,
+        };
+      }
       const provider = createSourceControlProviderFromEnv(this.env);
       const auth = await provider.generateCredentialHelperAuth();
       return {

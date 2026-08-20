@@ -8,6 +8,9 @@ import type { SessionRepositoryRow } from "./types";
 export interface RepoIdentity {
   repoOwner: string;
   repoName: string;
+  /** Stable repository identity when the target came through the connection registry. */
+  repositoryKey?: string | null;
+  connectionId?: string | null;
 }
 
 export function repoIdentityEquals(a: RepoIdentity, b: RepoIdentity): boolean {
@@ -19,6 +22,8 @@ export function repoIdentityEquals(a: RepoIdentity, b: RepoIdentity): boolean {
 
 /** One member repository of a session, with its role and backing storage. */
 export interface SessionRepositoryEntry {
+  repositoryKey?: string | null;
+  connectionId?: string | null;
   repoOwner: string;
   repoName: string;
   position: number;
@@ -49,6 +54,8 @@ export function buildSessionRepositories(
   if (rows.length === 0) {
     return [
       {
+        ...(scalarRepo.repositoryKey ? { repositoryKey: scalarRepo.repositoryKey } : {}),
+        ...(scalarRepo.connectionId ? { connectionId: scalarRepo.connectionId } : {}),
         repoOwner: scalarRepo.repoOwner,
         repoName: scalarRepo.repoName,
         position: 0,
@@ -59,6 +66,8 @@ export function buildSessionRepositories(
     ];
   }
   return rows.map((row) => ({
+    ...(row.repository_id ? { repositoryKey: row.repository_id } : {}),
+    ...(row.scm_connection_id ? { connectionId: row.scm_connection_id } : {}),
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
     position: row.position,

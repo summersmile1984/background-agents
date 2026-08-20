@@ -69,6 +69,7 @@ export interface AutomationRow {
   event_type: string | null;
   trigger_config: string | null; // JSON-serialized TriggerConfig
   trigger_auth_data: string | null;
+  scm_connection_id?: string | null;
 }
 
 type AutomationListResult = { automations: AutomationRow[] } & (
@@ -93,6 +94,8 @@ export interface AutomationRunRow {
   repo_owner: string | null;
   repo_name: string | null;
   repo_id: number | null;
+  repository_id?: string | null;
+  scm_connection_id?: string | null;
   base_branch: string | null;
   /** Environment snapshot taken at firing time (null for repository/repo-less runs). */
   environment_id: string | null;
@@ -108,6 +111,8 @@ export interface AutomationRepositoryRow {
   repo_owner: string;
   repo_name: string;
   repo_id: number | null;
+  repository_id?: string | null;
+  scm_connection_id?: string | null;
   base_branch: string | null;
   created_at: number;
   updated_at: number;
@@ -116,7 +121,7 @@ export interface AutomationRepositoryRow {
 /** Repository values for insert/replace (timestamps and owner id supplied by the store). */
 export type AutomationRepositoryInsert = Pick<
   AutomationRepositoryRow,
-  "repo_owner" | "repo_name" | "repo_id" | "base_branch"
+  "repo_owner" | "repo_name" | "repo_id" | "base_branch" | "repository_id" | "scm_connection_id"
 >;
 
 export interface AutomationEnvironmentRow {
@@ -162,6 +167,8 @@ export interface InvocationRunAggregate {
 
 function toAutomationRepository(row: AutomationRepositoryRow): AutomationRepository {
   return {
+    ...(row.repository_id ? { repositoryKey: row.repository_id } : {}),
+    ...(row.scm_connection_id ? { connectionId: row.scm_connection_id } : {}),
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
     repoId: row.repo_id,
@@ -221,6 +228,8 @@ export function toAutomationRun(row: EnrichedRunRow): AutomationRun {
     repoOwner: row.repo_owner ?? null,
     repoName: row.repo_name ?? null,
     repoId: row.repo_id ?? null,
+    ...(row.repository_id ? { repositoryKey: row.repository_id } : {}),
+    ...(row.scm_connection_id ? { connectionId: row.scm_connection_id } : {}),
     baseBranch: row.base_branch ?? null,
     environmentId: row.environment_id ?? null,
   };
@@ -330,6 +339,7 @@ export class AutomationStore {
       row.event_type,
       row.trigger_config,
       row.trigger_auth_data,
+      row.scm_connection_id ?? null,
     ] as const;
     if (row.agent_harness) {
       return this.db
@@ -338,8 +348,8 @@ export class AutomationStore {
            (id, name, instructions,
             trigger_type, schedule_cron, schedule_tz, model, reasoning_effort, enabled, next_run_at,
             consecutive_failures, created_by, user_id, created_at, updated_at, deleted_at,
-            event_type, trigger_config, trigger_auth_data, agent_harness)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            event_type, trigger_config, trigger_auth_data, scm_connection_id, agent_harness)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(...commonValues, row.agent_harness);
     }
@@ -349,8 +359,8 @@ export class AutomationStore {
          (id, name, instructions,
           trigger_type, schedule_cron, schedule_tz, model, reasoning_effort, enabled, next_run_at,
           consecutive_failures, created_by, user_id, created_at, updated_at, deleted_at,
-          event_type, trigger_config, trigger_auth_data)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          event_type, trigger_config, trigger_auth_data, scm_connection_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(...commonValues);
   }
@@ -434,6 +444,7 @@ export class AutomationStore {
       "event_type",
       "trigger_config",
       "trigger_auth_data",
+      "scm_connection_id",
     ];
 
     for (const field of allowedFields) {
@@ -561,8 +572,9 @@ export class AutomationStore {
       this.db
         .prepare(
           `INSERT INTO automation_repositories
-           (automation_id, repo_owner, repo_name, repo_id, base_branch, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
+           (automation_id, repo_owner, repo_name, repo_id, base_branch,
+            scm_connection_id, repository_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           automationId,
@@ -570,6 +582,8 @@ export class AutomationStore {
           repository.repo_name,
           repository.repo_id,
           repository.base_branch,
+          repository.scm_connection_id ?? null,
+          repository.repository_id ?? null,
           now,
           now
         )
@@ -865,8 +879,9 @@ export class AutomationStore {
             `INSERT INTO automation_runs
              (id, automation_id, invocation_id, session_id, status, skip_reason, failure_reason,
               scheduled_at, started_at, completed_at, created_at,
-              repo_owner, repo_name, repo_id, base_branch, environment_id)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+              repo_owner, repo_name, repo_id, base_branch, environment_id,
+              scm_connection_id, repository_id)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
              WHERE EXISTS (SELECT 1 FROM automation_invocations WHERE id = ?)`
           )
           .bind(
@@ -886,6 +901,8 @@ export class AutomationStore {
             child.repo_id,
             child.base_branch,
             child.environment_id,
+            child.scm_connection_id ?? null,
+            child.repository_id ?? null,
             invocation.id
           )
       );

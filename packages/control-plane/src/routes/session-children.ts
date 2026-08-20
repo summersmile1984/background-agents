@@ -13,7 +13,7 @@ import type { Env } from "../types";
 import {
   defineRoute,
   error,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
+  SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
   json,
   parsePattern,
   SCM_AGNOSTIC_SANDBOX_ROUTE,
@@ -101,12 +101,20 @@ export async function handlePromptChild(
   if (childSession.status === "completed" || childSession.status === "failed") {
     const parentSession = await sessionStore.get(parentId);
     if (!parentSession) return error("Parent session not found", 404);
-    const parentSettings = await resolveSandboxSettings(
-      ctx.db,
-      parentSession.repoOwner,
-      parentSession.repoName,
-      parentSession.environmentId
-    );
+    const parentSettings = parentSession.repositoryId
+      ? await resolveSandboxSettings(
+          ctx.db,
+          parentSession.repoOwner,
+          parentSession.repoName,
+          parentSession.environmentId,
+          parentSession.repositoryId
+        )
+      : await resolveSandboxSettings(
+          ctx.db,
+          parentSession.repoOwner,
+          parentSession.repoName,
+          parentSession.environmentId
+        );
     const maxConcurrentChildren =
       parentSettings.maxConcurrentChildSessions ?? DEFAULT_MAX_CONCURRENT_CHILD_SESSIONS;
     admissionLease = await sessionStore.acquireChildAdmissionLease(
@@ -249,13 +257,13 @@ export async function handleCancelChild(
 }
 
 export const sessionChildRoutes: Route[] = [
-  defineRoute(GITHUB_SANDBOX_FALLBACK_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE, {
     method: "GET",
     pattern: parsePattern("/sessions/:id/children"),
     handler: handleListChildren,
   }),
   defineRoute(
-    GITHUB_SANDBOX_FALLBACK_ROUTE,
+    SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
     sessionRoute({
       method: "GET",
       pattern: parsePattern("/sessions/:id/children/:childId"),
@@ -263,7 +271,7 @@ export const sessionChildRoutes: Route[] = [
     })
   ),
   defineRoute(
-    GITHUB_SANDBOX_FALLBACK_ROUTE,
+    SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
     sessionRoute({
       method: "POST",
       pattern: parsePattern("/sessions/:id/children/:childId/cancel"),

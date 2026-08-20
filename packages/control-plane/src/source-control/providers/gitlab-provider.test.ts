@@ -691,6 +691,8 @@ describe("GitLabSourceControlProvider", () => {
         private: true,
         archived: false,
         defaultBranch: "main",
+        webUrl: "https://gitlab.com/acme/web",
+        cloneUrl: "https://gitlab.com/acme/web.git",
       });
     });
 

@@ -10,8 +10,6 @@ import type { Env } from "../types";
 import {
   defineRoute,
   error,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
-  GITHUB_USER_OR_SERVICE_ROUTE,
   parseJsonBody,
   parsePattern,
   SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
@@ -222,7 +220,7 @@ function lifecycleProxyRoute(
   internalPath: SessionInternalPath
 ): Route {
   return defineRoute(
-    GITHUB_USER_OR_SERVICE_ROUTE,
+    SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     sessionRoute({
       method,
       pattern: parsePattern(routePath),
@@ -260,27 +258,27 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     notFoundMessage: "Session not found",
   }),
   simpleProxyRoute({
-    policy: GITHUB_USER_OR_SERVICE_ROUTE,
+    policy: SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     method: "POST",
     routePath: "/sessions/:id/stop",
     internalPath: SessionInternalPaths.stop,
     runtimeMethod: "POST",
   }),
   simpleProxyRoute({
-    policy: GITHUB_USER_OR_SERVICE_ROUTE,
+    policy: SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     method: "GET",
     routePath: "/sessions/:id/events",
     internalPath: SessionInternalPaths.events,
     forwardSearch: true,
   }),
   simpleProxyRoute({
-    policy: GITHUB_USER_OR_SERVICE_ROUTE,
+    policy: SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     method: "GET",
     routePath: "/sessions/:id/artifacts",
     internalPath: SessionInternalPaths.artifacts,
   }),
   simpleProxyRoute({
-    policy: GITHUB_USER_OR_SERVICE_ROUTE,
+    policy: SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     method: "GET",
     routePath: "/sessions/:id/participants",
     internalPath: SessionInternalPaths.participants,
@@ -294,7 +292,7 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     })
   ),
   defineRoute(
-    GITHUB_USER_OR_SERVICE_ROUTE,
+    SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     sessionRoute({
       method: "POST",
       pattern: parsePattern("/sessions/:id/participants"),
@@ -302,14 +300,14 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     })
   ),
   simpleProxyRoute({
-    policy: GITHUB_USER_OR_SERVICE_ROUTE,
+    policy: SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     method: "GET",
     routePath: "/sessions/:id/messages",
     internalPath: SessionInternalPaths.messages,
     forwardSearch: true,
   }),
   defineRoute(
-    GITHUB_SANDBOX_FALLBACK_ROUTE,
+    SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
     sessionRoute({
       method: "POST",
       pattern: parsePattern("/sessions/:id/pr"),

@@ -655,6 +655,25 @@ describe("createSandboxHandler", () => {
     expect(getScmCredentials).not.toHaveBeenCalled();
   });
 
+  it("never releases forge credentials for a connection-pinned session", async () => {
+    const { handler, getSession, getScmCredentials } = createHandler();
+    getSession.mockReturnValue({
+      id: "session-1",
+      repo_owner: "acme",
+      repo_name: "web-app",
+      scm_connection_id: "scm_gitea_1",
+    } as SessionRow);
+
+    const response = await handler.scmCredentials();
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: "Pinned SCM sessions use the server-side Git proxy",
+    });
+    expect(getScmCredentials).not.toHaveBeenCalled();
+  });
+
   it("returns scm credentials payload on success", async () => {
     const { handler, getSession, getScmCredentials } = createHandler();
     getSession.mockReturnValue({

@@ -100,6 +100,7 @@ describe("McpServersSettings", () => {
     expect(mocks.updateMcpServer).toHaveBeenCalledWith("server-a", {
       name: "Server A",
       enabled: true,
+      repositoryIds: null,
       repoScopes: null,
       type: "local",
       command: ["npx", "tool"],

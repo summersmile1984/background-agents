@@ -12,7 +12,7 @@ import type { IntegrationId, IntegrationEntry } from "@open-inspect/shared/types
 import { IntegrationSettingsSkeleton } from "./integration-settings-skeleton";
 import { Button } from "@/components/ui/button";
 import { RadioCard } from "@/components/ui/form-controls";
-import { browserApiFetch } from "@/lib/browser-api-fetch";
+import { browserApiFetch, type BrowserApiPath } from "@/lib/browser-api-fetch";
 import {
   Select,
   SelectContent,
@@ -57,6 +57,7 @@ interface GlobalResponse {
 }
 
 interface RepoSettingsEntry {
+  repositoryId?: string;
   repo: string;
   settings: EnablementSettings;
 }
@@ -121,9 +122,11 @@ function GlobalSettingsSection({
   copy: EnablementIntegrationCopy;
 }) {
   const [enabled, setEnabled] = useState(settings?.defaults?.enabled ?? false);
-  const [enabledRepos, setEnabledRepos] = useState<string[]>(settings?.enabledRepos ?? []);
+  const [enabledRepos, setEnabledRepos] = useState<string[]>(
+    settings?.enabledRepositoryIds ?? settings?.enabledRepos ?? []
+  );
   const [repoScopeMode, setRepoScopeMode] = useState<"all" | "selected">(
-    settings?.enabledRepos == null ? "all" : "selected"
+    settings?.enabledRepositoryIds == null && settings?.enabledRepos == null ? "all" : "selected"
   );
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -134,8 +137,12 @@ function GlobalSettingsSection({
     if (settings !== undefined && !initialized) {
       if (settings) {
         setEnabled(settings.defaults?.enabled ?? false);
-        setEnabledRepos(settings.enabledRepos ?? []);
-        setRepoScopeMode(settings.enabledRepos == null ? "all" : "selected");
+        setEnabledRepos(settings.enabledRepositoryIds ?? settings.enabledRepos ?? []);
+        setRepoScopeMode(
+          settings.enabledRepositoryIds == null && settings.enabledRepos == null
+            ? "all"
+            : "selected"
+        );
       }
       setInitialized(true);
     }
@@ -173,7 +180,15 @@ function GlobalSettingsSection({
     const defaults: EnablementSettings = { enabled };
     const body: EnablementGlobalConfig = { defaults };
     if (repoScopeMode === "selected") {
-      body.enabledRepos = enabledRepos;
+      const repositoryIds = enabledRepos.flatMap((selected) => {
+        const byId = availableRepos.find((repo) => repo.repositoryKey === selected);
+        if (byId?.repositoryKey) return [byId.repositoryKey];
+        const byPath = availableRepos.find(
+          (repo) => repo.fullName.toLowerCase() === selected.toLowerCase()
+        );
+        return byPath?.repositoryKey ? [byPath.repositoryKey] : [];
+      });
+      body.enabledRepositoryIds = [...new Set(repositoryIds)];
     }
 
     try {
@@ -198,10 +213,10 @@ function GlobalSettingsSection({
     }
   };
 
-  const toggleRepo = (fullName: string) => {
-    const lower = fullName.toLowerCase();
+  const toggleRepo = (repo: EnrichedRepository) => {
+    const key = repo.repositoryKey ?? repo.fullName.toLowerCase();
     setEnabledRepos((prev) =>
-      prev.includes(lower) ? prev.filter((r) => r !== lower) : [...prev, lower]
+      prev.includes(key) ? prev.filter((r) => r !== key) : [...prev, key]
     );
     setDirty(true);
   };
@@ -260,18 +275,20 @@ function GlobalSettingsSection({
             ) : (
               <div className="border border-border max-h-56 overflow-y-auto rounded-sm">
                 {availableRepos.map((repo) => {
-                  const fullName = repo.fullName.toLowerCase();
-                  const isChecked = enabledRepos.includes(fullName);
+                  const stableKey = repo.repositoryKey ?? repo.fullName.toLowerCase();
+                  const isChecked =
+                    enabledRepos.includes(stableKey) ||
+                    enabledRepos.includes(repo.fullName.toLowerCase());
 
                   return (
                     <label
-                      key={repo.fullName}
+                      key={stableKey}
                       className="flex items-center gap-2 px-4 py-2 hover:bg-muted/50 transition cursor-pointer text-sm"
                     >
                       <input
                         type="checkbox"
                         checked={isChecked}
-                        onChange={() => toggleRepo(repo.fullName)}
+                        onChange={() => toggleRepo(repo)}
                         className="rounded border-border"
                       />
                       <span className="text-foreground">{repo.fullName}</span>
@@ -329,25 +346,33 @@ function RepoOverridesSection({
 }) {
   const [addingRepo, setAddingRepo] = useState("");
 
-  const overriddenRepos = new Set(overrides.map((o) => o.repo));
+  const overriddenRepos = new Set(
+    overrides.map((override) => override.repositoryId ?? override.repo.toLowerCase())
+  );
   const availableForOverride = availableRepos.filter(
-    (r) => !overriddenRepos.has(r.fullName.toLowerCase())
+    (repo) => !overriddenRepos.has(repo.repositoryKey ?? repo.fullName.toLowerCase())
   );
 
   const handleAdd = async () => {
     if (!addingRepo) return;
-    const repository = parseRepositoryFullName(addingRepo);
-    if (!repository) return;
+    const selected = availableRepos.find(
+      (repo) => (repo.repositoryKey ?? repo.fullName.toLowerCase()) === addingRepo
+    );
+    if (!selected) return;
+    const endpoint: BrowserApiPath | null = selected.repositoryKey
+      ? `/api/integration-settings/${copy.id}/repositories/${encodeURIComponent(selected.repositoryKey)}`
+      : (() => {
+          const repository = parseRepositoryFullName(selected.fullName);
+          return repository ? `${settingsKey}/${encodeRepositoryPathSegments(repository)}` : null;
+        })();
+    if (!endpoint) return;
 
     try {
-      const res = await browserApiFetch(
-        `${settingsKey}/${encodeRepositoryPathSegments(repository)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ settings: { enabled: true } }),
-        }
-      );
+      const res = await browserApiFetch(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { enabled: true } }),
+      });
 
       if (res.ok) {
         mutate(settingsKey);
@@ -367,7 +392,12 @@ function RepoOverridesSection({
       {overrides.length > 0 ? (
         <div className="space-y-2 mb-4">
           {overrides.map((entry) => (
-            <RepoOverrideRow key={entry.repo} entry={entry} settingsKey={settingsKey} />
+            <RepoOverrideRow
+              key={entry.repositoryId ?? entry.repo}
+              entry={entry}
+              settingsKey={settingsKey}
+              integrationId={copy.id}
+            />
           ))}
         </div>
       ) : (
@@ -381,8 +411,12 @@ function RepoOverridesSection({
           </SelectTrigger>
           <SelectContent>
             {availableForOverride.map((repo) => (
-              <SelectItem key={repo.fullName} value={repo.fullName.toLowerCase()}>
+              <SelectItem
+                key={repo.repositoryKey ?? repo.fullName}
+                value={repo.repositoryKey ?? repo.fullName.toLowerCase()}
+              >
                 {repo.fullName}
+                {repo.connection?.displayName ? ` · ${repo.connection.displayName}` : ""}
               </SelectItem>
             ))}
           </SelectContent>
@@ -398,9 +432,11 @@ function RepoOverridesSection({
 function RepoOverrideRow({
   entry,
   settingsKey,
+  integrationId,
 }: {
   entry: RepoSettingsEntry;
   settingsKey: `/api/integration-settings/${string}/repos`;
+  integrationId: EnablementIntegrationCopy["id"];
 }) {
   const [enabled, setEnabled] = useState(entry.settings.enabled ?? false);
   const [saving, setSaving] = useState(false);
@@ -408,19 +444,19 @@ function RepoOverrideRow({
 
   const handleSave = async () => {
     const repository = parseRepositoryFullName(entry.repo);
-    if (!repository) return;
+    if (!entry.repositoryId && !repository) return;
+    const endpoint: BrowserApiPath = entry.repositoryId
+      ? `/api/integration-settings/${integrationId}/repositories/${encodeURIComponent(entry.repositoryId)}`
+      : `${settingsKey}/${encodeRepositoryPathSegments(repository!)}`;
     setSaving(true);
     const settings: EnablementSettings = { enabled };
 
     try {
-      const res = await browserApiFetch(
-        `${settingsKey}/${encodeRepositoryPathSegments(repository)}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ settings }),
-        }
-      );
+      const res = await browserApiFetch(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+      });
 
       if (res.ok) {
         mutate(settingsKey);
@@ -439,15 +475,15 @@ function RepoOverrideRow({
 
   const handleDelete = async () => {
     const repository = parseRepositoryFullName(entry.repo);
-    if (!repository) return;
+    if (!entry.repositoryId && !repository) return;
+    const endpoint: BrowserApiPath = entry.repositoryId
+      ? `/api/integration-settings/${integrationId}/repositories/${encodeURIComponent(entry.repositoryId)}`
+      : `${settingsKey}/${encodeRepositoryPathSegments(repository!)}`;
 
     try {
-      const res = await browserApiFetch(
-        `${settingsKey}/${encodeRepositoryPathSegments(repository)}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const res = await browserApiFetch(endpoint, {
+        method: "DELETE",
+      });
 
       if (res.ok) {
         mutate(settingsKey);

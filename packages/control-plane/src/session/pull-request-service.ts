@@ -19,6 +19,7 @@ import {
   type GitPushAuthContext,
   type GitPushSpec,
   type PullRequestSnapshot,
+  supportsServerSideApiAuth,
 } from "../source-control";
 import type { SessionMessenger } from "./messenger";
 import type { ArtifactRepository } from "./artifact-repository";
@@ -151,6 +152,19 @@ export interface PullRequestServiceDeps {
   /** DO-instance-scoped in-flight claims — must outlive individual requests. */
   claims: PullRequestCreationClaims;
   sourceControlProvider: SourceControlProvider;
+  /** Resolve the provider pinned to this session member. Legacy sessions fall
+   * back to sourceControlProvider. */
+  resolveSourceControlProvider?: (target: SessionRepositoryEntry) => Promise<SourceControlProvider>;
+  /** Build a credential-free push target through the session Git proxy. */
+  buildScmProxyPushSpec?: (config: {
+    sessionId: string;
+    repositoryKey: string;
+    repoOwner: string;
+    repoName: string;
+    sourceRef: string;
+    targetBranch: string;
+    force: boolean;
+  }) => GitPushSpec;
   log: Logger;
   generateId: () => string;
   pushBranchToRemote: (pushSpec: GitPushSpec) => Promise<PushBranchResult>;
@@ -217,6 +231,22 @@ export class SessionPullRequestService {
     try {
       const sessionId = session.session_name || session.id;
       const generatedHeadBranch = generateBranchName(sessionId);
+      const provider = this.deps.resolveSourceControlProvider
+        ? await this.deps.resolveSourceControlProvider(target)
+        : this.deps.sourceControlProvider;
+      const repositoryKey =
+        target.row?.repository_id ?? (target.isPrimary ? session.repository_id : null) ?? null;
+      const connectionId =
+        target.row?.scm_connection_id ??
+        (target.isPrimary ? session.scm_connection_id : null) ??
+        null;
+      if ((repositoryKey === null) !== (connectionId === null)) {
+        return {
+          kind: "error",
+          status: 409,
+          error: "Session repository has incomplete source-control identity",
+        };
+      }
 
       let scmSettings: ScmSettings;
       try {
@@ -235,17 +265,33 @@ export class SessionPullRequestService {
       }
       const draft = scmSettings.alwaysUseDraftMode === true || (input.draft ?? false);
 
-      let pushAuth: GitPushAuthContext;
+      let pushAuth: GitPushAuthContext | null = null;
+      let serviceAuth: SourceControlAuthContext;
       try {
-        pushAuth = await this.deps.sourceControlProvider.generatePushAuth();
-        this.deps.log.info("Generated fresh push auth token");
+        if (repositoryKey) {
+          if (!supportsServerSideApiAuth(provider)) {
+            throw new SourceControlProviderError(
+              "The pinned source-control connection has no server-side API authority.",
+              "permanent",
+              501
+            );
+          }
+          serviceAuth = await provider.getServiceApiAuthorization();
+        } else {
+          pushAuth = await provider.generatePushAuth();
+          serviceAuth = { authType: "app", token: pushAuth.token };
+        }
+        this.deps.log.info("Resolved server-side source-control authority", {
+          scm_provider: provider.name,
+          scm_connection_id: connectionId,
+        });
       } catch (error) {
         this.deps.log.error("Failed to generate push auth", {
           error: error instanceof Error ? error : String(error),
         });
         return {
           kind: "error",
-          status: 500,
+          status: error instanceof SourceControlProviderError ? (error.httpStatus ?? 500) : 500,
           error:
             error instanceof SourceControlProviderError
               ? error.message
@@ -253,12 +299,7 @@ export class SessionPullRequestService {
         };
       }
 
-      const appAuth: SourceControlAuthContext = {
-        authType: "app",
-        token: pushAuth.token,
-      };
-
-      const repoInfo = await this.deps.sourceControlProvider.getRepository(appAuth, {
+      const repoInfo = await provider.getRepository(serviceAuth, {
         owner: targetRepo.repoOwner,
         name: targetRepo.repoName,
       });
@@ -303,6 +344,7 @@ export class SessionPullRequestService {
         { headBranch: sanitizedHeadBranch, generatedHeadBranch }
       );
       const existingOpenPr = await this.resolveExistingOpenPullRequest(
+        provider,
         headMatches,
         targetRepo,
         sessionId,
@@ -315,14 +357,31 @@ export class SessionPullRequestService {
         }
       );
 
-      const pushSpec = this.deps.sourceControlProvider.buildGitPushSpec({
-        owner: targetRepo.repoOwner,
-        name: targetRepo.repoName,
-        sourceRef: "HEAD",
-        targetBranch: sanitizedHeadBranch,
-        auth: pushAuth,
-        force: true,
-      });
+      const pushSpec = repositoryKey
+        ? this.deps.buildScmProxyPushSpec?.({
+            sessionId,
+            repositoryKey,
+            repoOwner: targetRepo.repoOwner,
+            repoName: targetRepo.repoName,
+            sourceRef: "HEAD",
+            targetBranch: sanitizedHeadBranch,
+            force: true,
+          })
+        : provider.buildGitPushSpec({
+            owner: targetRepo.repoOwner,
+            name: targetRepo.repoName,
+            sourceRef: "HEAD",
+            targetBranch: sanitizedHeadBranch,
+            auth: pushAuth!,
+            force: true,
+          });
+      if (!pushSpec) {
+        return {
+          kind: "error",
+          status: 501,
+          error: "The pinned source-control connection does not support sandbox push",
+        };
+      }
 
       const pushResult = await this.deps.pushBranchToRemote(pushSpec);
       if (!pushResult.success) {
@@ -362,12 +421,15 @@ export class SessionPullRequestService {
 
       // Use user OAuth if available, otherwise fall back to GitHub App token
       // (e.g. sessions triggered from Linear or other integrations without user GitHub OAuth)
-      const prAuth = input.promptingAuth ?? appAuth;
+      // Prompting auth is currently GitHub-linked. Never send it to another
+      // forge connection; PAT MVP pull requests are authored by the service user.
+      const prAuth =
+        provider.name === "github" ? (input.promptingAuth ?? serviceAuth) : serviceAuth;
 
       const fullBody =
         input.body + `\n\n---\n*Created with [${this.deps.appName}](${input.sessionUrl})*`;
 
-      const prResult = await this.deps.sourceControlProvider.createPullRequest(prAuth, {
+      const prResult = await provider.createPullRequest(prAuth, {
         repository: repoInfo,
         title: input.title,
         body: fullBody,
@@ -392,6 +454,8 @@ export class SessionPullRequestService {
         headSha: prResult.headSha,
         repoOwner: targetRepo.repoOwner,
         repoName: targetRepo.repoName,
+        scmConnectionId: connectionId ?? undefined,
+        repositoryId: repositoryKey ?? undefined,
         repositoryExternalId: prResult.repositoryExternalId,
         providerUpdatedAt: prResult.providerUpdatedAt,
       };
@@ -489,6 +553,7 @@ export class SessionPullRequestService {
    * recency pick a winner.
    */
   private async resolveExistingOpenPullRequest(
+    provider: SourceControlProvider,
     matches: PrArtifactHeadMatch[],
     targetRepo: RepoIdentity,
     sessionId: string,
@@ -529,7 +594,7 @@ export class SessionPullRequestService {
       // opening a duplicate is not.
       let live: PullRequestSnapshot | null = null;
       try {
-        live = await this.deps.sourceControlProvider.getPullRequest({
+        live = await provider.getPullRequest({
           owner: targetRepo.repoOwner,
           name: targetRepo.repoName,
           number: candidate.prNumber,

@@ -21,6 +21,7 @@ import { ImageBuildError } from "../image-builds/errors";
 import {
   parseRuntimeVersionNumber,
   repoImageBuildScope,
+  repoImageBuildScopeByRepositoryKey,
   type ImageBuildScope,
 } from "../image-builds/model";
 import { getImageBuildsUnsupportedMessage } from "../image-builds/provider-policy";
@@ -40,11 +41,12 @@ import type {
 } from "../image-builds/types";
 import type { Env } from "../types";
 import type { SqlDatabase } from "../db/sql-database";
+import { ScmRepositoryStore } from "../db/scm-repositories";
 import {
   type RequestContext,
   type Route,
   defineRoute,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   SCM_AGNOSTIC_HANDLER_AUTHENTICATED_ROUTE,
   error,
   extractRepoParams,
@@ -316,6 +318,21 @@ async function handleTriggerRepoBuild(
   return triggerBuildForScope(env, repoImageBuildScope(params.owner, params.name), ctx);
 }
 
+async function handleTriggerRepositoryKeyBuild(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const providerError = requireImageBuilds(env);
+  if (providerError) return providerError;
+  const repositoryKey = match.groups?.repositoryKey
+    ? decodeURIComponent(match.groups.repositoryKey)
+    : null;
+  if (!repositoryKey) return error("Repository key is required", 400);
+  return triggerBuildForScope(env, repoImageBuildScopeByRepositoryKey(repositoryKey), ctx);
+}
+
 /**
  * PUT /image-builds/toggle/repo/:owner/:name
  * Toggle prebuilds for a repo (the repo_metadata.image_build_enabled write).
@@ -383,6 +400,41 @@ async function handleToggleRepoImageBuilds(
   }
 
   return json({ ok: true, enabled: body.enabled });
+}
+
+async function handleToggleRepositoryKeyImageBuilds(
+  request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const providerError = requireImageBuilds(env);
+  if (providerError) return providerError;
+  const repositoryKey = match.groups?.repositoryKey
+    ? decodeURIComponent(match.groups.repositoryKey)
+    : null;
+  if (!repositoryKey) return error("Repository key is required", 400);
+  const repository = await new ScmRepositoryStore(ctx.db).get(repositoryKey);
+  if (!repository) return error("SCM repository was not found", 404);
+  const body = await parseJsonBody<{ enabled?: unknown }>(request);
+  if (body instanceof Response) return body;
+  if (typeof body.enabled !== "boolean") return error("enabled must be a boolean", 400);
+  const scope = repoImageBuildScopeByRepositoryKey(repositoryKey);
+  if (body.enabled) {
+    try {
+      await resolveScopeTarget(env, ctx.db, scope);
+    } catch (cause) {
+      return imageBuildErrorToResponse(cause);
+    }
+  }
+  await new RepoMetadataStore(ctx.db).setImageBuildEnabledByRepositoryId(
+    repositoryKey,
+    body.enabled
+  );
+  if (body.enabled) {
+    scheduleImageBuildOnSave(env, scope, ctx);
+  }
+  return json({ ok: true, enabled: body.enabled, repositoryKey });
 }
 
 function parseScopeParams(request: Request): ImageBuildScope | null | Response {
@@ -513,32 +565,42 @@ export const imageBuildRoutes: Route[] = [
     pattern: parsePattern("/image-builds/build-failed"),
     handler: handleBuildFailed,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
+    method: "POST",
+    pattern: parsePattern("/image-builds/trigger/repository/:repositoryKey"),
+    handler: handleTriggerRepositoryKeyBuild,
+  }),
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "POST",
     pattern: parsePattern("/image-builds/trigger/environment/:id"),
     handler: handleTriggerEnvironmentBuild,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
+    method: "PUT",
+    pattern: parsePattern("/image-builds/toggle/repository/:repositoryKey"),
+    handler: handleToggleRepositoryKeyImageBuilds,
+  }),
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "POST",
     pattern: parsePattern("/image-builds/trigger/repo/:owner/:name"),
     handler: handleTriggerRepoBuild,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "PUT",
     pattern: parsePattern("/image-builds/toggle/repo/:owner/:name"),
     handler: handleToggleRepoImageBuilds,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "GET",
     pattern: parsePattern("/image-builds/status"),
     handler: handleGetStatus,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "GET",
     pattern: parsePattern("/image-builds/enabled"),
     handler: handleGetEnabledUnits,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "GET",
     pattern: parsePattern("/image-builds/enabled-repos"),
     handler: handleGetEnabledRepos,

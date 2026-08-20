@@ -9,6 +9,8 @@
 // the two paths can never diverge.
 const SESSION_REPOSITORIES_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_repositories (
   position INTEGER NOT NULL,
+  scm_connection_id TEXT,
+  repository_id TEXT,
   repo_owner TEXT NOT NULL,
   repo_name TEXT NOT NULL,
   repo_id INTEGER,
@@ -49,6 +51,8 @@ CREATE TABLE IF NOT EXISTS session (
   repo_owner TEXT,                                  -- e.g., "acme-corp"; NULL for no-repo sessions
   repo_name TEXT,                                   -- e.g., "web-app"; NULL for no-repo sessions
   repo_id INTEGER,                                  -- GitHub repository ID (stable)
+  scm_connection_id TEXT,                           -- Pinned SCM connection; NULL for legacy/repo-less
+  repository_id TEXT,                               -- Stable Open-Inspect repository id
   base_branch TEXT,                                 -- Base branch for PRs; NULL for no-repo sessions
   branch_name TEXT,                                 -- Working branch (set after first commit)
   base_sha TEXT,                                    -- SHA of base branch at session start
@@ -571,6 +575,16 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
         `ALTER TABLE session ADD COLUMN agent_harness TEXT NOT NULL DEFAULT 'opencode'`
       );
       runMigration(sql, `ALTER TABLE session ADD COLUMN agent_session_id TEXT`);
+    },
+  },
+  {
+    id: 44,
+    description: "Pin SCM connection and repository identity",
+    run: (sql) => {
+      runMigration(sql, `ALTER TABLE session ADD COLUMN scm_connection_id TEXT`);
+      runMigration(sql, `ALTER TABLE session ADD COLUMN repository_id TEXT`);
+      runMigration(sql, `ALTER TABLE session_repositories ADD COLUMN scm_connection_id TEXT`);
+      runMigration(sql, `ALTER TABLE session_repositories ADD COLUMN repository_id TEXT`);
     },
   },
 ];

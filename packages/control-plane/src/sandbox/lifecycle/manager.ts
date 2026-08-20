@@ -226,9 +226,32 @@ function buildSandboxIdForSession(session: SessionRow, now: number): string {
 function multiRepoSpawnFields(
   repositories: SessionRepositoryInfo[]
 ): Pick<CreateSandboxConfig, "repositories"> {
-  return repositories.length > 1 || repositories.some((repository) => repository.baseSha)
+  return repositories.length > 1 ||
+    repositories.some((repository) => repository.baseSha || repository.repositoryKey)
     ? { repositories }
     : {};
+}
+
+function scmGitProxyBaseUrl(
+  session: SessionRow,
+  repositories: SessionRepositoryInfo[],
+  controlPlaneUrl: string,
+  sessionId: string
+): string | undefined {
+  if (!session.scm_connection_id) return undefined;
+  if (
+    repositories.length === 0 ||
+    repositories.some(
+      (repository) =>
+        !repository.repositoryKey || repository.connectionId !== session.scm_connection_id
+    )
+  ) {
+    throw new SandboxProviderError(
+      "Pinned SCM session has incomplete repository proxy identity",
+      "permanent"
+    );
+  }
+  return `${controlPlaneUrl.replace(/\/+$/, "")}/git/session/${encodeURIComponent(sessionId)}`;
 }
 
 function withManagedRuntimeEnv(
@@ -253,7 +276,11 @@ function withManagedRuntimeEnv(
  */
 export interface McpServerLookup {
   getDecryptedForSession(
-    repositories: Array<{ repoOwner: string; repoName: string }>
+    repositories: Array<{
+      repoOwner: string;
+      repoName: string;
+      repositoryKey?: string | null;
+    }>
   ): Promise<McpServerConfig[]>;
 }
 
@@ -265,7 +292,11 @@ export interface McpServerLookup {
  * False (or throwing) means do not install the tool in this sandbox.
  */
 export interface SlackAgentNotifyLookup {
-  isEnabledForRepo(repoOwner: string | null, repoName: string | null): Promise<boolean>;
+  isEnabledForRepo(
+    repoOwner: string | null,
+    repoName: string | null,
+    repositoryId?: string | null
+  ): Promise<boolean>;
 }
 
 // ==================== Callbacks ====================
@@ -467,6 +498,12 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
       const repositories = this.storage.getSessionRepositories();
       const multiRepoFields = multiRepoSpawnFields(repositories);
+      const gitProxyBaseUrl = scmGitProxyBaseUrl(
+        session,
+        repositories,
+        this.config.controlPlaneUrl,
+        sessionId
+      );
 
       // Prebuilt-image selection: an environment session matches its
       // environment's image against the session's own repository snapshot
@@ -521,6 +558,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         agentSlackNotifyEnabled,
         mcpServers,
         sandboxSettings,
+        scmGitProxyBaseUrl: gitProxyBaseUrl,
         ...multiRepoFields,
       };
 
@@ -704,10 +742,15 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
   private async resolveAgentSlackNotifyEnabled(session: SessionRow): Promise<boolean> {
     if (!this.config.slackAgentNotifyLookup) return false;
     try {
-      return await this.config.slackAgentNotifyLookup.isEnabledForRepo(
-        sessionHasRepository(session) ? session.repo_owner : null,
-        sessionHasRepository(session) ? session.repo_name : null
-      );
+      const repoOwner = sessionHasRepository(session) ? session.repo_owner : null;
+      const repoName = sessionHasRepository(session) ? session.repo_name : null;
+      return session.repository_id
+        ? await this.config.slackAgentNotifyLookup.isEnabledForRepo(
+            repoOwner,
+            repoName,
+            session.repository_id
+          )
+        : await this.config.slackAgentNotifyLookup.isEnabledForRepo(repoOwner, repoName);
     } catch (err) {
       this.log.warn("Failed to resolve agent slack-notify gate; treating as disabled", {
         event: "slack_notify.gate_resolve_failed",
@@ -727,7 +770,11 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
     try {
       if (!this.config.mcpServerLookup) return undefined;
       const servers = await this.config.mcpServerLookup.getDecryptedForSession(
-        repositories.map(({ repoOwner, repoName }) => ({ repoOwner, repoName }))
+        repositories.map(({ repoOwner, repoName, repositoryKey }) => ({
+          repoOwner,
+          repoName,
+          repositoryKey,
+        }))
       );
       this.log.info("MCP servers loaded", {
         event: "mcp.loaded",
@@ -794,6 +841,13 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const { provider, model: modelId } = this.resolveProviderAndModel(session);
 
       const repositories = this.storage.getSessionRepositories();
+      const publicSessionId = session.session_name || session.id;
+      const gitProxyBaseUrl = scmGitProxyBaseUrl(
+        session,
+        repositories,
+        this.config.controlPlaneUrl,
+        publicSessionId
+      );
       const codeServerEnabled = session.code_server_enabled === 1;
       const vncEnabled = session.vnc_enabled === 1;
       const agentSlackNotifyEnabled = await this.resolveAgentSlackNotifyEnabled(session);
@@ -802,7 +856,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const timeoutSeconds = this.resolveSandboxTimeoutSeconds(sandboxSettings);
       const result = await this.provider.restoreFromSnapshot({
         snapshotImageId,
-        sessionId: session.session_name || session.id,
+        sessionId: publicSessionId,
         sandboxId: expectedSandboxId,
         sandboxAuthToken,
         controlPlaneUrl: this.config.controlPlaneUrl,
@@ -820,6 +874,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         agentSlackNotifyEnabled,
         mcpServers,
         sandboxSettings,
+        scmGitProxyBaseUrl: gitProxyBaseUrl,
         ...multiRepoSpawnFields(repositories),
       });
 

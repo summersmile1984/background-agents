@@ -24,8 +24,7 @@ import type {
   SessionPullRequestRecord,
   SessionPullRequestStore,
 } from "../db/session-pull-request-store";
-import { snapshotToRecord } from "../session/pull-request-snapshot";
-import type { PullRequestSnapshot } from "../source-control";
+import { snapshotToRecord, type PullRequestSnapshotInput } from "../session/pull-request-snapshot";
 
 /** A DO artifact as served by GET /internal/artifacts (metadata pre-parsed). */
 export interface SessionArtifactSummary {
@@ -49,7 +48,7 @@ export interface PullRequestLifecycleDeps {
   pushSnapshotToSession: (
     sessionId: string,
     artifactId: string,
-    snapshot: PullRequestSnapshot
+    snapshot: PullRequestSnapshotInput
   ) => Promise<void>;
   now: () => number;
 }
@@ -105,7 +104,7 @@ function equalsIgnoreCase(a: string | null | undefined, b: string): boolean {
  */
 async function upsertRecordThenMirror(
   deps: PullRequestLifecycleDeps,
-  snapshot: PullRequestSnapshot,
+  snapshot: PullRequestSnapshotInput,
   identity: { artifactId: string; sessionId: string; createdAt: number; updatedAt: number },
   outcome: "updated" | "inserted"
 ): Promise<PullRequestLifecycleOutcome> {
@@ -155,7 +154,7 @@ async function applyToRecord(
   status: PullRequestStatus,
   record: SessionPullRequestRecord
 ): Promise<PullRequestLifecycleOutcome> {
-  const snapshot: PullRequestSnapshot = {
+  const snapshot: PullRequestSnapshotInput = {
     number: facts.number,
     url: facts.url ?? record.url,
     lifecycleState: status.lifecycleState,
@@ -168,6 +167,8 @@ async function applyToRecord(
     repoOwner: event.repoOwner,
     repoName: event.repoName,
     repositoryExternalId: facts.repositoryExternalId ?? record.repositoryExternalId ?? undefined,
+    scmConnectionId: record.scmConnectionId ?? undefined,
+    repositoryId: record.repositoryId ?? undefined,
     providerCreatedAt: facts.providerCreatedAt ?? record.providerCreatedAt ?? undefined,
     providerUpdatedAt: facts.providerUpdatedAt ?? record.providerUpdatedAt ?? undefined,
     // Record fallback covers payloads missing the field; snapshotToRecord
@@ -238,7 +239,7 @@ async function insertViaBranchFallback(
   if (!url || !event.branch || !event.targetBranch) return "insufficient_payload";
 
   const now = deps.now();
-  const snapshot: PullRequestSnapshot = {
+  const snapshot: PullRequestSnapshotInput = {
     number: facts.number,
     url,
     lifecycleState: status.lifecycleState,

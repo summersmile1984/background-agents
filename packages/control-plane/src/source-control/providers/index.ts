@@ -6,13 +6,15 @@ import { SourceControlProviderError } from "../errors";
 import type { SourceControlProvider, SourceControlProviderName } from "../types";
 import { createGitHubProvider } from "./github-provider";
 import { createGitLabProvider } from "./gitlab-provider";
-import type { GitHubProviderConfig, GitLabProviderConfig } from "./types";
+import { createGiteaProvider } from "./gitea-provider";
+import type { GiteaProviderConfig, GitHubProviderConfig, GitLabProviderConfig } from "./types";
 
 // Types
-export type { GitHubProviderConfig } from "./types";
+export type { GiteaProviderConfig, GitHubProviderConfig } from "./types";
 
 // Providers
 export { GitHubSourceControlProvider, createGitHubProvider } from "./github-provider";
+export { GiteaSourceControlProvider, createGiteaProvider } from "./gitea-provider";
 
 /**
  * Factory configuration for selecting a source control provider.
@@ -20,6 +22,7 @@ export { GitHubSourceControlProvider, createGitHubProvider } from "./github-prov
 export interface SourceControlProviderFactoryConfig {
   provider: SourceControlProviderName;
   github?: GitHubProviderConfig;
+  gitea?: GiteaProviderConfig;
   gitlab?: GitLabProviderConfig;
 }
 
@@ -40,6 +43,14 @@ export function createSourceControlProvider(
         );
       }
       return createGitLabProvider(config.gitlab);
+    case "gitea":
+      if (!config.gitea) {
+        throw new SourceControlProviderError(
+          "SCM provider 'gitea' requires gitea configuration.",
+          "permanent"
+        );
+      }
+      return createGiteaProvider(config.gitea);
     case "bitbucket":
       throw new SourceControlProviderError(
         "SCM provider 'bitbucket' is configured but not implemented.",

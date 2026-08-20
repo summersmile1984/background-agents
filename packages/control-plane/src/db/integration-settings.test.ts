@@ -27,6 +27,8 @@ type RepoRow = {
   updated_at: number;
 };
 
+type StableRepoRow = Omit<RepoRow, "repo"> & { repository_id: string };
+
 type EnvironmentRow = {
   integration_id: string;
   environment_id: string;
@@ -44,6 +46,11 @@ const QUERY_PATTERNS = {
   UPSERT_REPO: /^INSERT INTO integration_repo_settings/,
   DELETE_REPO: /^DELETE FROM integration_repo_settings WHERE integration_id = \? AND repo = \?$/,
   LIST_REPO: /^SELECT repo, settings FROM integration_repo_settings WHERE integration_id = \?$/,
+  SELECT_STABLE_REPO:
+    /^SELECT settings FROM scm_integration_repo_settings WHERE integration_id = \? AND repository_id = \?$/,
+  UPSERT_STABLE_REPO: /^INSERT INTO scm_integration_repo_settings/,
+  DELETE_STABLE_REPO:
+    /^DELETE FROM scm_integration_repo_settings WHERE integration_id = \? AND repository_id = \?$/,
   SELECT_ENVIRONMENT:
     /^SELECT settings FROM integration_environment_settings WHERE integration_id = \? AND environment_id = \?$/,
   UPSERT_ENVIRONMENT: /^INSERT INTO integration_environment_settings/,
@@ -58,6 +65,7 @@ function normalizeQuery(query: string): string {
 class FakeD1Database {
   private globalRows = new Map<string, GlobalRow>();
   private repoRows = new Map<string, RepoRow>();
+  private stableRepoRows = new Map<string, StableRepoRow>();
   private environmentRows = new Map<string, EnvironmentRow>();
 
   private repoKey(integrationId: string, repo: string): string {
@@ -80,6 +88,12 @@ class FakeD1Database {
     if (QUERY_PATTERNS.SELECT_REPO.test(normalized)) {
       const [integrationId, repo] = args as [string, string];
       const row = this.repoRows.get(this.repoKey(integrationId, repo));
+      return row ? { settings: row.settings } : null;
+    }
+
+    if (QUERY_PATTERNS.SELECT_STABLE_REPO.test(normalized)) {
+      const [integrationId, repositoryId] = args as [string, string];
+      const row = this.stableRepoRows.get(this.repoKey(integrationId, repositoryId));
       return row ? { settings: row.settings } : null;
     }
 
@@ -149,6 +163,26 @@ class FakeD1Database {
       return { meta: { changes: 1 } };
     }
 
+    if (QUERY_PATTERNS.UPSERT_STABLE_REPO.test(normalized)) {
+      const [integrationId, repositoryId, settings, createdAt, updatedAt] = args as [
+        string,
+        string,
+        string,
+        number,
+        number,
+      ];
+      const key = this.repoKey(integrationId, repositoryId);
+      const existing = this.stableRepoRows.get(key);
+      this.stableRepoRows.set(key, {
+        integration_id: integrationId,
+        repository_id: repositoryId,
+        settings,
+        created_at: existing ? existing.created_at : createdAt,
+        updated_at: updatedAt,
+      });
+      return { meta: { changes: 1 } };
+    }
+
     if (QUERY_PATTERNS.DELETE_GLOBAL.test(normalized)) {
       const [integrationId] = args as [string];
       this.globalRows.delete(integrationId);
@@ -158,6 +192,12 @@ class FakeD1Database {
     if (QUERY_PATTERNS.DELETE_REPO.test(normalized)) {
       const [integrationId, repo] = args as [string, string];
       this.repoRows.delete(this.repoKey(integrationId, repo));
+      return { meta: { changes: 1 } };
+    }
+
+    if (QUERY_PATTERNS.DELETE_STABLE_REPO.test(normalized)) {
+      const [integrationId, repositoryId] = args as [string, string];
+      this.stableRepoRows.delete(this.repoKey(integrationId, repositoryId));
       return { meta: { changes: 1 } };
     }
 
@@ -287,6 +327,26 @@ describe("IntegrationSettingsStore", () => {
 
       const result = await store.getGlobal("github");
       expect(result?.enabledRepos).toEqual(["acme/widgets", "foo/bar"]);
+    });
+
+    it("round-trips and deduplicates stable repository allowlists", async () => {
+      await store.setGlobal("sandbox", {
+        enabledRepositoryIds: ["repo_gitea", "repo_gitea", "repo_github"],
+      });
+
+      expect((await store.getGlobal("sandbox"))?.enabledRepositoryIds).toEqual([
+        "repo_gitea",
+        "repo_github",
+      ]);
+    });
+
+    it("rejects simultaneous legacy and stable repository allowlists", async () => {
+      await expect(
+        store.setGlobal("sandbox", {
+          enabledRepos: ["acme/widgets"],
+          enabledRepositoryIds: ["repo_gitea"],
+        })
+      ).rejects.toThrow(IntegrationSettingsValidationError);
     });
 
     it("normalizes defaults.allowedTriggerUsers to lowercase", async () => {
@@ -466,13 +526,66 @@ describe("IntegrationSettingsStore", () => {
     });
   });
 
+  describe("stable per-repository CRUD", () => {
+    it("keeps equal repository paths isolated by repository id", async () => {
+      await store.setRepoSettingsByRepositoryId("sandbox", "repo_github", {
+        tunnelPorts: [3000],
+      });
+      await store.setRepoSettingsByRepositoryId("sandbox", "repo_gitea", {
+        tunnelPorts: [5173],
+      });
+
+      await expect(store.getRepoSettingsByRepositoryId("sandbox", "repo_github")).resolves.toEqual({
+        tunnelPorts: [3000],
+      });
+      await expect(store.getRepoSettingsByRepositoryId("sandbox", "repo_gitea")).resolves.toEqual({
+        tunnelPorts: [5173],
+      });
+    });
+
+    it("deletes only the selected stable repository override", async () => {
+      await store.setRepoSettingsByRepositoryId("vnc", "repo_github", { enabled: true });
+      await store.setRepoSettingsByRepositoryId("vnc", "repo_gitea", { enabled: false });
+      await store.deleteRepoSettingsByRepositoryId("vnc", "repo_github");
+
+      await expect(store.getRepoSettingsByRepositoryId("vnc", "repo_github")).resolves.toBeNull();
+      await expect(store.getRepoSettingsByRepositoryId("vnc", "repo_gitea")).resolves.toEqual({
+        enabled: false,
+      });
+    });
+  });
+
   describe("merge logic (getResolvedConfig)", () => {
     it("returns empty settings when nothing is configured", async () => {
       const config = await store.getResolvedConfig("github", "acme/widgets");
       expect(config).toEqual({
         enabledRepos: null,
+        enabledRepositoryIds: null,
+        repositoryEnabled: true,
         settings: {},
       });
+    });
+
+    it("resolves the override for the selected stable repository id", async () => {
+      await store.setGlobal("sandbox", {
+        enabledRepositoryIds: ["repo_gitea"],
+        defaults: { tunnelPorts: [3000] },
+      });
+      await store.setRepoSettingsByRepositoryId("sandbox", "repo_gitea", {
+        tunnelPorts: [5173],
+      });
+      await store.setRepoSettingsByRepositoryId("sandbox", "repo_github", {
+        tunnelPorts: [8080],
+      });
+
+      const config = await store.getResolvedConfig(
+        "sandbox",
+        "acme/widgets",
+        undefined,
+        "repo_gitea"
+      );
+      expect(config.repositoryEnabled).toBe(true);
+      expect(config.settings).toEqual({ tunnelPorts: [5173] });
     });
 
     it("returns global defaults when no repo override", async () => {
@@ -1203,7 +1316,12 @@ describe("IntegrationSettingsStore", () => {
 
     it("getResolvedConfig: returns empty settings when nothing configured", async () => {
       const config = await store.getResolvedConfig("slack", "acme/widgets");
-      expect(config).toEqual({ enabledRepos: null, settings: {} });
+      expect(config).toEqual({
+        enabledRepos: null,
+        enabledRepositoryIds: null,
+        repositoryEnabled: true,
+        settings: {},
+      });
     });
 
     it("getResolvedConfig: global agentNotificationsEnabled used when no repo override", async () => {

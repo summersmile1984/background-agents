@@ -29,6 +29,8 @@ export type ImageBuildUnitView = z.infer<typeof imageBuildUnitViewSchema>;
 
 /** One persisted repo prebuild flag as served by GET /api/image-builds. */
 export const imageBuildEnabledRepoViewSchema = z.object({
+  repositoryKey: z.string().optional(),
+  connectionId: z.string().optional(),
   repoOwner: z.string(),
   repoName: z.string(),
 });
@@ -81,13 +83,29 @@ export function repoImageBuildScopeId(repoOwner: string, repoName: string): stri
   return `${repoOwner}/${repoName}`.toLowerCase();
 }
 
+export function repoImageBuildScopeIdFor(repo: {
+  repositoryKey?: string;
+  owner: string;
+  name: string;
+}): string {
+  return repo.repositoryKey
+    ? `repo:${repo.repositoryKey}`
+    : repoImageBuildScopeId(repo.owner, repo.name);
+}
+
 /**
  * The set of prebuild-enabled repo scope ids from the feed's persisted flags.
  * Reads `enabledRepos` (not `units`) so a transiently dropped scope still reads
  * as enabled.
  */
 export function foldEnabledRepoScopeIds(enabledRepos: ImageBuildEnabledRepoView[]): Set<string> {
-  return new Set(enabledRepos.map((flag) => repoImageBuildScopeId(flag.repoOwner, flag.repoName)));
+  return new Set(
+    enabledRepos.map((flag) =>
+      flag.repositoryKey
+        ? `repo:${flag.repositoryKey}`
+        : repoImageBuildScopeId(flag.repoOwner, flag.repoName)
+    )
+  );
 }
 
 const STATUS_FOLD_PRECEDENCE: Record<ImageBuildStatus, number> = {

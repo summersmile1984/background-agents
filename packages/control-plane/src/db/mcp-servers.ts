@@ -38,6 +38,11 @@ interface McpServerRow {
   updated_at: number;
 }
 
+interface McpServerRepositoryScopeRow {
+  mcp_server_id: string;
+  repository_id: string;
+}
+
 function parseRepoScopes(raw: string | null): string[] | null {
   if (!raw) return null;
   try {
@@ -65,7 +70,11 @@ function safeJsonParseEnv(raw: string): Record<string, string> {
   }
 }
 
-function rowToConfig(row: McpServerRow, payload: Record<string, string>): McpServerConfig {
+function rowToConfig(
+  row: McpServerRow,
+  payload: Record<string, string>,
+  repositoryIds: string[] | null = null
+): McpServerConfig {
   const envOrHeaders: Pick<McpServerConfig, "env" | "headers"> =
     row.type === "remote" ? { headers: payload } : { env: payload };
   return {
@@ -75,12 +84,16 @@ function rowToConfig(row: McpServerRow, payload: Record<string, string>): McpSer
     command: row.type === "local" ? safeJsonParseCommand(row.command) : undefined,
     url: row.type === "remote" ? (row.url ?? undefined) : undefined,
     ...envOrHeaders,
+    repositoryIds,
     repoScopes: parseRepoScopes(row.repo_scope),
     enabled: row.enabled === 1,
   };
 }
 
-function rowToMetadata(row: McpServerRow): McpServerMetadata {
+function rowToMetadata(
+  row: McpServerRow,
+  repositoryIds: string[] | null = null
+): McpServerMetadata {
   const hasCredentials = row.env !== "" && row.env !== "{}" && row.env !== "null";
   return {
     id: row.id,
@@ -91,6 +104,7 @@ function rowToMetadata(row: McpServerRow): McpServerMetadata {
     url: row.type === "remote" ? (row.url ?? undefined) : undefined,
     hasEnv: row.type === "local" && hasCredentials,
     hasHeaders: row.type === "remote" && hasCredentials,
+    repositoryIds,
     repoScopes: parseRepoScopes(row.repo_scope),
     enabled: row.enabled === 1,
   };
@@ -130,21 +144,51 @@ export class McpServerStore {
     }
   }
 
-  private async decryptRow(row: McpServerRow): Promise<McpServerConfig> {
+  private async decryptRow(
+    row: McpServerRow,
+    repositoryIds: string[] | null = null
+  ): Promise<McpServerConfig> {
     const env = await this.decryptEnv(row.env);
-    return rowToConfig(row, env);
+    return rowToConfig(row, env, repositoryIds);
   }
 
-  async list(repoScope?: string): Promise<McpServerMetadata[]> {
+  private async repositoryScopesByServer(serverIds: string[]): Promise<Map<string, string[]>> {
+    const result = new Map<string, string[]>();
+    if (serverIds.length === 0) return result;
+    const placeholders = serverIds.map(() => "?").join(", ");
+    const { results } = await this.db
+      .prepare(
+        `SELECT mcp_server_id, repository_id
+         FROM mcp_server_repository_scopes
+         WHERE mcp_server_id IN (${placeholders})
+         ORDER BY mcp_server_id, repository_id`
+      )
+      .bind(...serverIds)
+      .all<McpServerRepositoryScopeRow>();
+    for (const row of results) {
+      if (typeof row.mcp_server_id !== "string" || typeof row.repository_id !== "string") continue;
+      const repositoryIds = result.get(row.mcp_server_id) ?? [];
+      repositoryIds.push(row.repository_id);
+      result.set(row.mcp_server_id, repositoryIds);
+    }
+    return result;
+  }
+
+  async list(repoScope?: string, repositoryId?: string): Promise<McpServerMetadata[]> {
     const { results } = await this.db
       .prepare("SELECT * FROM mcp_servers ORDER BY name")
       .all<McpServerRow>();
-    const metadata = results.map(rowToMetadata);
-    if (repoScope === undefined) return metadata;
-    const normalized = repoScope.toLowerCase();
+    const stableScopes = await this.repositoryScopesByServer(results.map((row) => row.id));
+    const metadata = results.map((row) => rowToMetadata(row, stableScopes.get(row.id) ?? null));
+    if (repoScope === undefined && repositoryId === undefined) return metadata;
+    const normalized = repoScope?.toLowerCase();
     return metadata.filter((c) => {
-      if (!c.repoScopes) return true;
-      return c.repoScopes.some((s) => s.toLowerCase() === normalized);
+      const hasLegacyScope = Boolean(c.repoScopes?.length);
+      const hasStableScope = Boolean(c.repositoryIds?.length);
+      if (!hasLegacyScope && !hasStableScope) return true;
+      if (repositoryId && c.repositoryIds?.includes(repositoryId)) return true;
+      if (repositoryId) return false;
+      return Boolean(normalized && c.repoScopes?.some((s) => s.toLowerCase() === normalized));
     });
   }
 
@@ -153,7 +197,9 @@ export class McpServerStore {
       .prepare("SELECT * FROM mcp_servers WHERE id = ?")
       .bind(id)
       .first<McpServerRow>();
-    return row ? rowToMetadata(row) : null;
+    if (!row) return null;
+    const stableScopes = await this.repositoryScopesByServer([id]);
+    return rowToMetadata(row, stableScopes.get(id) ?? null);
   }
 
   async create(config: ValidatedCreateMcpServerInput): Promise<McpServerMetadata> {
@@ -166,13 +212,18 @@ export class McpServerStore {
     if (config.type === "remote" && !config.url) {
       throw new McpServerValidationError("remote MCP servers require a URL");
     }
+    if (config.repositoryIds?.length && config.repoScopes?.length) {
+      throw new McpServerValidationError(
+        "MCP repositoryIds and legacy repoScopes cannot both be configured"
+      );
+    }
 
     const encryptedEnv = await this.encryptEnv(
       config.type === "remote" ? (config.headers ?? {}) : (config.env ?? {})
     );
 
     try {
-      await this.db
+      const insert = this.db
         .prepare(
           `INSERT INTO mcp_servers (id, name, type, command, url, env, repo_scope, enabled, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -190,8 +241,23 @@ export class McpServerStore {
           config.enabled ? 1 : 0,
           now,
           now
-        )
-        .run();
+        );
+      if (config.repositoryIds?.length) {
+        await this.db.batch([
+          insert,
+          ...config.repositoryIds.map((repositoryId) =>
+            this.db
+              .prepare(
+                `INSERT INTO mcp_server_repository_scopes
+                   (mcp_server_id, repository_id, created_at)
+                 VALUES (?, ?, ?)`
+              )
+              .bind(id, repositoryId, now)
+          ),
+        ]);
+      } else {
+        await insert.run();
+      }
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new McpServerValidationError(`An MCP server named '${config.name}' already exists`);
@@ -218,6 +284,11 @@ export class McpServerStore {
     if (!row) return null;
     if (expectedRevision !== undefined && row.revision !== expectedRevision) {
       throw new McpServerConflictError("MCP server changed; reload and try again");
+    }
+    if (patch.repositoryIds?.length && patch.repoScopes?.length) {
+      throw new McpServerValidationError(
+        "MCP repositoryIds and legacy repoScopes cannot both be configured"
+      );
     }
 
     const mergedType = patch.type ?? (row.type as "local" | "remote");
@@ -256,35 +327,64 @@ export class McpServerStore {
     }
 
     const now = Date.now();
+    const scopeChanged = patch.repositoryIds !== undefined || patch.repoScopes !== undefined;
+    const nextRepoScope =
+      patch.repositoryIds !== undefined
+        ? null
+        : patch.repoScopes !== undefined
+          ? patch.repoScopes?.length
+            ? JSON.stringify(patch.repoScopes.map((r) => r.toLowerCase()))
+            : null
+          : row.repo_scope;
 
     try {
       const statement = this.db.prepare(
         `UPDATE mcp_servers SET name = ?, type = ?, command = ?, url = ?, env = ?, repo_scope = ?, enabled = ?, updated_at = ?, revision = revision + 1
-         WHERE id = ? AND revision = COALESCE(?, revision)
-         RETURNING *`
+         WHERE id = ? AND revision = COALESCE(?, revision)${scopeChanged ? "" : " RETURNING *"}`
       );
-      const updated = await statement
-        .bind(
-          patch.name ?? row.name,
-          mergedType,
-          mergedType === "local" && mergedCommand ? JSON.stringify(mergedCommand) : null,
-          mergedType === "remote" ? (mergedUrl ?? null) : null,
-          encryptedEnv,
-          patch.repoScopes !== undefined
-            ? patch.repoScopes?.length
-              ? JSON.stringify(patch.repoScopes.map((r) => r.toLowerCase()))
-              : null
-            : row.repo_scope,
-          patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : row.enabled,
-          now,
-          id,
-          expectedRevision ?? null
-        )
-        .first<McpServerRow>();
+      const boundStatement = statement.bind(
+        patch.name ?? row.name,
+        mergedType,
+        mergedType === "local" && mergedCommand ? JSON.stringify(mergedCommand) : null,
+        mergedType === "remote" ? (mergedUrl ?? null) : null,
+        encryptedEnv,
+        nextRepoScope,
+        patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : row.enabled,
+        now,
+        id,
+        expectedRevision ?? null
+      );
+      if (scopeChanged) {
+        const [updateResult] = await this.db.batch([
+          boundStatement,
+          this.db
+            .prepare("DELETE FROM mcp_server_repository_scopes WHERE mcp_server_id = ?")
+            .bind(id),
+          ...(patch.repositoryIds ?? []).map((repositoryId) =>
+            this.db
+              .prepare(
+                `INSERT INTO mcp_server_repository_scopes
+                   (mcp_server_id, repository_id, created_at)
+                 VALUES (?, ?, ?)`
+              )
+              .bind(id, repositoryId, now)
+          ),
+        ]);
+        if ((updateResult.meta?.changes ?? 0) === 0) {
+          throw new McpServerConflictError("MCP server changed; reload and try again");
+        }
+        const updated = await this.get(id);
+        if (!updated) {
+          throw new McpServerConflictError("MCP server changed; reload and try again");
+        }
+        return updated;
+      }
+      const updated = await boundStatement.first<McpServerRow>();
       if (!updated) {
         throw new McpServerConflictError("MCP server changed; reload and try again");
       }
-      return rowToMetadata(updated);
+      const stableScopes = await this.repositoryScopesByServer([id]);
+      return rowToMetadata(updated, stableScopes.get(id) ?? null);
     } catch (err) {
       if (isUniqueConstraintError(err)) {
         throw new McpServerValidationError(
@@ -306,7 +406,11 @@ export class McpServerStore {
    * Pass an empty list for repo-less sessions (unscoped servers only).
    */
   async getDecryptedForSession(
-    repositories: Array<{ repoOwner: string; repoName: string }>
+    repositories: Array<{
+      repoOwner: string;
+      repoName: string;
+      repositoryKey?: string | null;
+    }>
   ): Promise<McpServerConfig[]> {
     const repoFullNames = new Set(
       repositories.map((repo) => `${repo.repoOwner}/${repo.repoName}`.toLowerCase())
@@ -314,13 +418,26 @@ export class McpServerStore {
     const { results } = await this.db
       .prepare("SELECT * FROM mcp_servers WHERE enabled = 1 ORDER BY name")
       .all<McpServerRow>();
+    const stableScopes = await this.repositoryScopesByServer(results.map((row) => row.id));
+    const repositoryKeys = new Set(
+      repositories.flatMap((repository) =>
+        repository.repositoryKey ? [repository.repositoryKey] : []
+      )
+    );
 
     const filtered = results.filter((row) => {
-      const scopes = parseRepoScopes(row.repo_scope);
-      if (!scopes) return true;
-      return scopes.some((s) => repoFullNames.has(s.toLowerCase()));
+      const legacyScopes = parseRepoScopes(row.repo_scope);
+      const repositoryIds = stableScopes.get(row.id);
+      if (!legacyScopes?.length && !repositoryIds?.length) return true;
+      if (repositoryIds?.some((repositoryId) => repositoryKeys.has(repositoryId))) return true;
+      // Once a session has a stable repository identity, legacy owner/name
+      // scopes are not an authority: the same path may exist on another forge.
+      if (repositoryKeys.size > 0) return false;
+      return Boolean(legacyScopes?.some((s) => repoFullNames.has(s.toLowerCase())));
     });
 
-    return Promise.all(filtered.map((r) => this.decryptRow(r)));
+    return Promise.all(
+      filtered.map((row) => this.decryptRow(row, stableScopes.get(row.id) ?? null))
+    );
   }
 }

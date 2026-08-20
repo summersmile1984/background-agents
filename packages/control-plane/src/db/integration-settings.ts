@@ -69,6 +69,11 @@ export class IntegrationSettingsStore {
     integrationId: K,
     settings: IntegrationSettingsMap[K]["global"]
   ): Promise<void> {
+    if (settings.enabledRepos !== undefined && settings.enabledRepositoryIds !== undefined) {
+      throw new IntegrationSettingsValidationError(
+        "enabledRepos and enabledRepositoryIds are mutually exclusive"
+      );
+    }
     if (settings.enabledRepos !== undefined) {
       if (
         !Array.isArray(settings.enabledRepos) ||
@@ -79,6 +84,20 @@ export class IntegrationSettingsStore {
       settings = {
         ...settings,
         enabledRepos: settings.enabledRepos.map((r) => r.toLowerCase()),
+      };
+    }
+    if (settings.enabledRepositoryIds !== undefined) {
+      if (
+        !Array.isArray(settings.enabledRepositoryIds) ||
+        !settings.enabledRepositoryIds.every((id) => typeof id === "string" && id.trim() !== "")
+      ) {
+        throw new IntegrationSettingsValidationError(
+          "enabledRepositoryIds must be an array of non-empty strings"
+        );
+      }
+      settings = {
+        ...settings,
+        enabledRepositoryIds: [...new Set(settings.enabledRepositoryIds.map((id) => id.trim()))],
       };
     }
 
@@ -172,6 +191,86 @@ export class IntegrationSettingsStore {
     }));
   }
 
+  async getRepoSettingsByRepositoryId<K extends keyof IntegrationSettingsMap>(
+    integrationId: K,
+    repositoryId: string
+  ): Promise<IntegrationSettingsMap[K]["repo"] | null> {
+    const row = await this.db
+      .prepare(
+        "SELECT settings FROM scm_integration_repo_settings WHERE integration_id = ? AND repository_id = ?"
+      )
+      .bind(integrationId, repositoryId)
+      .first<{ settings: string }>();
+
+    if (!row) return null;
+    return this.normalizeStoredRepoSettings(
+      integrationId,
+      JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"]
+    );
+  }
+
+  async setRepoSettingsByRepositoryId<K extends keyof IntegrationSettingsMap>(
+    integrationId: K,
+    repositoryId: string,
+    settings: IntegrationSettingsMap[K]["repo"]
+  ): Promise<void> {
+    const normalized = this.validateAndNormalizeSettings(integrationId, settings, "repo");
+    const now = Date.now();
+    await this.db
+      .prepare(
+        `INSERT INTO scm_integration_repo_settings
+           (integration_id, repository_id, settings, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(integration_id, repository_id) DO UPDATE SET
+           settings = excluded.settings,
+           updated_at = excluded.updated_at`
+      )
+      .bind(integrationId, repositoryId, JSON.stringify(normalized), now, now)
+      .run();
+  }
+
+  async deleteRepoSettingsByRepositoryId<K extends keyof IntegrationSettingsMap>(
+    integrationId: K,
+    repositoryId: string
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        "DELETE FROM scm_integration_repo_settings WHERE integration_id = ? AND repository_id = ?"
+      )
+      .bind(integrationId, repositoryId)
+      .run();
+  }
+
+  async listStableRepoSettings<K extends keyof IntegrationSettingsMap>(
+    integrationId: K
+  ): Promise<
+    Array<{
+      repositoryId: string;
+      repo: string;
+      settings: IntegrationSettingsMap[K]["repo"];
+    }>
+  > {
+    const { results } = await this.db
+      .prepare(
+        `SELECT s.repository_id, r.owner, r.name, s.settings
+         FROM scm_integration_repo_settings s
+         JOIN scm_repositories r ON r.id = s.repository_id
+         WHERE s.integration_id = ?
+         ORDER BY lower(r.owner), lower(r.name), s.repository_id`
+      )
+      .bind(integrationId)
+      .all<{ repository_id: string; owner: string; name: string; settings: string }>();
+
+    return results.map((row) => ({
+      repositoryId: row.repository_id,
+      repo: `${row.owner}/${row.name}`,
+      settings: this.normalizeStoredRepoSettings(
+        integrationId,
+        JSON.parse(row.settings) as IntegrationSettingsMap[K]["repo"]
+      ),
+    }));
+  }
+
   /**
    * Environment-level overrides (design §13.5) — the top layer of the
    * resolution chain, in the integration's override (repo) shape. Only the
@@ -229,21 +328,47 @@ export class IntegrationSettingsStore {
   async getResolvedConfig<K extends keyof IntegrationSettingsMap>(
     integrationId: K,
     repo: string,
-    environmentId?: string | null
+    environmentId?: string | null,
+    repositoryId?: string | null
   ): Promise<
     ResolvedIntegrationConfig<NonNullable<IntegrationSettingsMap[K]["global"]["defaults"]>>
   > {
-    const [globalSettings, repoSettings, environmentSettings] = await Promise.all([
+    const [globalSettings, stableRepoSettings, environmentSettings] = await Promise.all([
       this.getGlobal(integrationId),
-      this.getRepoSettings(integrationId, repo),
+      repositoryId ? this.getRepoSettingsByRepositoryId(integrationId, repositoryId) : null,
       environmentId && supportsEnvironmentSettings(integrationId)
         ? this.getEnvironmentSettings(integrationId, environmentId)
         : null,
     ]);
 
+    let repositoryContext: { provider: string; pathKey: string } | null = null;
+    const needsLegacyFallback = Boolean(repositoryId && stableRepoSettings === null);
+    const needsLegacyAllowlistCheck = Boolean(repositoryId && globalSettings?.enabledRepos);
+    if (repositoryId && (needsLegacyFallback || needsLegacyAllowlistCheck)) {
+      repositoryContext = await this.getRepositoryContext(repositoryId);
+    }
+
+    const mayUseLegacyPath =
+      !repositoryId ||
+      (repositoryContext?.provider === "github" &&
+        repositoryContext.pathKey === repo.toLowerCase());
+    const repoSettings =
+      stableRepoSettings ??
+      (mayUseLegacyPath ? await this.getRepoSettings(integrationId, repo) : null);
+
     // undefined → null (all repos), [] → [] (disabled), [...] → [...] (allowlist)
     const enabledRepos =
       globalSettings?.enabledRepos !== undefined ? globalSettings.enabledRepos : null;
+    const enabledRepositoryIds =
+      globalSettings?.enabledRepositoryIds !== undefined
+        ? globalSettings.enabledRepositoryIds
+        : null;
+    const repositoryEnabled =
+      enabledRepositoryIds !== null
+        ? Boolean(repositoryId && enabledRepositoryIds.includes(repositoryId))
+        : enabledRepos !== null
+          ? mayUseLegacyPath && enabledRepos.includes(repo.toLowerCase())
+          : true;
 
     const defaults = globalSettings?.defaults ?? {};
 
@@ -263,9 +388,27 @@ export class IntegrationSettingsStore {
         ? normalizeSandboxSettings(settings, { invalid: "omit" })
         : settings;
 
-    return { enabledRepos, settings: resolvedSettings } as ResolvedIntegrationConfig<
-      NonNullable<IntegrationSettingsMap[K]["global"]["defaults"]>
-    >;
+    return {
+      enabledRepos,
+      enabledRepositoryIds,
+      repositoryEnabled,
+      settings: resolvedSettings,
+    } as ResolvedIntegrationConfig<NonNullable<IntegrationSettingsMap[K]["global"]["defaults"]>>;
+  }
+
+  private async getRepositoryContext(
+    repositoryId: string
+  ): Promise<{ provider: string; pathKey: string } | null> {
+    const row = await this.db
+      .prepare(
+        `SELECT c.provider, r.path_key
+         FROM scm_repositories r
+         JOIN scm_connections c ON c.id = r.connection_id
+         WHERE r.id = ?`
+      )
+      .bind(repositoryId)
+      .first<{ provider: string; path_key: string }>();
+    return row ? { provider: row.provider, pathKey: row.path_key } : null;
   }
 
   private normalizeStoredGlobalSettings<K extends keyof IntegrationSettingsMap>(
@@ -561,6 +704,8 @@ export class IntegrationSettingsStore {
 
 export interface ResolvedIntegrationConfig<TRepo extends object = Record<string, unknown>> {
   enabledRepos: string[] | null;
+  enabledRepositoryIds: string[] | null;
+  repositoryEnabled: boolean;
   settings: TRepo;
 }
 

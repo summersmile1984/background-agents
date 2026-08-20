@@ -63,8 +63,8 @@ function validateAndNormalizeScmSettings(settings: unknown): ScmSettings {
 
 /**
  * Global defaults + per-repo overrides for source-control (SCM) behavior, such
- * as always opening pull/merge requests as drafts. Applies to both GitHub and
- * GitLab. A thin wrapper over the generic {@link IntegrationSettingsStore} that
+ * as always opening pull/merge requests as drafts. Applies to every SCM
+ * provider. A thin wrapper over the generic {@link IntegrationSettingsStore} that
  * pins the storage key to `scm` and validates the SCM-specific shape.
  */
 export class ScmSettingsStore {
@@ -105,13 +105,32 @@ export class ScmSettingsStore {
     return this.store.getRepoSettings(SCM_SETTINGS_KEY, repo) as Promise<ScmRepoSettings | null>;
   }
 
+  getRepoSettingsByRepositoryId(repositoryId: string): Promise<ScmRepoSettings | null> {
+    return this.store.getRepoSettingsByRepositoryId(
+      SCM_SETTINGS_KEY,
+      repositoryId
+    ) as Promise<ScmRepoSettings | null>;
+  }
+
   async setRepoSettings(repo: string, settings: ScmRepoSettings): Promise<void> {
     const normalized = validateAndNormalizeScmSettings(settings);
     await this.store.setRepoSettings(SCM_SETTINGS_KEY, repo, normalized);
   }
 
+  async setRepoSettingsByRepositoryId(
+    repositoryId: string,
+    settings: ScmRepoSettings
+  ): Promise<void> {
+    const normalized = validateAndNormalizeScmSettings(settings);
+    await this.store.setRepoSettingsByRepositoryId(SCM_SETTINGS_KEY, repositoryId, normalized);
+  }
+
   deleteRepoSettings(repo: string): Promise<void> {
     return this.store.deleteRepoSettings(SCM_SETTINGS_KEY, repo);
+  }
+
+  deleteRepoSettingsByRepositoryId(repositoryId: string): Promise<void> {
+    return this.store.deleteRepoSettingsByRepositoryId(SCM_SETTINGS_KEY, repositoryId);
   }
 
   listRepoSettings(): Promise<Array<{ repo: string; settings: ScmRepoSettings }>> {
@@ -121,8 +140,10 @@ export class ScmSettingsStore {
   }
 
   /** Resolve a repo's effective settings: global defaults merged with the per-repo override (override wins). */
-  async getResolvedSettings(repo: string): Promise<ScmSettings> {
-    const { settings } = await this.store.getResolvedConfig(SCM_SETTINGS_KEY, repo);
+  async getResolvedSettings(repo: string, repositoryId?: string | null): Promise<ScmSettings> {
+    const { settings } = repositoryId
+      ? await this.store.getResolvedConfig(SCM_SETTINGS_KEY, repo, undefined, repositoryId)
+      : await this.store.getResolvedConfig(SCM_SETTINGS_KEY, repo);
     return settings;
   }
 }

@@ -309,7 +309,12 @@ export class SchedulerDO extends DurableObject<Env> {
       params.repositories ?? (await store.getRepositoriesForAutomation(automation.id));
     const environmentSelection =
       params.environments ?? (await store.getEnvironmentsForAutomation(automation.id));
-    const resolutions = await resolveAutomationRepositories(this.env, selection);
+    const resolutions = await resolveAutomationRepositories(
+      this.env,
+      selection,
+      undefined,
+      this.db
+    );
 
     const invocationId = generateId();
     const scheduledAt = params.scheduledAt ?? now;
@@ -328,6 +333,8 @@ export class SchedulerDO extends DurableObject<Env> {
       repo_owner: null,
       repo_name: null,
       repo_id: null,
+      repository_id: null,
+      scm_connection_id: null,
       base_branch: null,
       environment_id: null,
     });
@@ -348,6 +355,12 @@ export class SchedulerDO extends DurableObject<Env> {
           repo_owner: resolution.repository?.repoOwner ?? resolution.requested.repo_owner,
           repo_name: resolution.repository?.repoName ?? resolution.requested.repo_name,
           repo_id: resolution.repository?.repoId ?? resolution.requested.repo_id,
+          repository_id:
+            resolution.repository?.repositoryId ?? resolution.requested.repository_id ?? null,
+          scm_connection_id:
+            resolution.repository?.scmConnectionId ??
+            resolution.requested.scm_connection_id ??
+            null,
           base_branch: resolution.repository?.baseBranch ?? resolution.requested.base_branch,
         })
       ),
@@ -1358,7 +1371,14 @@ export class SchedulerDO extends DurableObject<Env> {
     const scopeMembers =
       target.repositories ??
       (target.repoOwner && target.repoName
-        ? [{ repoOwner: target.repoOwner, repoName: target.repoName }]
+        ? [
+            {
+              repoOwner: target.repoOwner,
+              repoName: target.repoName,
+              repositoryKey: target.repositoryId ?? null,
+              connectionId: target.scmConnectionId ?? null,
+            },
+          ]
         : []);
     const { codeServerEnabled, vncEnabled, sandboxSettings } = await resolveSessionScopedSettings(
       this.db,

@@ -4,6 +4,7 @@ import { SourceControlProviderError } from "./errors";
 import { createSourceControlProviderFromEnv } from "./provider-from-env";
 import { GitHubSourceControlProvider } from "./providers/github-provider";
 import { GitLabSourceControlProvider } from "./providers/gitlab-provider";
+import { GiteaSourceControlProvider } from "./providers/gitea-provider";
 
 function createEnv(overrides?: Partial<Env>): Env {
   return {
@@ -41,5 +42,21 @@ describe("createSourceControlProviderFromEnv", () => {
 
     expect(createProvider).toThrow(SourceControlProviderError);
     expect(createProvider).toThrow("SCM provider 'gitlab' requires gitlab configuration.");
+  });
+
+  it("creates a Gitea provider without releasing its PAT through legacy helper auth", async () => {
+    const provider = createSourceControlProviderFromEnv(
+      createEnv({
+        SCM_PROVIDER: "gitea",
+        GITEA_BASE_URL: "https://gitea.example.com/root",
+        GITEA_ACCESS_TOKEN: "gitea-token",
+        GITEA_USERNAME: "agent-bot",
+      })
+    );
+
+    expect(provider).toBeInstanceOf(GiteaSourceControlProvider);
+    await expect(provider.generateCredentialHelperAuth()).rejects.toThrow(
+      "cannot be released through the sandbox credential helper"
+    );
   });
 });

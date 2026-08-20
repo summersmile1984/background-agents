@@ -11,14 +11,17 @@ const {
   mockCacheGet,
   mockCachePut,
   mockGetBatch,
+  mockGetBatchByRepositoryIds,
   mockListRepositories,
   mockLogger,
   mockUpsert,
+  mockUpsertRepository,
 } = vi.hoisted(() => ({
   mockCacheDelete: vi.fn(),
   mockCacheGet: vi.fn(),
   mockCachePut: vi.fn(),
   mockGetBatch: vi.fn(),
+  mockGetBatchByRepositoryIds: vi.fn(),
   mockListRepositories: vi.fn(),
   mockLogger: {
     debug: vi.fn(),
@@ -27,11 +30,52 @@ const {
     error: vi.fn(),
   },
   mockUpsert: vi.fn(),
+  mockUpsertRepository: vi.fn(),
+}));
+
+vi.mock("../db/scm-connections", () => ({
+  ScmConnectionStore: class {
+    async list() {
+      return [
+        {
+          id: "scm_github_default",
+          provider: "github",
+          displayName: "GitHub",
+          baseUrl: "https://github.com",
+          cloneBaseUrl: "https://github.com",
+          revision: 1,
+          isDefault: true,
+          enabled: true,
+        },
+      ];
+    }
+  },
+  ScmConnectionCredentialStore: class {},
+}));
+
+vi.mock("../db/scm-repositories", () => ({
+  ScmRepositoryStore: class {
+    upsertResolved(...args: unknown[]) {
+      return mockUpsertRepository(...args);
+    }
+  },
+}));
+
+vi.mock("../source-control/connection-registry", () => ({
+  SourceControlConnectionRegistry: class {
+    async getConnection() {
+      return { provider: { listRepositories: mockListRepositories } };
+    }
+  },
 }));
 
 vi.mock("../db/repo-metadata", () => ({
   RepoMetadataStore: vi.fn().mockImplementation(function () {
-    return { upsert: mockUpsert, getBatch: mockGetBatch };
+    return {
+      upsert: mockUpsert,
+      getBatch: mockGetBatch,
+      getBatchByRepositoryIds: mockGetBatchByRepositoryIds,
+    };
   }),
 }));
 
@@ -97,6 +141,7 @@ describe("repository list route", () => {
     mockCacheGet.mockResolvedValue(null);
     mockCachePut.mockResolvedValue(undefined);
     mockGetBatch.mockResolvedValue(new Map());
+    mockGetBatchByRepositoryIds.mockResolvedValue(new Map());
     mockListRepositories.mockResolvedValue([
       {
         id: 1,
@@ -109,6 +154,7 @@ describe("repository list route", () => {
         defaultBranch: "main",
       },
     ]);
+    mockUpsertRepository.mockResolvedValue({ id: "repo-1" });
   });
 
   it("keeps the cold-cache refresh alive when the client disconnects", async () => {
@@ -122,7 +168,7 @@ describe("repository list route", () => {
 
     const response = await handler(
       new Request("https://test.local/repos"),
-      { REPOS_CACHE: {} as KVNamespace } as Env,
+      { REPOS_CACHE: {} as KVNamespace, TOKEN_ENCRYPTION_KEY: "unused" } as Env,
       match,
       {
         ...ctx,

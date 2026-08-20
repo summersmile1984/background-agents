@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  sourceControlConnectionSummarySchema,
+  sourceControlProviderNameSchema,
+} from "./source-control";
 
 export type ConfidenceLevel = "high" | "medium" | "low";
 
@@ -13,6 +17,15 @@ export const installationRepositorySchema = z.object({
   archived: z.boolean(),
   language: z.string().nullable().optional(),
   topics: z.array(z.string()).optional(),
+  /** Stable Open-Inspect repository identity (new multi-connection clients). */
+  repositoryKey: z.string().min(1).optional(),
+  connectionId: z.string().min(1).optional(),
+  provider: sourceControlProviderNameSchema.optional(),
+  webUrl: z.string().url().optional(),
+  cloneUrl: z.string().url().optional(),
+  connection: sourceControlConnectionSummarySchema
+    .pick({ id: true, provider: true, displayName: true, baseUrl: true })
+    .optional(),
 });
 
 export type InstallationRepository = z.infer<typeof installationRepositorySchema>;

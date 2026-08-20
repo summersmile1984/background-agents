@@ -20,22 +20,23 @@ export async function resolveCodeServerEnabled(
   db: SqlDatabase | undefined,
   repoOwner: string | null,
   repoName: string | null,
-  environmentId?: string | null
+  environmentId?: string | null,
+  repositoryId?: string | null
 ): Promise<boolean> {
   if (!db) return false;
   if (!repoOwner || !repoName) return false;
   const repo = `${repoOwner}/${repoName}`;
   try {
     const store = new IntegrationSettingsStore(db);
-    const { enabledRepos, settings } = await store.getResolvedConfig(
+    const { repositoryEnabled, settings } = await store.getResolvedConfig(
       "code-server",
       repo,
-      environmentId
+      environmentId,
+      repositoryId
     );
     const codeServerSettings = settings as CodeServerSettings;
     if (codeServerSettings.enabled !== true) return false;
-    // enabledRepos: null -> all repos, [] -> none, [...] -> allowlist
-    if (enabledRepos !== null && !enabledRepos.includes(repo.toLowerCase())) return false;
+    if (repositoryEnabled === false) return false;
     return true;
   } catch (e) {
     logger.warn("Failed to resolve code-server integration settings, defaulting to disabled", {
@@ -50,16 +51,22 @@ export async function resolveVncEnabled(
   db: SqlDatabase | undefined,
   repoOwner: string | null,
   repoName: string | null,
-  environmentId?: string | null
+  environmentId?: string | null,
+  repositoryId?: string | null
 ): Promise<boolean> {
   if (!db || !repoOwner || !repoName) return false;
   const repo = `${repoOwner}/${repoName}`;
   try {
     const store = new IntegrationSettingsStore(db);
-    const { enabledRepos, settings } = await store.getResolvedConfig("vnc", repo, environmentId);
+    const { repositoryEnabled, settings } = await store.getResolvedConfig(
+      "vnc",
+      repo,
+      environmentId,
+      repositoryId
+    );
     const vncSettings = settings as VncSettings;
     if (vncSettings.enabled !== true) return false;
-    if (enabledRepos !== null && !enabledRepos.includes(repo.toLowerCase())) return false;
+    if (repositoryEnabled === false) return false;
     return true;
   } catch (e) {
     logger.warn("Failed to resolve VNC integration settings, defaulting to disabled", {
@@ -79,7 +86,8 @@ export async function resolveSandboxSettings(
   db: SqlDatabase | undefined,
   repoOwner: string | null,
   repoName: string | null,
-  environmentId?: string | null
+  environmentId?: string | null,
+  repositoryId?: string | null
 ): Promise<SandboxSettings> {
   if (!db) return {};
   if (!repoOwner || !repoName) {
@@ -97,13 +105,13 @@ export async function resolveSandboxSettings(
   const repo = `${repoOwner}/${repoName}`;
   try {
     const store = new IntegrationSettingsStore(db);
-    const { enabledRepos, settings } = await store.getResolvedConfig(
+    const { repositoryEnabled, settings } = await store.getResolvedConfig(
       "sandbox",
       repo,
-      environmentId
+      environmentId,
+      repositoryId
     );
-    // enabledRepos: null -> all repos, [] -> none, [...] -> allowlist
-    if (enabledRepos !== null && !enabledRepos.includes(repo.toLowerCase())) return {};
+    if (repositoryEnabled === false) return {};
     return settings as SandboxSettings;
   } catch (e) {
     logger.warn("Failed to resolve sandbox settings, using defaults", {
@@ -161,14 +169,22 @@ export async function resolveSessionScopedSettings(
       db,
       primary?.repoOwner ?? null,
       primary?.repoName ?? null,
-      environmentId
+      environmentId,
+      primary?.repositoryKey ?? null
     ),
-    resolveVncEnabled(db, primary?.repoOwner ?? null, primary?.repoName ?? null, environmentId),
+    resolveVncEnabled(
+      db,
+      primary?.repoOwner ?? null,
+      primary?.repoName ?? null,
+      environmentId,
+      primary?.repositoryKey ?? null
+    ),
     resolveSandboxSettings(
       db,
       primary?.repoOwner ?? null,
       primary?.repoName ?? null,
-      environmentId
+      environmentId,
+      primary?.repositoryKey ?? null
     ),
   ]);
   return { codeServerEnabled, vncEnabled, sandboxSettings };

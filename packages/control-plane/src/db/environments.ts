@@ -21,6 +21,7 @@ export interface EnvironmentRow {
   /** Absent only while a rolling deploy still reads a pre-migration row fixture. */
   default_agent_harness?: AgentHarness | null;
   channel_associations: string | null; // JSON string array (mirrors repo_metadata)
+  scm_connection_id?: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -28,6 +29,8 @@ export interface EnvironmentRow {
 export interface EnvironmentRepositoryRow {
   environment_id: string;
   position: number;
+  scm_connection_id?: string | null;
+  repository_id?: string | null;
   repo_owner: string;
   repo_name: string;
   repo_id: number | null;
@@ -37,11 +40,19 @@ export interface EnvironmentRepositoryRow {
 /** Repository values for insert/replace (environment_id supplied by the store). */
 export type EnvironmentRepositoryInsert = Pick<
   EnvironmentRepositoryRow,
-  "position" | "repo_owner" | "repo_name" | "repo_id" | "base_branch"
+  | "position"
+  | "scm_connection_id"
+  | "repository_id"
+  | "repo_owner"
+  | "repo_name"
+  | "repo_id"
+  | "base_branch"
 >;
 
 function toEnvironmentRepository(row: EnvironmentRepositoryRow): EnvironmentRepository {
   return {
+    repositoryKey: row.repository_id ?? null,
+    connectionId: row.scm_connection_id ?? null,
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
     repoId: row.repo_id,
@@ -71,7 +82,12 @@ export function toEnvironment(
 export type EnvironmentScalarFields = Partial<
   Pick<
     EnvironmentRow,
-    "name" | "description" | "prebuild_enabled" | "default_agent_harness" | "channel_associations"
+    | "name"
+    | "description"
+    | "prebuild_enabled"
+    | "default_agent_harness"
+    | "channel_associations"
+    | "scm_connection_id"
   >
 >;
 
@@ -81,6 +97,7 @@ const MUTABLE_SCALAR_COLUMNS = [
   "prebuild_enabled",
   "default_agent_harness",
   "channel_associations",
+  "scm_connection_id",
 ] as const satisfies readonly (keyof EnvironmentScalarFields)[];
 
 export class EnvironmentStore {
@@ -90,8 +107,8 @@ export class EnvironmentStore {
     return this.db
       .prepare(
         `INSERT INTO environments
-         (id, name, description, prebuild_enabled, default_agent_harness, channel_associations, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, name, description, prebuild_enabled, default_agent_harness, channel_associations, scm_connection_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         row.id,
@@ -100,6 +117,7 @@ export class EnvironmentStore {
         row.prebuild_enabled,
         row.default_agent_harness ?? null,
         row.channel_associations,
+        row.scm_connection_id ?? null,
         row.created_at,
         row.updated_at
       );
@@ -277,12 +295,14 @@ export class EnvironmentStore {
       this.db
         .prepare(
           `INSERT INTO environment_repositories
-           (environment_id, position, repo_owner, repo_name, repo_id, base_branch)
-           VALUES (?, ?, ?, ?, ?, ?)`
+           (environment_id, position, scm_connection_id, repository_id, repo_owner, repo_name, repo_id, base_branch)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           environmentId,
           repository.position,
+          repository.scm_connection_id ?? null,
+          repository.repository_id ?? null,
           repository.repo_owner,
           repository.repo_name,
           repository.repo_id,

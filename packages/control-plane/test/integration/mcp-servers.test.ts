@@ -12,6 +12,7 @@ interface McpServerMetadata {
   url?: string;
   hasEnv: boolean;
   hasHeaders: boolean;
+  repositoryIds: string[] | null;
   repoScopes: string[] | null;
   enabled: boolean;
 }
@@ -60,6 +61,76 @@ describe("MCP Servers API", () => {
       // Credentials should NOT be in the response
       expect("headers" in body).toBe(false);
       expect("env" in body).toBe(false);
+    });
+
+    it("stores stable repository scopes without legacy owner/name keys", async () => {
+      const now = Date.now();
+      await env.DB.prepare(
+        `INSERT INTO scm_connections
+          (id, provider, display_name, base_url, api_base_url, clone_base_url,
+           auth_mode, credential_source, credential_ref, capabilities_json,
+           enabled, is_default, created_by, created_at, updated_at)
+         VALUES (?, 'gitea', 'Test Gitea', 'https://gitea.example.com',
+           'https://gitea.example.com/api/v1', 'https://gitea.example.com',
+           'pat', 'worker_binding', 'GITEA_TOKEN', '{}', 1, 0, 'test', ?, ?)`
+      )
+        .bind("conn_gitea", now, now)
+        .run();
+      await env.DB.prepare(
+        `INSERT INTO scm_repositories
+          (id, connection_id, external_id, owner, name, path_key, default_branch,
+           web_url, clone_url, is_private, archived, resolution_status,
+           last_seen_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'main', ?, ?, 1, 0, 'resolved', ?, ?, ?)`
+      )
+        .bind(
+          "repo_gitea_one",
+          "conn_gitea",
+          "42",
+          "team",
+          "service",
+          "team/service",
+          "https://gitea.example.com/team/service",
+          "https://gitea.example.com/team/service.git",
+          now,
+          now,
+          now
+        )
+        .run();
+
+      const response = await serviceFetch("https://test.local/mcp-servers", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "repo-scoped",
+          type: "remote",
+          url: "https://mcp.example.com/sse",
+          repositoryIds: ["repo_gitea_one"],
+        }),
+      });
+
+      expect(response.status).toBe(201);
+      await expect(response.json<McpServerMetadata>()).resolves.toMatchObject({
+        repositoryIds: ["repo_gitea_one"],
+        repoScopes: null,
+      });
+      const mapping = await env.DB.prepare(
+        "SELECT repository_id FROM mcp_server_repository_scopes"
+      ).first<{ repository_id: string }>();
+      expect(mapping?.repository_id).toBe("repo_gitea_one");
+    });
+
+    it("rejects mixing stable and legacy repository scopes", async () => {
+      const response = await serviceFetch("https://test.local/mcp-servers", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "ambiguous-scope",
+          type: "remote",
+          url: "https://mcp.example.com/sse",
+          repositoryIds: ["repo_stable"],
+          repoScopes: ["owner/name"],
+        }),
+      });
+      expect(response.status).toBe(400);
     });
 
     it("returns 400 for missing name", async () => {

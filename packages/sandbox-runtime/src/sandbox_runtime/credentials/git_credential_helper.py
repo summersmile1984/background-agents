@@ -230,6 +230,18 @@ def _get_credentials() -> dict[str, object]:
     ``VCS_CLONE_TOKEN`` env var only when no control-plane context exists —
     that's how image-build sandboxes authenticate their one-shot clone.
     """
+    if os.environ.get("OI_SCM_PROXY_MODE") == "1":
+        sandbox_token = os.environ.get("SANDBOX_AUTH_TOKEN", "").strip()
+        if not sandbox_token:
+            raise RuntimeError("SCM proxy mode requires SANDBOX_AUTH_TOKEN")
+        # The token is already the sandbox's short-lived session capability;
+        # the proxy validates it and obtains forge credentials server-side.
+        return {
+            "username": sandbox_token,
+            "password": sandbox_token,
+            "expires_at_epoch_ms": int((time.time() + BUILD_MODE_TOKEN_TTL_SECONDS) * 1000),
+        }
+
     endpoint = _resolve_endpoint()
     if endpoint is None:
         if _has_control_plane_context():

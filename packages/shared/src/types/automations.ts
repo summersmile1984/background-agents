@@ -35,6 +35,8 @@ export const MAX_AUTOMATION_REPOSITORIES = MAX_TARGET_REPOSITORIES;
 
 /** A repository selected on an automation (response shape, resolved). */
 const automationRepositorySchema = z.object({
+  repositoryKey: z.string().min(1).nullable().optional(),
+  connectionId: z.string().min(1).nullable().optional(),
   repoOwner: z.string(),
   repoName: z.string(),
   repoId: z.number().nullable(),
@@ -55,6 +57,8 @@ export function toRepositoryRef(
     throw new Error(`repository ${repo.repoOwner}/${repo.repoName} is not resolved (no repoId)`);
   }
   return {
+    ...(repo.repositoryKey ? { repositoryKey: repo.repositoryKey } : {}),
+    ...(repo.connectionId ? { connectionId: repo.connectionId } : {}),
     repoOwner: repo.repoOwner,
     repoName: repo.repoName,
     repoId: repo.repoId,
@@ -67,6 +71,31 @@ export function toRepositoryRef(
 export const automationRepositoryInputSchema = repositoryInputSchema;
 export type AutomationRepositoryInput = RepositoryInput;
 export const automationRepositoriesInputSchema = repositoriesInputSchema;
+
+export const automationRepositoryKeysInputSchema = z
+  .array(
+    z.object({
+      repositoryKey: z.string().trim().min(1),
+      baseBranch: z.string().trim().min(1).nullish(),
+    })
+  )
+  .max(MAX_AUTOMATION_REPOSITORIES)
+  .superRefine((repositories, ctx) => {
+    const seen = new Set<string>();
+    repositories.forEach((repository, index) => {
+      if (seen.has(repository.repositoryKey)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `duplicate repository key: ${repository.repositoryKey}`,
+          path: [index],
+        });
+      }
+      seen.add(repository.repositoryKey);
+    });
+  });
+export type AutomationRepositoryKeyInput = z.input<
+  typeof automationRepositoryKeysInputSchema
+>[number];
 
 const automationSchema = z.object({
   id: z.string(),
@@ -107,6 +136,8 @@ export interface CreateAutomationRequest {
   sentryClientSecret?: string;
   /** Repositories to run against (0..MAX_AUTOMATION_REPOSITORIES). */
   repositories?: AutomationRepositoryInput[];
+  /** Stable repository identities. Mutually exclusive with repositories. */
+  repositoryKeys?: AutomationRepositoryKeyInput[];
   /** Environments to fan out over, one workspace session each (design §13.3). */
   environmentIds?: string[];
 }
@@ -123,6 +154,8 @@ export interface UpdateAutomationRequest {
   triggerConfig?: TriggerConfig;
   /** Replaces the full repository selection when present. */
   repositories?: AutomationRepositoryInput[];
+  /** Stable repository identities. Mutually exclusive with repositories. */
+  repositoryKeys?: AutomationRepositoryKeyInput[];
   /** Replaces the full environment selection when present (empty clears). */
   environmentIds?: string[];
 }
@@ -149,6 +182,8 @@ export interface AutomationRun {
   repoOwner: string | null;
   repoName: string | null;
   repoId: number | null;
+  repositoryKey?: string | null;
+  connectionId?: string | null;
   baseBranch: string | null;
   /**
    * Environment snapshot taken at firing time; the run's session opens this

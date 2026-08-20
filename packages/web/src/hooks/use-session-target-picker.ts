@@ -10,12 +10,13 @@ import type { ComboboxGroup, ComboboxOption } from "@/components/ui/combobox";
 import { useBranches } from "@/hooks/use-branches";
 import { useEnvironments } from "@/hooks/use-environments";
 import { useRepos, type Repo } from "@/hooks/use-repos";
+import { repoSelectionValue } from "@/lib/repository-selection";
 import {
   IMAGE_BUILDS_KEY,
   foldEnabledRepoScopeIds,
   foldImageBuildStatusByScope,
   imageBuildScopeKey,
-  repoImageBuildScopeId,
+  repoImageBuildScopeIdFor,
   type ImageBuildsFeed,
 } from "@/lib/image-builds";
 import { NO_REPOSITORY_LABEL } from "@/lib/repo-label";
@@ -93,7 +94,7 @@ export function describeRepository(
   prebuildEnabledRepoScopeIds: Set<string>
 ): string {
   const base = `${repo.owner}${repo.private ? " • private" : ""}`;
-  const scopeId = repoImageBuildScopeId(repo.owner, repo.name);
+  const scopeId = repoImageBuildScopeIdFor(repo);
   const status = imageStatusByScope.get(imageBuildScopeKey("repo", scopeId));
   return withAnnotation(base, prebuildAnnotation(prebuildEnabledRepoScopeIds.has(scopeId), status));
 }
@@ -145,11 +146,23 @@ export function useSessionTargetPicker(): SessionTargetSelection {
   const [sessionTarget, setSessionTarget] = useState<SessionTarget | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>("");
 
-  const selectedRepository =
-    sessionTarget?.kind === "repo" ? parseRepositoryFullName(sessionTarget.repoFullName) : null;
+  const selectedRepo =
+    sessionTarget?.kind === "repo"
+      ? repos.find(
+          (repo) =>
+            repoSelectionValue(repo) === sessionTarget.repoFullName ||
+            repo.fullName === sessionTarget.repoFullName
+        )
+      : undefined;
+  const selectedRepository = selectedRepo
+    ? { repoOwner: selectedRepo.owner, repoName: selectedRepo.name }
+    : sessionTarget?.kind === "repo"
+      ? parseRepositoryFullName(sessionTarget.repoFullName)
+      : null;
   const { branches, loading: loadingBranches } = useBranches(
     selectedRepository?.repoOwner ?? "",
-    selectedRepository?.repoName ?? ""
+    selectedRepository?.repoName ?? "",
+    selectedRepo?.repositoryKey
   );
 
   // Prebuild status for the repository and environment options: the unified
@@ -192,11 +205,12 @@ export function useSessionTargetPicker(): SessionTargetSelection {
     if (repos.length > 0) {
       // A stored `env:<id>` value never matches a fullName, so a deleted
       // environment lands on repos[0] here like any other stale value.
-      const hasStoredRepo = repos.some((repo) => repo.fullName === storedValue);
-      const defaultRepo = (hasStoredRepo ? storedValue : repos[0].fullName) ?? repos[0].fullName;
-      setSessionTarget({ kind: "repo", repoFullName: defaultRepo });
-      const repo = repos.find((r) => r.fullName === defaultRepo);
-      if (repo) setSelectedBranch(repo.defaultBranch);
+      const storedRepo = repos.find(
+        (repo) => repoSelectionValue(repo) === storedValue || repo.fullName === storedValue
+      );
+      const repo = storedRepo ?? repos[0];
+      setSessionTarget({ kind: "repo", repoFullName: repoSelectionValue(repo) });
+      setSelectedBranch(repo.defaultBranch);
       return;
     }
 
@@ -220,7 +234,11 @@ export function useSessionTargetPicker(): SessionTargetSelection {
         setSelectedBranch("");
         return;
       }
-      const repo = repos.find((r) => r.fullName === nextTarget.repoFullName);
+      const repo = repos.find(
+        (candidate) =>
+          repoSelectionValue(candidate) === nextTarget.repoFullName ||
+          candidate.fullName === nextTarget.repoFullName
+      );
       if (repo) setSelectedBranch(repo.defaultBranch);
     },
     [repos, sessionTarget]
@@ -232,13 +250,27 @@ export function useSessionTargetPicker(): SessionTargetSelection {
 
   const buildRequestFields = useCallback((): SessionTargetRequestFields | null => {
     if (!sessionTarget || !isSessionTargetLaunchable(sessionTarget)) return null;
+    if (sessionTarget.kind === "repo" && selectedRepo?.repositoryKey) {
+      return {
+        repositoryKey: selectedRepo.repositoryKey,
+        branch: selectedBranch || undefined,
+      };
+    }
+    if (sessionTarget.kind === "repos") {
+      const selected = sessionTarget.repoFullNames
+        .map((value) =>
+          repos.find(
+            (repo) => repoSelectionValue(repo) === value || repo.fullName.toLowerCase() === value
+          )
+        )
+        .filter((repo): repo is Repo => Boolean(repo));
+      if (selected.length !== sessionTarget.repoFullNames.length) return null;
+      if (selected.every((repo) => repo.repositoryKey)) {
+        return { repositoryKeys: selected.map((repo) => repo.repositoryKey!) };
+      }
+    }
     return buildSessionTargetRequestFields(sessionTarget, selectedBranch);
-  }, [sessionTarget, selectedBranch]);
-
-  const selectedRepo =
-    sessionTarget?.kind === "repo"
-      ? repos.find((r) => r.fullName === sessionTarget.repoFullName)
-      : undefined;
+  }, [sessionTarget, selectedBranch, selectedRepo, repos]);
   const selectedEnvironment =
     sessionTarget?.kind === "environment"
       ? environments.find((environment) => environment.id === sessionTarget.environmentId)
@@ -273,9 +305,9 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       description: "Pick an ad-hoc set of repositories",
     },
     ...repos.map((repo) => ({
-      value: repo.fullName,
+      value: repoSelectionValue(repo),
       label: repo.name,
-      description: describeRepository(repo, imageStatusByScope, prebuildEnabledRepoScopeIds),
+      description: `${repo.connection?.displayName ? `${repo.connection.displayName} · ` : ""}${describeRepository(repo, imageStatusByScope, prebuildEnabledRepoScopeIds)}`,
     })),
   ];
   // One unified list: environments (when any exist) alongside the repositories.

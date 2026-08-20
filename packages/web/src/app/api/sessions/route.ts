@@ -45,6 +45,8 @@ export async function POST(request: NextRequest) {
     const sessionBody = {
       repoOwner: body.repoOwner,
       repoName: body.repoName,
+      repositoryKey: body.repositoryKey,
+      repositoryKeys: body.repositoryKeys,
       model: body.model,
       reasoningEffort: body.reasoningEffort,
       agentHarness: body.agentHarness,

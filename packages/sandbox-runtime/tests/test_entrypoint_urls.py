@@ -8,6 +8,7 @@ purely a function of host, owner, and name.
 
 from unittest.mock import patch
 
+from sandbox_runtime.repo_config import RepoEntry
 from sandbox_runtime.repository_boot import RepositoryBoot
 from tests.runtime_helpers import make_repository_boot
 
@@ -73,6 +74,27 @@ class TestBuildRepoUrl:
         assert (
             sup.synchronizer._build_repo_url(sup.repositories[0])
             == "https://cp.example.com/git/session-1/acme/app.git"
+        )
+
+    def test_private_clone_base_uses_stable_repository_key(self) -> None:
+        sup = _make_repository_boot(
+            {
+                "VCS_HOST": "cp.example.com",
+                "VCS_CLONE_BASE_URL": "https://cp.example.com/git/session/session-1",
+            }
+        )
+        repository = RepoEntry(
+            owner="acme",
+            name="app",
+            branch="main",
+            path=sup.repositories[0].path,
+            repository_key="repo_abc-123",
+            connection_id="scm_gitea_1",
+        )
+
+        assert (
+            sup.synchronizer._build_repo_url(repository)
+            == "https://cp.example.com/git/session/session-1/repo_abc-123.git"
         )
 
     def test_invalid_clone_base_url_falls_back_to_vcs_host(self) -> None:

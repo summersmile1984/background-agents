@@ -47,8 +47,8 @@ import {
 import {
   defineRoute,
   error,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   json,
   parsePattern,
   type Route,
@@ -239,7 +239,7 @@ async function handleAttachmentGet(
 
 export const sessionAttachmentRoutes: Route[] = [
   defineRoute(
-    GITHUB_USER_OR_SERVICE_ROUTE,
+    SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
     sessionRoute({
       method: "POST",
       pattern: parsePattern("/sessions/:id/attachments"),
@@ -247,7 +247,7 @@ export const sessionAttachmentRoutes: Route[] = [
     })
   ),
   defineRoute(
-    GITHUB_SANDBOX_FALLBACK_ROUTE,
+    SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
     sessionRoute({
       method: "GET",
       pattern: parsePattern("/sessions/:id/attachments/:attachmentId"),

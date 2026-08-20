@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   mutateMock: vi.fn(),
   reposValue: [] as Array<{
     id: number;
+    repositoryKey?: string;
+    connectionId?: string;
     fullName: string;
     owner: string;
     name: string;
@@ -226,6 +228,27 @@ describe("Home", () => {
     await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
     expect(sessionCreateBody()).toMatchObject({ agentHarness: "codex" });
     expect(String(sessionCreateBody().model)).toMatch(/^openai\//);
+  });
+
+  it("creates a connection-pinned session with the stable repository key", async () => {
+    mocks.reposValue = [
+      {
+        ...repo,
+        repositoryKey: "repo_gitea_1",
+        connectionId: "scm_gitea_1",
+      },
+    ];
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.type(screen.getByPlaceholderText("What do you want to build?"), "Use Gitea");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
+    const body = sessionCreateBody();
+    expect(body).toMatchObject({ repositoryKey: "repo_gitea_1", branch: "main" });
+    expect(body).not.toHaveProperty("repoOwner");
+    expect(body).not.toHaveProperty("repoName");
   });
 
   it("invalidates a warmed session when the managed skill selection changes", async () => {

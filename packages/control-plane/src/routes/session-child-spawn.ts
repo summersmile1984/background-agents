@@ -35,7 +35,7 @@ import type { Env } from "../types";
 import {
   defineRoutes,
   error,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
+  SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
   json,
   parsePattern,
   type Route,
@@ -71,12 +71,20 @@ async function handleSpawnChild(
   // Children inherit the parent's settings scope: its primary repo plus, for
   // environment-launched parents, that environment's overrides (design §13.5).
   const resolvedChildSandboxSettings = parentSession
-    ? await resolveSandboxSettings(
-        ctx.db,
-        parentSession.repoOwner,
-        parentSession.repoName,
-        parentEnvironmentId
-      )
+    ? parentSession.repositoryId
+      ? await resolveSandboxSettings(
+          ctx.db,
+          parentSession.repoOwner,
+          parentSession.repoName,
+          parentEnvironmentId,
+          parentSession.repositoryId
+        )
+      : await resolveSandboxSettings(
+          ctx.db,
+          parentSession.repoOwner,
+          parentSession.repoName,
+          parentEnvironmentId
+        )
     : {};
   const maxConcurrentChildren =
     resolvedChildSandboxSettings.maxConcurrentChildSessions ??
@@ -209,24 +217,42 @@ async function handleSpawnChild(
     model,
   });
 
-  const childCodeServerEnabled = await resolveCodeServerEnabled(
-    ctx.db,
-    spawnContext.repoOwner,
-    spawnContext.repoName,
-    parentEnvironmentId
-  );
-  const childVncEnabled = await resolveVncEnabled(
-    ctx.db,
-    spawnContext.repoOwner,
-    spawnContext.repoName,
-    parentEnvironmentId
-  );
+  const childCodeServerEnabled = spawnContext.repositoryId
+    ? await resolveCodeServerEnabled(
+        ctx.db,
+        spawnContext.repoOwner,
+        spawnContext.repoName,
+        parentEnvironmentId,
+        spawnContext.repositoryId
+      )
+    : await resolveCodeServerEnabled(
+        ctx.db,
+        spawnContext.repoOwner,
+        spawnContext.repoName,
+        parentEnvironmentId
+      );
+  const childVncEnabled = spawnContext.repositoryId
+    ? await resolveVncEnabled(
+        ctx.db,
+        spawnContext.repoOwner,
+        spawnContext.repoName,
+        parentEnvironmentId,
+        spawnContext.repositoryId
+      )
+    : await resolveVncEnabled(
+        ctx.db,
+        spawnContext.repoOwner,
+        spawnContext.repoName,
+        parentEnvironmentId
+      );
 
   const input: SessionInitInput = {
     sessionId: childId,
     repoOwner: spawnContext.repoOwner,
     repoName: spawnContext.repoName,
     repoId: spawnContext.repoId,
+    repositoryId: spawnContext.repositoryId ?? null,
+    scmConnectionId: spawnContext.scmConnectionId ?? null,
     environmentId: parentEnvironmentId,
     branch:
       spawnContext.repoOwner && spawnContext.repoName ? (spawnContext.baseBranch ?? "main") : null,
@@ -336,7 +362,7 @@ async function handleSpawnChild(
   return json({ sessionId: childId, status: "created" }, 201);
 }
 
-export const sessionChildSpawnRoutes: Route[] = defineRoutes(GITHUB_SANDBOX_FALLBACK_ROUTE, [
+export const sessionChildSpawnRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE, [
   sessionRoute({
     method: "POST",
     pattern: parsePattern("/sessions/:id/children"),

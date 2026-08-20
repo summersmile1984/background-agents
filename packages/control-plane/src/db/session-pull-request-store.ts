@@ -11,6 +11,9 @@ export interface SessionPullRequestRecord {
   /** Matches the DO artifact id (primary key). */
   artifactId: string;
   sessionId: string;
+  /** Stable connection/repository authority. Both are present or both absent. */
+  scmConnectionId?: string | null;
+  repositoryId?: string | null;
   /** Stable provider repo id (canonical identity); null on legacy rows. */
   repositoryExternalId: string | null;
   /** Mutable lookup/display; refreshed when a rename/transfer is detected. */
@@ -46,6 +49,8 @@ export interface UpsertResult {
 interface SessionPullRequestRow {
   artifact_id: string;
   session_id: string;
+  scm_connection_id?: string | null;
+  repository_id?: string | null;
   repository_external_id: string | null;
   repo_owner: string;
   repo_name: string;
@@ -77,6 +82,8 @@ function toRecord(row: SessionPullRequestRow): SessionPullRequestRecord {
   return {
     artifactId: row.artifact_id,
     sessionId: row.session_id,
+    scmConnectionId: row.scm_connection_id ?? null,
+    repositoryId: row.repository_id ?? null,
     repositoryExternalId: row.repository_external_id,
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
@@ -116,6 +123,66 @@ export class SessionPullRequestStore {
    * id violates the unique identity index and throws — one record per PR.
    */
   async upsert(record: SessionPullRequestRecord): Promise<UpsertResult> {
+    if ((record.scmConnectionId == null) !== (record.repositoryId == null)) {
+      throw new Error("PR connection and repository identity must be provided together");
+    }
+    if (record.scmConnectionId && record.repositoryId) {
+      const result = await this.db
+        .prepare(
+          `INSERT INTO scm_session_pull_requests (
+             artifact_id, session_id, scm_connection_id, repository_id,
+             repository_external_id, repo_owner, repo_name, pr_number, url,
+             lifecycle_state, is_draft, head_branch, base_branch, head_sha,
+             provider_created_at, provider_updated_at, merged_at, closed_at,
+             created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (artifact_id) DO UPDATE SET
+             scm_connection_id = excluded.scm_connection_id,
+             repository_id = excluded.repository_id,
+             repository_external_id = excluded.repository_external_id,
+             repo_owner = excluded.repo_owner,
+             repo_name = excluded.repo_name,
+             pr_number = excluded.pr_number,
+             url = excluded.url,
+             lifecycle_state = excluded.lifecycle_state,
+             is_draft = excluded.is_draft,
+             head_branch = excluded.head_branch,
+             base_branch = excluded.base_branch,
+             head_sha = excluded.head_sha,
+             provider_created_at = excluded.provider_created_at,
+             provider_updated_at = excluded.provider_updated_at,
+             merged_at = excluded.merged_at,
+             closed_at = excluded.closed_at,
+             updated_at = excluded.updated_at
+           WHERE excluded.provider_updated_at IS NULL
+              OR scm_session_pull_requests.provider_updated_at IS NULL
+              OR excluded.provider_updated_at >= scm_session_pull_requests.provider_updated_at`
+        )
+        .bind(
+          record.artifactId,
+          record.sessionId,
+          record.scmConnectionId,
+          record.repositoryId,
+          record.repositoryExternalId,
+          record.repoOwner,
+          record.repoName,
+          record.prNumber,
+          record.url,
+          record.lifecycleState,
+          record.isDraft ? 1 : 0,
+          record.headBranch,
+          record.baseBranch,
+          record.headSha,
+          record.providerCreatedAt,
+          record.providerUpdatedAt,
+          record.mergedAt,
+          record.closedAt,
+          record.createdAt,
+          record.updatedAt
+        )
+        .run();
+      return { applied: (result.meta.changes ?? 0) > 0 };
+    }
     const result = await this.db
       .prepare(
         `INSERT INTO session_pull_requests (
@@ -170,6 +237,11 @@ export class SessionPullRequestStore {
   }
 
   async getByArtifactId(artifactId: string): Promise<SessionPullRequestRecord | null> {
+    const stableRow = await this.db
+      .prepare("SELECT * FROM scm_session_pull_requests WHERE artifact_id = ?")
+      .bind(artifactId)
+      .first<SessionPullRequestRow>();
+    if (stableRow) return toRecord(stableRow);
     const row = await this.db
       .prepare("SELECT * FROM session_pull_requests WHERE artifact_id = ?")
       .bind(artifactId)
@@ -189,11 +261,29 @@ export class SessionPullRequestStore {
    *    case-insensitive while our stored casing is display-canonical.
    */
   async getByIdentity(identity: {
+    repositoryId?: string | null;
+    scmConnectionId?: string | null;
     repositoryExternalId?: string | null;
     repoOwner: string;
     repoName: string;
     prNumber: number;
   }): Promise<SessionPullRequestRecord | null> {
+    if (identity.repositoryId) {
+      const row = await this.db
+        .prepare(
+          `SELECT * FROM scm_session_pull_requests
+           WHERE repository_id = ? AND pr_number = ?
+             AND (? IS NULL OR scm_connection_id = ?)`
+        )
+        .bind(
+          identity.repositoryId,
+          identity.prNumber,
+          identity.scmConnectionId ?? null,
+          identity.scmConnectionId ?? null
+        )
+        .first<SessionPullRequestRow>();
+      if (row) return toRecord(row);
+    }
     if (identity.repositoryExternalId) {
       const row = await this.db
         .prepare(
@@ -237,11 +327,16 @@ export class SessionPullRequestStore {
                 SUM(CASE WHEN lifecycle_state = 'open' AND is_draft = 1 THEN 1 ELSE 0 END) AS draft,
                 SUM(CASE WHEN lifecycle_state = 'merged' THEN 1 ELSE 0 END) AS merged,
                 SUM(CASE WHEN lifecycle_state = 'closed' THEN 1 ELSE 0 END) AS closed
-         FROM session_pull_requests
-         WHERE session_id IN (${placeholders})
+         FROM (
+           SELECT session_id, lifecycle_state, is_draft
+           FROM session_pull_requests WHERE session_id IN (${placeholders})
+           UNION ALL
+           SELECT session_id, lifecycle_state, is_draft
+           FROM scm_session_pull_requests WHERE session_id IN (${placeholders})
+         )
          GROUP BY session_id`
       )
-      .bind(...sessionIds)
+      .bind(...sessionIds, ...sessionIds)
       .all<SummaryRow>();
 
     const summaries = new Map<string, PullRequestSummary>();

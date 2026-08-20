@@ -113,6 +113,51 @@ async def test_user_env_vars_override_order(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_sandbox_uses_server_side_scm_proxy_capability(monkeypatch):
+    captured = {}
+
+    async def fake_create_aio(*args, **kwargs):
+        captured["env"] = kwargs.get("env")
+
+        class FakeSandbox:
+            object_id = "obj-proxy"
+            stdout = None
+
+        return FakeSandbox()
+
+    fake_create_aio.aio = fake_create_aio
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", fake_create_aio)
+
+    await SandboxManager().create_sandbox(
+        SandboxConfig(
+            repo_owner="acme",
+            repo_name="repo",
+            control_plane_url="https://control-plane.example",
+            sandbox_auth_token="session-capability",
+            scm_git_proxy_base_url=("https://control-plane.example/git/session/session-1"),
+        )
+    )
+
+    env = captured["env"]
+    assert env["VCS_CLONE_BASE_URL"].endswith("/git/session/session-1")
+    assert env["VCS_HOST"] == "control-plane.example"
+    assert env["OI_SCM_PROXY_MODE"] == "1"
+    assert "VCS_CLONE_TOKEN" not in env
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_rejects_insecure_scm_proxy(monkeypatch):
+    with pytest.raises(ValueError, match="absolute HTTPS"):
+        await SandboxManager().create_sandbox(
+            SandboxConfig(
+                repo_owner=None,
+                repo_name=None,
+                scm_git_proxy_base_url="http://control-plane.example/git/session/session-1",
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_restore_user_env_vars_override_order(monkeypatch):
     captured = {}
 

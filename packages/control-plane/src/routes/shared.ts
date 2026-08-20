@@ -139,7 +139,7 @@ export const SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE = {
 
 export const SCM_CREDENTIALS_ROUTE = {
   authentication: { kind: "sandbox", ...SESSION_ID_BINDING },
-  supportedScmProviders: ["github", "gitlab"],
+  supportedScmProviders: "all",
 } as const satisfies RoutePolicy;
 
 export const SCM_AGNOSTIC_SANDBOX_ROUTE = {

@@ -19,6 +19,7 @@ import { SessionIndexStore } from "./db/session-index";
 import type { SqlDatabase } from "./db/sql-database";
 import { createCloudflareBackgroundJobDispatcher } from "./cloudflare/background-job-dispatcher";
 import { handleGitHubGitProxy } from "./github-git-proxy";
+import { handleScmGitProxy } from "./scm-git-proxy";
 
 const logger = createLogger("worker");
 
@@ -32,6 +33,10 @@ export { SchedulerDO } from "./scheduler/durable-object";
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // eslint-disable-next-line no-restricted-syntax -- composition root: inject the worker database binding
+    const scmGitProxyResponse = await handleScmGitProxy(request, url, env, env.DB);
+    if (scmGitProxyResponse) return scmGitProxyResponse;
 
     const gitProxyResponse = await handleGitHubGitProxy(request, url, env);
     if (gitProxyResponse) return gitProxyResponse;

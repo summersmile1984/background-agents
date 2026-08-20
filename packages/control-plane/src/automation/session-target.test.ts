@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolveAutomationSessionTarget } from "./session-target";
-import { resolveEnvironmentTarget, resolveSessionRepositories } from "../repos/resolve";
+import { resolveEnvironmentRepositorySet } from "../repos/resolve";
 import { HttpError, type RequestContext } from "../routes/shared";
 import type { AutomationRunRow } from "../db/automation-store";
 import type { Env } from "../types";
@@ -11,8 +11,7 @@ vi.mock("../repos/resolve", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    resolveEnvironmentTarget: vi.fn(),
-    resolveSessionRepositories: vi.fn(),
+    resolveEnvironmentRepositorySet: vi.fn(),
   };
 });
 
@@ -69,7 +68,7 @@ describe("resolveAutomationSessionTarget", () => {
       defaultBranch: "main",
       environmentId: null,
     });
-    expect(resolveEnvironmentTarget).not.toHaveBeenCalled();
+    expect(resolveEnvironmentRepositorySet).not.toHaveBeenCalled();
   });
 
   it("returns null fields for repo-less runs", async () => {
@@ -90,16 +89,14 @@ describe("resolveAutomationSessionTarget", () => {
   });
 
   it("resolves the environment workspace with the primary mirrored to scalars", async () => {
-    const environmentInputs = [
-      { repoOwner: "acme", repoName: "web-app", baseBranch: "main" },
-      { repoOwner: "acme", repoName: "api", baseBranch: "develop" },
-    ];
     const repositories = [
       { repoOwner: "acme", repoName: "web-app", repoId: 12345, baseBranch: "main" },
       { repoOwner: "acme", repoName: "api", repoId: 67890, baseBranch: "develop" },
     ];
-    vi.mocked(resolveEnvironmentTarget).mockResolvedValue(environmentInputs);
-    vi.mocked(resolveSessionRepositories).mockResolvedValue(repositories);
+    vi.mocked(resolveEnvironmentRepositorySet).mockResolvedValue({
+      connectionId: null,
+      repositories,
+    });
 
     const target = await resolveAutomationSessionTarget(
       env,
@@ -116,12 +113,19 @@ describe("resolveAutomationSessionTarget", () => {
       log
     );
 
-    expect(resolveEnvironmentTarget).toHaveBeenCalledWith(expect.anything(), "env_1");
-    expect(resolveSessionRepositories).toHaveBeenCalledWith(env, environmentInputs, ctx, log);
+    expect(resolveEnvironmentRepositorySet).toHaveBeenCalledWith(
+      env,
+      expect.anything(),
+      "env_1",
+      ctx,
+      log
+    );
     expect(target).toEqual({
       repoOwner: "acme",
       repoName: "web-app",
       repoId: 12345,
+      repositoryId: null,
+      scmConnectionId: null,
       defaultBranch: "main",
       repositories,
       environmentId: "env_1",
@@ -129,7 +133,7 @@ describe("resolveAutomationSessionTarget", () => {
   });
 
   it("propagates environment resolution failures to the caller", async () => {
-    vi.mocked(resolveEnvironmentTarget).mockRejectedValue(
+    vi.mocked(resolveEnvironmentRepositorySet).mockRejectedValue(
       new HttpError("Environment not found: env_gone", 404)
     );
 

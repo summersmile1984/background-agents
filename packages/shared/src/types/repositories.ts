@@ -13,6 +13,9 @@ export const MAX_SESSION_REPOSITORIES = MAX_TARGET_REPOSITORIES;
  * both types, convert at resolution time (toRepositoryRef).
  */
 export interface RepositoryRef {
+  /** Stable Open-Inspect identity. Required after SCM key cutover. */
+  repositoryKey?: string;
+  connectionId?: string;
   repoOwner: string;
   repoName: string;
   repoId: number;
@@ -26,6 +29,8 @@ export interface RepositoryRef {
  */
 export const sessionRepositoryStateSchema = z.object({
   position: z.number(),
+  repositoryKey: z.string().min(1).nullable().optional(),
+  connectionId: z.string().min(1).nullable().optional(),
   repoOwner: z.string(),
   repoName: z.string(),
   repoId: z.number().nullable(),
@@ -49,6 +54,8 @@ export type SessionRepositoryState = z.infer<typeof sessionRepositoryStateSchema
  * this so the wire shape has a single home.
  */
 export interface SessionListRepository {
+  repositoryKey?: string | null;
+  connectionId?: string | null;
   repoOwner: string;
   repoName: string;
   repoId: number | null;
@@ -82,11 +89,25 @@ export function prArtifactBelongsToRepo(
  */
 export const repositoryInputSchema = z
   .object({
+    repositoryKey: z.string().trim().min(1).optional(),
+    connectionId: z.string().trim().min(1).optional(),
     repoOwner: z.string().trim().min(1),
     repoName: z.string().trim().min(1),
     baseBranch: z.string().trim().min(1).nullish(),
   })
+  .superRefine((entry, context) => {
+    if (Boolean(entry.repositoryKey) !== Boolean(entry.connectionId)) {
+      context.addIssue({
+        code: "custom",
+        path: [entry.repositoryKey ? "connectionId" : "repositoryKey"],
+        message: "repositoryKey and connectionId must be provided together",
+      });
+    }
+  })
   .transform((entry) => ({
+    ...(entry.repositoryKey
+      ? { repositoryKey: entry.repositoryKey, connectionId: entry.connectionId! }
+      : {}),
     repoOwner: entry.repoOwner.toLowerCase(),
     repoName: entry.repoName.toLowerCase(),
     baseBranch: entry.baseBranch ?? null,
@@ -103,7 +124,9 @@ export const repositoriesInputSchema = z
   .superRefine((repositories, ctx) => {
     const seen = new Set<string>();
     repositories.forEach((repository, index) => {
-      const key = `${repository.repoOwner}/${repository.repoName}`;
+      const key = repository.repositoryKey
+        ? `repo:${repository.repositoryKey}`
+        : `${repository.repoOwner}/${repository.repoName}`;
       if (seen.has(key)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

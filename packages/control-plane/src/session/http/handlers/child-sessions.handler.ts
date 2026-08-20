@@ -109,6 +109,8 @@ export function createChildSessionsHandler(deps: ChildSessionsHandlerDeps): Chil
         repoOwner: session.repo_owner,
         repoName: session.repo_name,
         repoId: session.repo_id,
+        ...(session.repository_id ? { repositoryId: session.repository_id } : {}),
+        ...(session.scm_connection_id ? { scmConnectionId: session.scm_connection_id } : {}),
         model: session.model,
         reasoningEffort: session.reasoning_effort ?? null,
         agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,

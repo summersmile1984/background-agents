@@ -11,7 +11,7 @@ import type { Env } from "../types";
 import { createLogger } from "../logger";
 import {
   type Route,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   type RequestContext,
   parsePattern,
@@ -32,9 +32,10 @@ async function handleListMcpServers(
 
   const url = new URL(request.url);
   const repo = url.searchParams.get("repo") ?? undefined;
+  const repositoryId = url.searchParams.get("repositoryId") ?? undefined;
 
   const store = new McpServerStore(ctx.db, env.REPO_SECRETS_ENCRYPTION_KEY);
-  const servers = await store.list(repo);
+  const servers = await store.list(repo, repositoryId);
   logger.info("MCP servers listed", {
     event: "mcp_server.list",
     request_id: ctx.request_id,
@@ -160,7 +161,7 @@ async function handleDeleteMcpServer(
   return json({ ok: true });
 }
 
-export const mcpServerRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const mcpServerRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   {
     method: "GET",
     pattern: parsePattern("/mcp-servers"),

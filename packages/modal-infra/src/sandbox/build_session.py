@@ -67,6 +67,7 @@ class ModalBuildSessionService:
         clone_token: str = "",
         clone_host: str | None = None,
         clone_username: str | None = None,
+        clone_base_url: str | None = None,
         user_env_vars: dict[str, str] | None = None,
         build_execution_timeout_seconds: int = DEFAULT_BUILD_TIMEOUT_SECONDS,
         timeout_seconds: int = DEFAULT_BUILD_TIMEOUT_SECONDS,
@@ -100,6 +101,7 @@ class ModalBuildSessionService:
             clone_token or None,
             clone_host=clone_host,
             clone_username=clone_username,
+            clone_base_url=clone_base_url,
         )
 
         command = ("python", "-m", "sandbox_runtime.entrypoint", MODAL_IMAGE_BUILD_START_ARGUMENT)

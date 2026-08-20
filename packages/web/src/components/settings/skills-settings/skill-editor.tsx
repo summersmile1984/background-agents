@@ -49,6 +49,12 @@ export function SkillEditor({
     return {
       type: "repository",
       repository: {
+        ...(assignment.repositoryKey && assignment.connectionId
+          ? {
+              repositoryKey: assignment.repositoryKey,
+              connectionId: assignment.connectionId,
+            }
+          : {}),
         repoOwner: assignment.repoOwner,
         repoName: assignment.repoName,
         baseBranch: null,

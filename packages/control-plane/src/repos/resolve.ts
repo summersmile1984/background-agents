@@ -4,6 +4,9 @@ import type { Env } from "../types";
 import type { Logger } from "../logger";
 import type { SourceControlProvider } from "../source-control";
 import type { EnvironmentStore } from "../db/environments";
+import { ScmConnectionCredentialStore, ScmConnectionStore } from "../db/scm-connections";
+import { ScmRepositoryStore, type ScmRepositoryRecord } from "../db/scm-repositories";
+import { SourceControlConnectionRegistry } from "../source-control/connection-registry";
 import { createRouteSourceControlProvider, HttpError, type RequestContext } from "../routes/shared";
 
 /**
@@ -13,6 +16,107 @@ import { createRouteSourceControlProvider, HttpError, type RequestContext } from
 export type SessionRepositoryResolutionInput = NonNullable<
   CreateSessionRequest["repositories"]
 >[number];
+
+export interface ResolvedSessionRepositorySet {
+  connectionId: string;
+  repositories: RepositoryRef[];
+}
+
+function numericProviderRepositoryId(repository: ScmRepositoryRecord): number {
+  const value = Number(repository.externalId);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new HttpError(
+      `SCM repository has an unsupported external identity: ${repository.id}`,
+      409
+    );
+  }
+  return value;
+}
+
+/** Resolve stable repository keys and pin exactly one SCM connection. */
+export async function resolveSessionRepositoryKeys(
+  env: Env,
+  repositoryKeys: readonly string[],
+  ctx: RequestContext,
+  logger: Logger,
+  scalarBaseBranch?: string | null,
+  baseBranches?: readonly (string | null | undefined)[]
+): Promise<ResolvedSessionRepositorySet> {
+  const repositoryStore = new ScmRepositoryStore(ctx.db);
+  const records = await Promise.all(repositoryKeys.map((key) => repositoryStore.get(key)));
+  const missing = repositoryKeys.filter((_, index) => {
+    const record = records[index];
+    return !record || record.resolutionStatus !== "resolved" || record.removedAt != null;
+  });
+  if (missing.length > 0) {
+    throw new HttpError(
+      `SCM repositories were not found or are unresolved: ${missing.join(", ")}`,
+      404
+    );
+  }
+
+  const resolvedRecords = records as ScmRepositoryRecord[];
+  const connectionIds = new Set(resolvedRecords.map((record) => record.connectionId));
+  if (connectionIds.size !== 1) {
+    throw new HttpError(
+      "SCM_CONNECTION_MISMATCH: all session repositories must use one connection",
+      409
+    );
+  }
+  const connectionId = resolvedRecords[0].connectionId;
+  const registry = new SourceControlConnectionRegistry(env, {
+    connections: new ScmConnectionStore(ctx.db),
+    credentials: new ScmConnectionCredentialStore(ctx.db, env.TOKEN_ENCRYPTION_KEY),
+  });
+  const { provider } = await registry.getConnection(connectionId);
+  const refs = await Promise.all(
+    resolvedRecords.map(async (repository, index): Promise<RepositoryRef> => {
+      try {
+        const access = await provider.checkRepositoryAccess({
+          owner: repository.owner,
+          name: repository.name,
+        });
+        if (!access || String(access.repoId) !== repository.externalId) {
+          throw new HttpError(`SCM_REPOSITORY_ACCESS_DENIED: ${repository.id}`, 403);
+        }
+        return {
+          repositoryKey: repository.id,
+          connectionId,
+          repoOwner: access.repoOwner,
+          repoName: access.repoName,
+          repoId: numericProviderRepositoryId(repository),
+          baseBranch:
+            baseBranches?.[index]?.trim() ||
+            (repositoryKeys.length === 1 ? scalarBaseBranch?.trim() : null) ||
+            repository.defaultBranch ||
+            access.defaultBranch ||
+            "main",
+        };
+      } catch (cause) {
+        if (cause instanceof HttpError) throw cause;
+        logger.warn("Stable repository resolution failed", {
+          repository_id: repository.id,
+          connection_id: connectionId,
+          position: index,
+          error_type: cause instanceof Error ? cause.name : "unknown",
+          request_id: ctx.request_id,
+          trace_id: ctx.trace_id,
+        });
+        throw new HttpError(`SCM_REPOSITORY_ACCESS_DENIED: ${repository.id}`, 403);
+      }
+    })
+  );
+
+  const seenNames = new Set<string>();
+  for (const ref of refs) {
+    const checkoutName = ref.repoName.toLowerCase();
+    if (seenNames.has(checkoutName)) {
+      throw new HttpError(`repositories resolve to the same checkout path: ${ref.repoName}`, 400);
+    }
+    seenNames.add(checkoutName);
+  }
+  return { connectionId, repositories: refs };
+}
 
 /**
  * Resolve a launch environment into the repository inputs its session should
@@ -44,6 +148,62 @@ export async function resolveEnvironmentTarget(
     repoName: repo.repo_name,
     baseBranch: repo.base_branch,
   }));
+}
+
+/** Resolve an environment through its pinned repository identities when the
+ * additive migration has populated them, with an all-legacy compatibility
+ * fallback during rollout. A partially backfilled environment fails closed. */
+export async function resolveEnvironmentRepositorySet(
+  env: Env,
+  store: EnvironmentStore,
+  environmentId: string,
+  ctx: RequestContext,
+  logger: Logger
+): Promise<ResolvedSessionRepositorySet | { connectionId: null; repositories: RepositoryRef[] }> {
+  const environment = await store.getById(environmentId);
+  if (!environment) throw new HttpError(`Environment not found: ${environmentId}`, 404);
+  const rows = await store.getRepositoriesForEnvironment(environmentId);
+  if (rows.length === 0)
+    throw new HttpError(`Environment has no repositories: ${environmentId}`, 500);
+
+  const stableCount = rows.filter(
+    (row) => Boolean(row.repository_id) && Boolean(row.scm_connection_id)
+  ).length;
+  if (stableCount > 0 && stableCount !== rows.length) {
+    throw new HttpError(
+      `Environment has incomplete source-control identity: ${environmentId}`,
+      409
+    );
+  }
+  if (stableCount === rows.length) {
+    const connectionIds = new Set(rows.map((row) => row.scm_connection_id));
+    if (
+      connectionIds.size !== 1 ||
+      (environment.scm_connection_id && !connectionIds.has(environment.scm_connection_id))
+    ) {
+      throw new HttpError(`SCM_CONNECTION_MISMATCH: environment ${environmentId}`, 409);
+    }
+    return resolveSessionRepositoryKeys(
+      env,
+      rows.map((row) => row.repository_id!),
+      ctx,
+      logger,
+      null,
+      rows.map((row) => row.base_branch)
+    );
+  }
+
+  const repositories = await resolveSessionRepositories(
+    env,
+    rows.map((row) => ({
+      repoOwner: row.repo_owner,
+      repoName: row.repo_name,
+      baseBranch: row.base_branch,
+    })),
+    ctx,
+    logger
+  );
+  return { connectionId: null, repositories };
 }
 
 interface ResolutionOutcome {

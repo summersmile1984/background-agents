@@ -53,6 +53,8 @@ interface AssignmentRow {
   scope_type: "global" | "repository" | "environment";
   repo_owner: string | null;
   repo_name: string | null;
+  repository_id?: string | null;
+  scm_connection_id?: string | null;
   environment_id: string | null;
   environment_name: string | null;
 }
@@ -262,6 +264,14 @@ export class SkillStore {
            )`
         )
         .bind(id, id, resultingRevisionId),
+      this.db
+        .prepare(
+          `DELETE FROM scm_skill_assignments WHERE skill_id = ?
+           AND EXISTS (
+             SELECT 1 FROM skills WHERE id = ? AND current_revision_id = ? AND deleted_at IS NULL
+           )`
+        )
+        .bind(id, id, resultingRevisionId),
       ...this.assignmentInserts(id, input.assignments, actorUserId, now, resultingRevisionId),
       this.bumpGeneration(id, resultingRevisionId)
     );
@@ -309,10 +319,39 @@ export class SkillStore {
 
   /** Return enabled skills with only the assignments matching this session target. */
   async listApplicable(input: {
-    repositories: readonly { repoOwner: string; repoName: string }[];
+    repositories: readonly {
+      repositoryKey?: string | null;
+      connectionId?: string | null;
+      repoOwner: string;
+      repoName: string;
+    }[];
     environmentId: string | null;
   }): Promise<ApplicableSkill[]> {
-    const repositoryConditions = input.repositories.map(
+    const connectionIds = [
+      ...new Set(
+        input.repositories.flatMap((repository) =>
+          repository.connectionId ? [repository.connectionId] : []
+        )
+      ),
+    ];
+    const githubConnectionIds = new Set<string>();
+    if (connectionIds.length > 0) {
+      const placeholders = connectionIds.map(() => "?").join(", ");
+      const result = await this.db
+        .prepare(
+          `SELECT id FROM scm_connections
+           WHERE provider = 'github' AND id IN (${placeholders})`
+        )
+        .bind(...connectionIds)
+        .all<{ id: string }>();
+      for (const row of result.results ?? []) githubConnectionIds.add(row.id);
+    }
+    const legacyRepositories = input.repositories.filter(
+      (repository) =>
+        !repository.repositoryKey ||
+        (repository.connectionId != null && githubConnectionIds.has(repository.connectionId))
+    );
+    const repositoryConditions = legacyRepositories.map(
       () =>
         "(a.scope_type = 'repository' AND lower(a.repo_owner) = lower(?) AND lower(a.repo_name) = lower(?))"
     );
@@ -325,26 +364,39 @@ export class SkillStore {
     ];
     const assignmentParams = [
       ...(input.environmentId === null ? [] : [input.environmentId]),
-      ...input.repositories.flatMap(({ repoOwner, repoName }) => [repoOwner, repoName]),
+      ...legacyRepositories.flatMap(({ repoOwner, repoName }) => [repoOwner, repoName]),
     ];
+    const stableRepositoryIds = input.repositories.flatMap((repository) =>
+      repository.repositoryKey ? [repository.repositoryKey] : []
+    );
+    const stablePredicate = stableRepositoryIds.length
+      ? ` OR EXISTS (
+           SELECT 1 FROM scm_skill_assignments sa
+           WHERE sa.skill_id = s.id
+             AND sa.repository_id IN (${stableRepositoryIds.map(() => "?").join(", ")})
+         )`
+      : "";
     const rows = await this.db
       .prepare(
         `${this.currentSkillSelect()}
          WHERE s.enabled = 1 AND s.deleted_at IS NULL
-           AND EXISTS (
-             SELECT 1 FROM skill_assignments a
-             WHERE a.skill_id = s.id AND (${assignmentConditions.join(" OR ")})
+           AND (
+             EXISTS (
+               SELECT 1 FROM skill_assignments a
+               WHERE a.skill_id = s.id AND (${assignmentConditions.join(" OR ")})
+             )${stablePredicate}
            )
          ORDER BY s.name`
       )
-      .bind(...assignmentParams)
+      .bind(...assignmentParams, ...stableRepositoryIds)
       .all<SkillRow>();
     const repositoryKeys = new Set(
-      input.repositories.map(
+      legacyRepositories.map(
         (repository) =>
           `${repository.repoOwner.toLowerCase()}\0${repository.repoName.toLowerCase()}`
       )
     );
+    const repositoryIds = new Set(stableRepositoryIds);
     const assignmentsBySkill = await this.assignmentsForSkills(
       (rows.results ?? []).map((row) => row.id)
     );
@@ -356,6 +408,7 @@ export class SkillStore {
         if (assignment.type === "environment") {
           return input.environmentId !== null && assignment.environmentId === input.environmentId;
         }
+        if (assignment.repositoryKey) return repositoryIds.has(assignment.repositoryKey);
         return repositoryKeys.has(
           `${assignment.repoOwner.toLowerCase()}\0${assignment.repoName.toLowerCase()}`
         );
@@ -460,6 +513,12 @@ export class SkillStore {
         assignment = {
           id: row.id,
           type: "repository",
+          ...(row.repository_id
+            ? {
+                repositoryKey: row.repository_id,
+                connectionId: row.scm_connection_id ?? undefined,
+              }
+            : {}),
           repoOwner: row.repo_owner!,
           repoName: row.repo_name!,
         };
@@ -475,6 +534,34 @@ export class SkillStore {
       }
       assignments.get(row.skill_id)?.push(assignment);
     }
+
+    for (let start = 0; start < skillIds.length; start += MAX_D1_QUERY_PARAMETERS) {
+      const chunk = skillIds.slice(start, start + MAX_D1_QUERY_PARAMETERS);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const stable = await this.db
+        .prepare(
+          `SELECT a.id, a.skill_id, 'repository' AS scope_type,
+                  r.owner AS repo_owner, r.name AS repo_name,
+                  a.repository_id, r.connection_id AS scm_connection_id,
+                  NULL AS environment_id, NULL AS environment_name
+           FROM scm_skill_assignments a
+           JOIN scm_repositories r ON r.id = a.repository_id
+           WHERE a.skill_id IN (${placeholders})
+           ORDER BY a.skill_id, a.id`
+        )
+        .bind(...chunk)
+        .all<AssignmentRow & { skill_id: string }>();
+      for (const row of stable.results ?? []) {
+        assignments.get(row.skill_id)?.push({
+          id: row.id,
+          type: "repository",
+          repositoryKey: row.repository_id!,
+          connectionId: row.scm_connection_id ?? undefined,
+          repoOwner: row.repo_owner!,
+          repoName: row.repo_name!,
+        });
+      }
+    }
     return assignments;
   }
 
@@ -482,6 +569,9 @@ export class SkillStore {
     const keys = assignments.map((assignment) => {
       if (assignment.type === "global") return "global";
       if (assignment.type === "environment") return `environment:${assignment.environmentId}`;
+      if (assignment.repository.repositoryKey) {
+        return `repository:${assignment.repository.repositoryKey}`;
+      }
       return `repository:${assignment.repository.repoOwner.toLowerCase()}/${assignment.repository.repoName.toLowerCase()}`;
     });
     if (new Set(keys).size !== keys.length) {
@@ -494,14 +584,34 @@ export class SkillStore {
         )
       ),
     ];
-    if (environmentIds.length === 0) return;
-    const placeholders = environmentIds.map(() => "?").join(", ");
-    const row = await this.db
-      .prepare(`SELECT COUNT(*) AS count FROM environments WHERE id IN (${placeholders})`)
-      .bind(...environmentIds)
-      .first<{ count: number }>();
-    if ((row?.count ?? 0) !== environmentIds.length) {
-      throw new SkillValidationError("One or more assigned environments do not exist");
+    if (environmentIds.length > 0) {
+      const placeholders = environmentIds.map(() => "?").join(", ");
+      const row = await this.db
+        .prepare(`SELECT COUNT(*) AS count FROM environments WHERE id IN (${placeholders})`)
+        .bind(...environmentIds)
+        .first<{ count: number }>();
+      if ((row?.count ?? 0) !== environmentIds.length) {
+        throw new SkillValidationError("One or more assigned environments do not exist");
+      }
+    }
+    const repositoryIds = [
+      ...new Set(
+        assignments.flatMap((assignment) =>
+          assignment.type === "repository" && assignment.repository.repositoryKey
+            ? [assignment.repository.repositoryKey]
+            : []
+        )
+      ),
+    ];
+    if (repositoryIds.length > 0) {
+      const placeholders = repositoryIds.map(() => "?").join(", ");
+      const row = await this.db
+        .prepare(`SELECT COUNT(*) AS count FROM scm_repositories WHERE id IN (${placeholders})`)
+        .bind(...repositoryIds)
+        .first<{ count: number }>();
+      if ((row?.count ?? 0) !== repositoryIds.length) {
+        throw new SkillValidationError("One or more assigned repositories do not exist");
+      }
     }
   }
 
@@ -575,6 +685,28 @@ export class SkillStore {
   ): SqlStatement[] {
     return assignments.map((assignment) => {
       const id = `skillassign_${generateId()}`;
+      if (assignment.type === "repository" && assignment.repository.repositoryKey) {
+        return this.db
+          .prepare(
+            `INSERT INTO scm_skill_assignments
+              (id, skill_id, repository_id, created_by, created_at)
+             SELECT ?, ?, ?, ?, ?
+             WHERE ? IS NULL OR EXISTS (
+               SELECT 1 FROM skills
+               WHERE id = ? AND current_revision_id = ? AND deleted_at IS NULL
+             )`
+          )
+          .bind(
+            id,
+            skillId,
+            assignment.repository.repositoryKey,
+            actorUserId,
+            now,
+            requiredCurrentRevisionId ?? null,
+            skillId,
+            requiredCurrentRevisionId ?? null
+          );
+      }
       return this.db
         .prepare(
           `INSERT INTO skill_assignments

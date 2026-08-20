@@ -34,6 +34,8 @@ export interface SessionRow {
   repo_owner: string | null;
   repo_name: string | null;
   repo_id: number | null;
+  scm_connection_id?: string | null;
+  repository_id?: string | null;
   base_branch: string | null;
   branch_name: string | null;
   base_sha: string | null;
@@ -67,6 +69,8 @@ export type RepositorySessionRow = SessionRow & {
  */
 export interface SessionRepositoryRow {
   position: number;
+  scm_connection_id?: string | null;
+  repository_id?: string | null;
   repo_owner: string;
   repo_name: string;
   repo_id: number | null;

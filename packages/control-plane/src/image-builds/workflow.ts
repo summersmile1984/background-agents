@@ -258,6 +258,12 @@ export class ImageBuildWorkflow {
         scope,
         provider,
         repositoriesFingerprint: target.repositoriesFingerprint,
+        ...(target.repositories[0]?.connectionId
+          ? { scmConnectionId: target.repositories[0].connectionId }
+          : {}),
+        ...(target.repositories[0]?.repositoryKey
+          ? { repositoryId: target.repositories[0].repositoryKey }
+          : {}),
         ...callbackAuthRegistration(callbackAuth),
       });
       if (!registered) {

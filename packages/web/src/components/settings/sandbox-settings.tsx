@@ -35,7 +35,11 @@ type ResourceField = "cpuCores" | "memoryMib";
 
 interface GlobalSettingsResponse {
   integrationId: string;
-  settings: { defaults?: SandboxSettings; enabledRepos?: string[] } | null;
+  settings: {
+    defaults?: SandboxSettings;
+    enabledRepos?: string[];
+    enabledRepositoryIds?: string[];
+  } | null;
 }
 
 interface RepoSettingsResponse {
@@ -151,6 +155,7 @@ interface SandboxScopeModel {
   baseDefaults: SandboxSettings | undefined;
   /** Preserved on global saves so a defaults update can't drop the allowlist. */
   enabledRepos: string[] | undefined;
+  enabledRepositoryIds: string[] | undefined;
   isLoading: boolean;
   mutate: () => Promise<unknown>;
 }
@@ -169,13 +174,16 @@ function useSandboxSettingsScope(
   scope: "global" | "repo" | "environment",
   owner?: string,
   name?: string,
-  environmentId?: string
+  environmentId?: string,
+  repositoryKey?: string
 ): SandboxScopeModel {
   const isGlobal = scope === "global";
   const globalApiUrl: BrowserApiPath = "/api/integration-settings/sandbox";
   const repoPath =
     owner && name ? encodeRepositoryPathSegments({ repoOwner: owner, repoName: name }) : "";
-  const repoApiUrl: BrowserApiPath = `/api/integration-settings/sandbox/repos/${repoPath}`;
+  const repoApiUrl: BrowserApiPath = repositoryKey
+    ? `/api/integration-settings/sandbox/repositories/${encodeURIComponent(repositoryKey)}`
+    : `/api/integration-settings/sandbox/repos/${repoPath}`;
   const apiUrl: BrowserApiPath = isGlobal
     ? globalApiUrl
     : scope === "repo"
@@ -212,6 +220,7 @@ function useSandboxSettingsScope(
     ownSettings,
     baseDefaults,
     enabledRepos: globalSettings?.enabledRepos,
+    enabledRepositoryIds: globalSettings?.enabledRepositoryIds,
     isLoading: isLoading || isLoadingGlobal || isLoadingPrimaryRepo,
     mutate,
   };
@@ -222,6 +231,7 @@ export function SandboxSettingsEditor({
   owner,
   name,
   environmentId,
+  repositoryKey,
 }: {
   scope: "global" | "repo" | "environment";
   /**
@@ -232,10 +242,18 @@ export function SandboxSettingsEditor({
   owner?: string;
   name?: string;
   environmentId?: string;
+  repositoryKey?: string;
 }) {
   const isGlobal = scope === "global";
-  const { apiUrl, ownSettings, baseDefaults, enabledRepos, isLoading, mutate } =
-    useSandboxSettingsScope(scope, owner, name, environmentId);
+  const {
+    apiUrl,
+    ownSettings,
+    baseDefaults,
+    enabledRepos,
+    enabledRepositoryIds,
+    isLoading,
+    mutate,
+  } = useSandboxSettingsScope(scope, owner, name, environmentId, repositoryKey);
 
   // Display values: the scope's own setting, else the inherited base. Only
   // explicitly edited fields (or pre-existing overrides) are written back on
@@ -500,7 +518,12 @@ export function SandboxSettingsEditor({
       );
       if (memory !== undefined) settingsPayload.memoryMib = memory;
       const body = isGlobal
-        ? { settings: { defaults: settingsPayload, enabledRepos } }
+        ? {
+            settings: {
+              defaults: settingsPayload,
+              ...(enabledRepositoryIds !== undefined ? { enabledRepositoryIds } : { enabledRepos }),
+            },
+          }
         : { settings: settingsPayload };
 
       const res = await browserApiFetch(apiUrl, {
@@ -884,7 +907,9 @@ export function SandboxSettingsPage() {
   const { repos, loading: loadingRepos } = useRepos();
   const [selectedRepo, setSelectedRepo] = useState(GLOBAL_SCOPE);
 
-  const selectedRepoObj = repos.find((r) => r.fullName === selectedRepo);
+  const selectedRepoObj = repos.find(
+    (repo) => (repo.repositoryKey ?? repo.fullName) === selectedRepo
+  );
   const isGlobal = selectedRepo === GLOBAL_SCOPE;
   const displayRepoName = isGlobal
     ? "All Repositories (Global)"
@@ -916,9 +941,9 @@ export function SandboxSettingsPage() {
           value={selectedRepo}
           onChange={setSelectedRepo}
           items={repos.map((repo) => ({
-            value: repo.fullName,
+            value: repo.repositoryKey ?? repo.fullName,
             label: repo.name,
-            description: `${repo.owner}${repo.private ? " \u2022 private" : ""}`,
+            description: `${repo.owner}${repo.connection?.displayName ? ` · ${repo.connection.displayName}` : ""}${repo.private ? " \u2022 private" : ""}`,
           }))}
           searchable
           searchPlaceholder="Search repositories..."
@@ -961,10 +986,11 @@ export function SandboxSettingsPage() {
         <SandboxSettingsEditor scope="global" />
       ) : selectedRepoObj ? (
         <SandboxSettingsEditor
-          key={selectedRepoObj.fullName}
+          key={selectedRepoObj.repositoryKey ?? selectedRepoObj.fullName}
           scope="repo"
           owner={selectedRepoObj.owner}
           name={selectedRepoObj.name}
+          repositoryKey={selectedRepoObj.repositoryKey}
         />
       ) : null}
     </div>

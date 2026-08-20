@@ -6,6 +6,7 @@ import type { SqlDatabase } from "./sql-database";
 const D1_BATCH_LIMIT = 100;
 
 interface RepoMetadataRow {
+  repository_id?: string;
   repo_owner: string;
   repo_name: string;
   description: string | null;
@@ -19,6 +20,8 @@ interface RepoMetadataRow {
 }
 
 export interface ImageBuildEnabledRepo {
+  repositoryKey?: string;
+  connectionId?: string;
   repoOwner: string;
   repoName: string;
 }
@@ -46,6 +49,14 @@ export class RepoMetadataStore {
       .bind(owner.toLowerCase(), name.toLowerCase())
       .first<RepoMetadataRow>();
 
+    return row ? toMetadata(row) : null;
+  }
+
+  async getByRepositoryId(repositoryId: string): Promise<RepoMetadata | null> {
+    const row = await this.db
+      .prepare("SELECT * FROM scm_repository_metadata WHERE repository_id = ?")
+      .bind(repositoryId)
+      .first<RepoMetadataRow>();
     return row ? toMetadata(row) : null;
   }
 
@@ -78,6 +89,52 @@ export class RepoMetadataStore {
         now
       )
       .run();
+  }
+
+  async upsertByRepositoryId(repositoryId: string, metadata: RepoMetadata): Promise<void> {
+    const now = Date.now();
+    await this.db
+      .prepare(
+        `INSERT INTO scm_repository_metadata
+         (repository_id, description, aliases, channel_associations, keywords,
+          default_environment_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repository_id) DO UPDATE SET
+           description = excluded.description,
+           aliases = excluded.aliases,
+           channel_associations = excluded.channel_associations,
+           keywords = excluded.keywords,
+           default_environment_id = excluded.default_environment_id,
+           updated_at = excluded.updated_at`
+      )
+      .bind(
+        repositoryId,
+        metadata.description ?? null,
+        metadata.aliases ? JSON.stringify(metadata.aliases) : null,
+        metadata.channelAssociations ? JSON.stringify(metadata.channelAssociations) : null,
+        metadata.keywords ? JSON.stringify(metadata.keywords) : null,
+        metadata.defaultEnvironmentId ?? null,
+        now,
+        now
+      )
+      .run();
+  }
+
+  async getBatchByRepositoryIds(repositoryIds: string[]): Promise<Map<string, RepoMetadata>> {
+    const map = new Map<string, RepoMetadata>();
+    for (let start = 0; start < repositoryIds.length; start += D1_BATCH_LIMIT) {
+      const chunk = repositoryIds.slice(start, start + D1_BATCH_LIMIT);
+      const results = await this.db.batch<RepoMetadataRow>(
+        chunk.map((id) =>
+          this.db.prepare("SELECT * FROM scm_repository_metadata WHERE repository_id = ?").bind(id)
+        )
+      );
+      results.forEach((result, index) => {
+        const row = result.results?.[0];
+        if (row) map.set(chunk[index], toMetadata(row));
+      });
+    }
+    return map;
   }
 
   async getBatch(
@@ -123,15 +180,44 @@ export class RepoMetadataStore {
     return row?.image_build_enabled === 1;
   }
 
+  async getImageBuildEnabledByRepositoryId(repositoryId: string): Promise<boolean> {
+    const row = await this.db
+      .prepare("SELECT image_build_enabled FROM scm_repository_metadata WHERE repository_id = ?")
+      .bind(repositoryId)
+      .first<{ image_build_enabled: number }>();
+    return row?.image_build_enabled === 1;
+  }
+
   async getImageBuildEnabledRepos(): Promise<ImageBuildEnabledRepo[]> {
-    const result = await this.db
+    const legacy = await this.db
       .prepare("SELECT repo_owner, repo_name FROM repo_metadata WHERE image_build_enabled = 1")
       .all<{ repo_owner: string; repo_name: string }>();
-
-    return (result.results || []).map((row) => ({
-      repoOwner: row.repo_owner,
-      repoName: row.repo_name,
-    }));
+    const stable = await this.db
+      .prepare(
+        `SELECT m.repository_id, r.connection_id, r.owner, r.name
+         FROM scm_repository_metadata m
+         JOIN scm_repositories r ON r.id = m.repository_id
+         WHERE m.image_build_enabled = 1 AND r.resolution_status = 'resolved'
+           AND r.removed_at IS NULL`
+      )
+      .all<{
+        repository_id: string;
+        connection_id: string;
+        owner: string;
+        name: string;
+      }>();
+    return [
+      ...(legacy.results || []).map((row) => ({
+        repoOwner: row.repo_owner,
+        repoName: row.repo_name,
+      })),
+      ...(stable.results || []).map((row) => ({
+        repositoryKey: row.repository_id,
+        connectionId: row.connection_id,
+        repoOwner: row.owner,
+        repoName: row.name,
+      })),
+    ];
   }
 
   async setImageBuildEnabled(owner: string, name: string, enabled: boolean): Promise<void> {
@@ -148,6 +234,21 @@ export class RepoMetadataStore {
            updated_at = excluded.updated_at`
       )
       .bind(normalizedOwner, normalizedName, enabled ? 1 : 0, now, now)
+      .run();
+  }
+
+  async setImageBuildEnabledByRepositoryId(repositoryId: string, enabled: boolean): Promise<void> {
+    const now = Date.now();
+    await this.db
+      .prepare(
+        `INSERT INTO scm_repository_metadata
+         (repository_id, image_build_enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(repository_id) DO UPDATE SET
+           image_build_enabled = excluded.image_build_enabled,
+           updated_at = excluded.updated_at`
+      )
+      .bind(repositoryId, enabled ? 1 : 0, now, now)
       .run();
   }
 }

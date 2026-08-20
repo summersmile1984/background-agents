@@ -5,13 +5,16 @@ interface BranchesResponse {
   branches: { name: string }[];
 }
 
-export function useBranches(repoOwner: string, repoName: string) {
+export function useBranches(repoOwner: string, repoName: string, repositoryKey?: string) {
   const { data: session } = useAuthSession();
 
-  const key =
-    session && repoOwner && repoName
-      ? `/api/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/branches`
-      : null;
+  const key = session
+    ? repositoryKey
+      ? `/api/repos/${encodeURIComponent(repositoryKey)}/branches`
+      : repoOwner && repoName
+        ? `/api/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/branches`
+        : null
+    : null;
 
   const { data, isLoading } = useSWR<BranchesResponse>(key);
 

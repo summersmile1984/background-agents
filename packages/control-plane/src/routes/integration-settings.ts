@@ -21,13 +21,14 @@ import {
   supportsEnvironmentSettings,
 } from "../db/integration-settings";
 import { EnvironmentStore } from "../db/environments";
+import { ScmRepositoryStore } from "../db/scm-repositories";
 import type { Env } from "../types";
 import type { SqlDatabase } from "../db/sql-database";
 import { createLogger } from "../logger";
 import {
   type Route,
   type RequestContext,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   parsePattern,
   json,
@@ -176,8 +177,114 @@ async function handleListRepoSettings(
   if (!id) return error(`Unknown integration: ${match.groups?.id}`, 404);
 
   const store = new IntegrationSettingsStore(ctx.db);
-  const repos = await store.listRepoSettings(id);
-  return json({ integrationId: id, repos });
+  const [stableRepos, legacyRepos] = await Promise.all([
+    store.listStableRepoSettings(id),
+    store.listRepoSettings(id),
+  ]);
+  const stablePaths = new Set(stableRepos.map((entry) => entry.repo.toLowerCase()));
+  return json({
+    integrationId: id,
+    repos: [
+      ...stableRepos,
+      ...legacyRepos.filter((entry) => !stablePaths.has(entry.repo.toLowerCase())),
+    ],
+  });
+}
+
+async function extractStableRepositorySettingsParams(
+  db: SqlDatabase,
+  match: RegExpMatchArray
+): Promise<
+  | {
+      integrationId: IntegrationId;
+      repositoryId: string;
+      repo: string;
+      store: IntegrationSettingsStore;
+    }
+  | Response
+> {
+  const integrationId = extractIntegrationId(match);
+  if (!integrationId) return error(`Unknown integration: ${match.groups?.id}`, 404);
+  const repositoryId = match.groups?.repositoryKey;
+  if (!repositoryId) return error("Repository key required", 400);
+  const repository = await new ScmRepositoryStore(db).get(repositoryId);
+  if (!repository || repository.resolutionStatus !== "resolved") {
+    return error("Repository not found", 404);
+  }
+  return {
+    integrationId,
+    repositoryId,
+    repo: `${repository.owner}/${repository.name}`,
+    store: new IntegrationSettingsStore(db),
+  };
+}
+
+async function handleGetStableRepoSettings(
+  _request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const params = await extractStableRepositorySettingsParams(ctx.db, match);
+  if (params instanceof Response) return params;
+  const settings = await params.store.getRepoSettingsByRepositoryId(
+    params.integrationId,
+    params.repositoryId
+  );
+  return json({
+    integrationId: params.integrationId,
+    repositoryId: params.repositoryId,
+    repo: params.repo,
+    settings,
+  });
+}
+
+async function handleSetStableRepoSettings(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const params = await extractStableRepositorySettingsParams(ctx.db, match);
+  if (params instanceof Response) return params;
+  const body = await parseJsonBody<{ settings?: Record<string, unknown> }>(request);
+  if (body instanceof Response) return body;
+  if (!body?.settings || typeof body.settings !== "object") {
+    return error("Request body must include settings object", 400);
+  }
+  try {
+    await params.store.setRepoSettingsByRepositoryId(
+      params.integrationId,
+      params.repositoryId,
+      body.settings
+    );
+    return json({
+      status: "updated",
+      integrationId: params.integrationId,
+      repositoryId: params.repositoryId,
+      repo: params.repo,
+    });
+  } catch (cause) {
+    if (cause instanceof IntegrationSettingsValidationError) return error(cause.message, 400);
+    throw cause;
+  }
+}
+
+async function handleDeleteStableRepoSettings(
+  _request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  const params = await extractStableRepositorySettingsParams(ctx.db, match);
+  if (params instanceof Response) return params;
+  await params.store.deleteRepoSettingsByRepositoryId(params.integrationId, params.repositoryId);
+  return json({
+    status: "deleted",
+    integrationId: params.integrationId,
+    repositoryId: params.repositoryId,
+    repo: params.repo,
+  });
 }
 
 async function handleGetRepoSettings(
@@ -487,7 +594,7 @@ async function handleGetResolvedConfig(
   return error(`Unsupported integration: ${id}`, 400);
 }
 
-export const integrationSettingsRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const integrationSettingsRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   // Integration settings — global
   {
     method: "GET",
@@ -509,6 +616,21 @@ export const integrationSettingsRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SE
     method: "GET",
     pattern: parsePattern("/integration-settings/:id/repos"),
     handler: handleListRepoSettings,
+  },
+  {
+    method: "GET",
+    pattern: parsePattern("/integration-settings/:id/repositories/:repositoryKey"),
+    handler: handleGetStableRepoSettings,
+  },
+  {
+    method: "PUT",
+    pattern: parsePattern("/integration-settings/:id/repositories/:repositoryKey"),
+    handler: handleSetStableRepoSettings,
+  },
+  {
+    method: "DELETE",
+    pattern: parsePattern("/integration-settings/:id/repositories/:repositoryKey"),
+    handler: handleDeleteStableRepoSettings,
   },
   {
     method: "GET",

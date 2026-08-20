@@ -4,6 +4,15 @@ import {
 } from "@open-inspect/shared/types/repositories";
 import type { AutomationRepositoryInput } from "@open-inspect/shared/types/automations";
 import type { SessionTarget } from "@/lib/session-target";
+import { repoSelectionValue } from "@/lib/repository-selection";
+
+export type AutomationRepositorySelection = Omit<
+  AutomationRepositoryInput,
+  "repositoryKey" | "connectionId"
+> & {
+  repositoryKey?: string | null;
+  connectionId?: string | null;
+};
 
 /**
  * One entry of the automation's fan-out selection, reusing the shared
@@ -19,8 +28,10 @@ export type AutomationSessionTarget = Extract<SessionTarget, { kind: "repo" | "e
 export type SelectionMode = "single" | "multiple";
 
 /** Selection key for a repository: the lowercase full name, as the API stores it. */
-function repositoryKey(repoOwner: string, repoName: string): string {
-  return formatRepositoryFullName({ repoOwner, repoName }).toLowerCase();
+function repositoryKey(repository: AutomationRepositorySelection): string {
+  return repository.repositoryKey
+    ? `repo:${repository.repositoryKey}`
+    : formatRepositoryFullName(repository).toLowerCase();
 }
 
 /**
@@ -28,14 +39,14 @@ function repositoryKey(repoOwner: string, repoName: string): string {
  * environments, each in stored order.
  */
 export function hydrateTargets(
-  initialRepositories: AutomationRepositoryInput[],
+  initialRepositories: AutomationRepositorySelection[],
   initialEnvironmentIds: string[]
 ): AutomationSessionTarget[] {
   return [
     ...initialRepositories.map(
       (repository): AutomationSessionTarget => ({
         kind: "repo",
-        repoFullName: repositoryKey(repository.repoOwner, repository.repoName),
+        repoFullName: repositoryKey(repository),
       })
     ),
     ...initialEnvironmentIds.map(
@@ -51,14 +62,14 @@ export function hydrateTargets(
  * environment targets on edit.
  */
 export function initialSelectionMode(
-  initialRepositories: AutomationRepositoryInput[],
+  initialRepositories: AutomationRepositorySelection[],
   initialEnvironmentIds: string[]
 ): SelectionMode {
   return initialRepositories.length + initialEnvironmentIds.length > 1 ? "multiple" : "single";
 }
 
 /** The hydrated branch: the stored branch when exactly one repository is stored. */
-export function initialBaseBranch(initialRepositories: AutomationRepositoryInput[]): string {
+export function initialBaseBranch(initialRepositories: AutomationRepositorySelection[]): string {
   return initialRepositories.length === 1 ? (initialRepositories[0].baseBranch ?? "") : "";
 }
 
@@ -109,10 +120,10 @@ export function toggleTarget(
 /** Exactly one selected repository pins its default branch; anything else clears the branch. */
 function pinnedBranchFor(
   repoNames: string[],
-  repos: Array<{ fullName: string; defaultBranch: string }>
+  repos: Array<{ fullName: string; defaultBranch: string; repositoryKey?: string }>
 ): string {
   if (repoNames.length !== 1) return "";
-  return repos.find((repo) => repo.fullName.toLowerCase() === repoNames[0])?.defaultBranch ?? "";
+  return repos.find((repo) => repoSelectionValue(repo) === repoNames[0])?.defaultBranch ?? "";
 }
 
 /**
@@ -124,7 +135,7 @@ function pinnedBranchFor(
 export function nextBaseBranch(
   prevTargets: AutomationSessionTarget[],
   nextTargets: AutomationSessionTarget[],
-  repos: Array<{ fullName: string; defaultBranch: string }>
+  repos: Array<{ fullName: string; defaultBranch: string; repositoryKey?: string }>
 ): string | null {
   const prevRepoNames = repoNamesOf(prevTargets);
   const nextRepoNames = repoNamesOf(nextTargets);
@@ -146,23 +157,50 @@ export function buildRepositoriesPayload(
   selectedRepoNames: string[],
   usesSingleRepository: boolean,
   baseBranch: string,
-  initialRepositories: AutomationRepositoryInput[]
+  initialRepositories: AutomationRepositorySelection[]
 ): AutomationRepositoryInput[] {
-  return selectedRepoNames.map((key) => {
-    const entry: AutomationRepositoryInput = parseRepositoryFullName(key) ?? {
-      repoOwner: "",
-      repoName: "",
-    };
-    if (usesSingleRepository) {
-      if (baseBranch.trim()) entry.baseBranch = baseBranch.trim();
-    } else {
-      // Multi-repo selections have no branch picker; keep the branch each
-      // already-selected repository had so an unrelated edit can't reset it.
-      const existing = initialRepositories.find(
-        (repository) => repositoryKey(repository.repoOwner, repository.repoName) === key
-      );
-      if (existing?.baseBranch) entry.baseBranch = existing.baseBranch;
-    }
-    return entry;
-  });
+  return selectedRepoNames
+    .filter((key) => !key.startsWith("repo:"))
+    .map((key) => {
+      const entry: AutomationRepositoryInput = parseRepositoryFullName(key) ?? {
+        repoOwner: "",
+        repoName: "",
+      };
+      if (usesSingleRepository) {
+        if (baseBranch.trim()) entry.baseBranch = baseBranch.trim();
+      } else {
+        // Multi-repo selections have no branch picker; keep the branch each
+        // already-selected repository had so an unrelated edit can't reset it.
+        const existing = initialRepositories.find(
+          (repository) => repositoryKey(repository) === key
+        );
+        if (existing?.baseBranch) entry.baseBranch = existing.baseBranch;
+      }
+      return entry;
+    });
+}
+
+/** Stable-key payload for selected catalog repositories. */
+export function buildRepositoryKeysPayload(
+  selectedRepoNames: string[],
+  usesSingleRepository: boolean,
+  baseBranch: string,
+  initialRepositories: AutomationRepositorySelection[]
+): Array<{ repositoryKey: string; baseBranch?: string }> {
+  return selectedRepoNames
+    .filter((key) => key.startsWith("repo:"))
+    .map((key) => {
+      const repositoryKeyValue = key.slice("repo:".length);
+      const entry: { repositoryKey: string; baseBranch?: string } = {
+        repositoryKey: repositoryKeyValue,
+      };
+      if (usesSingleRepository && baseBranch.trim()) entry.baseBranch = baseBranch.trim();
+      if (!usesSingleRepository) {
+        const existing = initialRepositories.find(
+          (repository) => repository.repositoryKey === repositoryKeyValue
+        );
+        if (existing?.baseBranch) entry.baseBranch = existing.baseBranch;
+      }
+      return entry;
+    });
 }

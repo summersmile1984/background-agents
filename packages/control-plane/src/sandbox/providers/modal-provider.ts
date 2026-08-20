@@ -30,11 +30,8 @@ interface StartModalImageBuildConfig {
   correlation?: CorrelationContext;
 }
 
-/** Modal extends the shared trigger contract with explicit SCM clone identity. */
-export interface ModalImageBuildTriggerConfig extends ImageBuildProviderTriggerConfig {
-  cloneHost?: string;
-  cloneUsername?: string;
-}
+/** Modal uses the shared trigger contract, including explicit SCM clone identity. */
+export type ModalImageBuildTriggerConfig = ImageBuildProviderTriggerConfig;
 
 export interface TerminateModalImageBuildConfig {
   buildId: string;
@@ -124,6 +121,7 @@ export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildPro
           mcpServers: config.mcpServers,
           sandboxSettings: config.sandboxSettings,
           repositories: config.repositories,
+          scmGitProxyBaseUrl: config.scmGitProxyBaseUrl,
         },
         config.correlation
       );
@@ -171,6 +169,7 @@ export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildPro
           mcpServers: config.mcpServers,
           sandboxSettings: config.sandboxSettings,
           repositories: config.repositories,
+          scmGitProxyBaseUrl: config.scmGitProxyBaseUrl,
         },
         config.correlation
       );
@@ -289,6 +288,7 @@ export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildPro
           cloneToken: config.cloneToken,
           ...(config.cloneHost ? { cloneHost: config.cloneHost } : {}),
           ...(config.cloneUsername ? { cloneUsername: config.cloneUsername } : {}),
+          ...(config.cloneBaseUrl ? { cloneBaseUrl: config.cloneBaseUrl } : {}),
           callbackUrl: config.callbackUrl,
           failureCallbackUrl: config.failureCallbackUrl,
           userEnvVars: config.userEnvVars,

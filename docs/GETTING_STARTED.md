@@ -944,6 +944,27 @@ curl -I "$(terraform output -raw web_app_url)"
 
 ---
 
+### Optional: add a self-hosted Gitea connection
+
+1. Add the exact Gitea `host[:port]` to `scm_allowed_hosts` in `terraform.tfvars`, then apply
+   Terraform. Do not put the PAT in Terraform.
+2. Upgrade Gitea to a security-supported version. For an Enterprise build that reports an older
+   community base, obtain written vendor confirmation of the required backports before adding that
+   exact version to `gitea_security_confirmed_versions`.
+3. In Open-Inspect, open **Settings → Source Control**. If the migration card appears, run bounded
+   batches until the preflight is clean. Unresolved active repositories must be repaired before a
+   second connection is allowed.
+4. Select **Add Gitea**, enter the base URL, dedicated service-account username, and a scoped PAT.
+   The control plane probes the instance before saving and encrypts the PAT in D1.
+5. Refresh the repository selector, create a Gitea-backed session, push a change, and open a pull
+   request. The sandbox receives only a short-lived Open-Inspect Git capability; the Gitea PAT stays
+   in the control plane.
+
+One session, environment, or automation may contain several repositories, but all must belong to the
+same source-control connection. Browser sign-in remains independent of Gitea service authority.
+
+---
+
 ## Step 10: Set Up CI/CD (Optional)
 
 Enable automatic deployments when you push to main by adding GitHub Secrets.

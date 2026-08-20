@@ -14,6 +14,7 @@ import {
   formatReadyDetails,
   parsePrimaryBuildSha,
   type ImageBuildsFeed,
+  repoImageBuildScopeIdFor,
 } from "@/lib/image-builds";
 import { supportsRepoImages } from "@/lib/sandbox-provider";
 import { ImageBuildStatus } from "./image-build-status";
@@ -46,23 +47,29 @@ export function ImagesSettings() {
   // Toggle state reads the persisted flags, not `units` — the units feed
   // resolves scopes through source control and can transiently drop a repo.
   const enabledRepos = new Set(
-    (data?.enabledRepos ?? []).map((repo) => `${repo.repoOwner}/${repo.repoName}`.toLowerCase())
+    (data?.enabledRepos ?? []).map((repo) =>
+      repo.repositoryKey
+        ? `repo:${repo.repositoryKey}`
+        : `${repo.repoOwner}/${repo.repoName}`.toLowerCase()
+    )
   );
 
   // Repo scope_ids are lowercase `owner/name` pairs.
-  const getLatestImage = (owner: string, name: string): ImageBuildRecordView | undefined => {
-    const key = `${owner}/${name}`.toLowerCase();
+  const getLatestImage = (repo: (typeof repos)[number]): ImageBuildRecordView | undefined => {
+    const key = repoImageBuildScopeIdFor(repo);
     return data?.images.find((img) => img.scope_kind === "repo" && img.scope_id === key);
   };
 
-  const handleToggle = async (owner: string, name: string, enabled: boolean) => {
-    const repoKey = `${owner}/${name}`.toLowerCase();
+  const handleToggle = async (repo: (typeof repos)[number], enabled: boolean) => {
+    const repoKey = repoImageBuildScopeIdFor(repo);
     setTogglingRepos((prev) => new Set(prev).add(repoKey));
     setError("");
 
     try {
       const res = await browserApiFetch(
-        `/api/image-builds/repo/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/toggle`,
+        repo.repositoryKey
+          ? `/api/image-builds/repository/${encodeURIComponent(repo.repositoryKey)}/toggle`
+          : `/api/image-builds/repo/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/toggle`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -87,14 +94,16 @@ export function ImagesSettings() {
     }
   };
 
-  const handleTrigger = async (owner: string, name: string) => {
-    const repoKey = `${owner}/${name}`.toLowerCase();
+  const handleTrigger = async (repo: (typeof repos)[number]) => {
+    const repoKey = repoImageBuildScopeIdFor(repo);
     setTriggeringRepos((prev) => new Set(prev).add(repoKey));
     setError("");
 
     try {
       const res = await browserApiFetch(
-        `/api/image-builds/repo/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/trigger`,
+        repo.repositoryKey
+          ? `/api/image-builds/repository/${encodeURIComponent(repo.repositoryKey)}/trigger`
+          : `/api/image-builds/repo/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/trigger`,
         { method: "POST" }
       );
 
@@ -137,11 +146,11 @@ export function ImagesSettings() {
 
         <div className="space-y-2">
           {repos.map((repo) => {
-            const repoKey = `${repo.owner}/${repo.name}`.toLowerCase();
+            const repoKey = repoImageBuildScopeIdFor(repo);
             const isEnabled = enabledRepos.has(repoKey);
             const isToggling = togglingRepos.has(repoKey);
             const isTriggering = triggeringRepos.has(repoKey);
-            const image = getLatestImage(repo.owner, repo.name);
+            const image = getLatestImage(repo);
 
             return (
               <div
@@ -151,7 +160,7 @@ export function ImagesSettings() {
                 <div className="flex items-center gap-3 min-w-0">
                   <Switch
                     checked={isEnabled}
-                    onCheckedChange={(checked) => handleToggle(repo.owner, repo.name, checked)}
+                    onCheckedChange={(checked) => handleToggle(repo, checked)}
                     disabled={isToggling}
                     aria-label={`Toggle pre-built images for ${repo.owner}/${repo.name}`}
                   />
@@ -178,7 +187,7 @@ export function ImagesSettings() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleTrigger(repo.owner, repo.name)}
+                    onClick={() => handleTrigger(repo)}
                     disabled={!isEnabled || isTriggering || image?.status === "building"}
                     title="Rebuild image"
                   >
@@ -192,7 +201,7 @@ export function ImagesSettings() {
 
         {repos.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            No repositories found. Install the GitHub App on repositories to get started.
+            No repositories found. Add or authorize a source-control connection to get started.
           </p>
         )}
       </div>

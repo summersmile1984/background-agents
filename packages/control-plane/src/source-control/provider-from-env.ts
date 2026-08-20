@@ -27,5 +27,15 @@ export function createSourceControlProviderFromEnv(env: Env): SourceControlProvi
           },
         }
       : {}),
+    ...(env.GITEA_BASE_URL && env.GITEA_ACCESS_TOKEN && env.GITEA_USERNAME
+      ? {
+          gitea: {
+            baseUrl: env.GITEA_BASE_URL,
+            accessToken: env.GITEA_ACCESS_TOKEN,
+            username: env.GITEA_USERNAME,
+            userAgent,
+          },
+        }
+      : {}),
   });
 }

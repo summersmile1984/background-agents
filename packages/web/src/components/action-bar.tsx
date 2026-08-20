@@ -12,7 +12,6 @@ import {
   ArchiveIcon,
   MoreIcon,
   LinkIcon,
-  GitHubIcon,
   ChevronUpIcon,
 } from "@/components/ui/icons";
 import { Badge } from "@/components/ui/badge";
@@ -131,8 +130,8 @@ export function ActionBar({
             {prLinks.length === 1 && (
               <DropdownMenuItem className="hidden md:flex" asChild>
                 <a href={prLinks[0].url} target="_blank" rel="noopener noreferrer">
-                  <GitHubIcon className="w-4 h-4" />
-                  View in GitHub
+                  <GitPrIcon className="w-4 h-4" />
+                  View PR
                 </a>
               </DropdownMenuItem>
             )}

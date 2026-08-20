@@ -175,6 +175,7 @@ export interface CreateSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   repositories?: SessionRepositoryInfo[];
+  scmGitProxyBaseUrl?: string;
 }
 
 export interface CreateSandboxResponse {
@@ -211,6 +212,7 @@ export interface RestoreSandboxRequest {
   mcpServers?: McpServerConfig[];
   sandboxSettings?: SandboxSettings;
   repositories?: SessionRepositoryInfo[];
+  scmGitProxyBaseUrl?: string;
 }
 
 export interface RestoreSandboxResponse {
@@ -252,10 +254,11 @@ export interface CreateImageBuildSandboxRequest {
   scopeId: string;
   buildId: string;
   /** Repositories in position order ([0] = primary), cloned at their base branches. */
-  repositories: Array<{ repoOwner: string; repoName: string; baseBranch: string }>;
+  repositories: SessionRepositoryInfo[];
   cloneToken?: string;
   cloneHost?: string;
   cloneUsername?: string;
+  cloneBaseUrl?: string;
   callbackUrl: string;
   failureCallbackUrl: string;
   userEnvVars?: Record<string, string>;
@@ -401,6 +404,7 @@ export class ModalClient {
           repositories: request.repositories?.length
             ? request.repositories.map(toRepositoryConfigPayload)
             : null,
+          scm_git_proxy_base_url: request.scmGitProxyBaseUrl ?? null,
         }),
       });
 
@@ -474,6 +478,7 @@ export class ModalClient {
           vnc_enabled: request.vncEnabled ?? false,
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
+          scm_git_proxy_base_url: request.scmGitProxyBaseUrl ?? null,
         }),
       });
 
@@ -661,6 +666,7 @@ export class ModalClient {
           clone_token: request.cloneToken,
           clone_host: request.cloneHost,
           clone_username: request.cloneUsername,
+          clone_base_url: request.cloneBaseUrl,
           callback_url: request.callbackUrl,
           failure_callback_url: request.failureCallbackUrl,
           user_env_vars: request.userEnvVars,

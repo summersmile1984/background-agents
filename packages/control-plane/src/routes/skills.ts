@@ -330,6 +330,8 @@ async function handleResolvePreview(
     repositories = (
       await environments.getRepositoriesForEnvironment(parsed.data.environmentId)
     ).map((repository) => ({
+      repositoryKey: repository.repository_id ?? undefined,
+      connectionId: repository.scm_connection_id ?? undefined,
       repoOwner: repository.repo_owner,
       repoName: repository.repo_name,
     }));

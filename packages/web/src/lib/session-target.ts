@@ -99,8 +99,10 @@ export function isSessionTargetLaunchable(target: SessionTarget | null): boolean
 export type SessionTargetRequestFields =
   | { repoOwner: null; repoName: null }
   | { repoOwner: string; repoName: string; branch?: string }
+  | { repositoryKey: string; branch?: string }
   | { environmentId: string }
-  | { repositories: Array<{ repoOwner: string; repoName: string }> };
+  | { repositories: Array<{ repoOwner: string; repoName: string }> }
+  | { repositoryKeys: string[] };
 
 export function buildSessionTargetRequestFields(
   target: SessionTarget,

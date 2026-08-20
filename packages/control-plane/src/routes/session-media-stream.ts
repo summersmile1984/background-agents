@@ -13,7 +13,7 @@ import { getSessionArtifactFromRuntime } from "./session-media-artifacts";
 import {
   defineRoutes,
   error,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   parsePattern,
   type Route,
 } from "./shared";
@@ -141,7 +141,7 @@ async function handleMediaGet(
     : createStoredObjectResponse(body, metadata, contentType);
 }
 
-export const sessionMediaStreamRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const sessionMediaStreamRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   sessionRoute({
     method: "GET",
     pattern: parsePattern("/sessions/:id/media/:artifactId"),

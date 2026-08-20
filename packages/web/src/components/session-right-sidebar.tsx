@@ -25,6 +25,7 @@ import type { DiffSelection } from "@/lib/session-diffs";
 import { deriveSessionDiffView } from "@/lib/session-diffs";
 import { DiffRetryNotice } from "@/components/diff-retry-notice";
 import { ManagedSkillsSection } from "./sidebar/managed-skills-section";
+import { useRepos } from "@/hooks/use-repos";
 
 interface SessionRightSidebarProps {
   isOpen?: boolean;
@@ -61,6 +62,7 @@ export function SessionRightSidebarContent({
   onOpenDiff,
 }: SessionRightSidebarContentProps) {
   const tasks = useMemo(() => extractLatestTasks(events), [events]);
+  const { repos } = useRepos();
   const warnings = useMemo(
     () =>
       events.filter(
@@ -124,6 +126,7 @@ export function SessionRightSidebarContent({
           warnings={warnings}
           parentSessionId={sessionState.parentSessionId}
           totalCost={sessionState.totalCost}
+          repositoryCatalog={repos}
         />
       </div>
 

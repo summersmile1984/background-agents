@@ -177,6 +177,18 @@ variable "google_client_secret" {
 # GitHub App Credentials (for Modal sandbox)
 # =============================================================================
 
+variable "scm_allowed_hosts" {
+  description = "Comma-separated host[:port] allowlist for self-hosted source-control connections (for example gitea.example.com). Empty disables self-hosted connection creation."
+  type        = string
+  default     = ""
+}
+
+variable "gitea_security_confirmed_versions" {
+  description = "Comma-separated exact Gitea Enterprise versions whose vendor has confirmed backports for the required upstream security fixes. Do not set without operator evidence."
+  type        = string
+  default     = ""
+}
+
 variable "github_app_id" {
   description = "GitHub App ID"
   type        = string

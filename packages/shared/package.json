@@ -114,6 +114,10 @@
       "import": "./dist/types/repository-catalog.js",
       "types": "./dist/types/repository-catalog.d.ts"
     },
+    "./types/source-control": {
+      "import": "./dist/types/source-control.js",
+      "types": "./dist/types/source-control.d.ts"
+    },
     "./types/automations": {
       "import": "./dist/types/automations.js",
       "types": "./dist/types/automations.d.ts"

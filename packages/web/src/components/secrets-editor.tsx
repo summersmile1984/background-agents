@@ -109,7 +109,8 @@ function resolveScopePolicy(
   scope: SecretsScope,
   owner: string | undefined,
   name: string | undefined,
-  environmentId: string | undefined
+  environmentId: string | undefined,
+  repositoryKey?: string
 ): SecretsScopePolicy {
   switch (scope) {
     case "global":
@@ -136,8 +137,10 @@ function resolveScopePolicy(
       const repoPath =
         owner && name ? encodeRepositoryPathSegments({ repoOwner: owner, repoName: name }) : "";
       return {
-        apiBase: `/api/repos/${repoPath}/secrets`,
-        ready: Boolean(owner && name),
+        apiBase: repositoryKey
+          ? `/api/repos/${encodeURIComponent(repositoryKey)}/secrets`
+          : `/api/repos/${repoPath}/secrets`,
+        ready: Boolean(repositoryKey || (owner && name)),
         description: `Values are never shown after save. Secrets apply to ${repoLabel || "the selected repo"}.`,
         emptyStateText: "No secrets set for this repo.",
         notReadyText: "Select a repository to manage secrets.",
@@ -151,6 +154,7 @@ export function SecretsEditor({
   owner,
   name,
   environmentId,
+  repositoryKey,
   disabled = false,
   scope = "repo",
 }: {
@@ -158,6 +162,7 @@ export function SecretsEditor({
   name?: string;
   /** Required for scope "environment". */
   environmentId?: string;
+  repositoryKey?: string;
   disabled?: boolean;
   scope?: SecretsScope;
 }) {
@@ -166,7 +171,7 @@ export function SecretsEditor({
   const [error, setError] = useState("");
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
-  const scopePolicy = resolveScopePolicy(scope, owner, name, environmentId);
+  const scopePolicy = resolveScopePolicy(scope, owner, name, environmentId, repositoryKey);
   const { apiBase, ready } = scopePolicy;
 
   const {

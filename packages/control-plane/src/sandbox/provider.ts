@@ -28,12 +28,15 @@ export interface ImageBuildProviderTriggerConfig {
   /** Build scope id; used only for sandbox naming/labels. */
   scopeId: string;
   /** Repositories in position order ([0] = primary), cloned at their base branches. */
-  repositories: Array<{ repoOwner: string; repoName: string; baseBranch: string }>;
+  repositories: SessionRepositoryInfo[];
   callbackUrl: string;
   failureCallbackUrl: string;
   callbackToken: string;
   userEnvVars?: Record<string, string>;
   cloneToken?: string;
+  cloneHost?: string;
+  cloneUsername?: string;
+  cloneBaseUrl?: string;
   buildExecutionTimeoutSeconds: number;
   /**
    * Provider-session lifetime in seconds, including deferred finalization
@@ -70,6 +73,9 @@ export interface SandboxProviderCapabilities {
  * toRepositoryConfigPayload.
  */
 export interface SessionRepositoryInfo {
+  /** Stable identity used in server-side Git proxy paths. */
+  repositoryKey?: string | null;
+  connectionId?: string | null;
   repoOwner: string;
   repoName: string;
   /** Base branch to clone (resolved at session create; never null). */
@@ -143,6 +149,8 @@ export interface CreateSandboxConfig {
    * (pull-request-service) and travel in per-repo push specs.
    */
   repositories?: SessionRepositoryInfo[];
+  /** Credential-free, session-authorized smart-HTTP proxy base. */
+  scmGitProxyBaseUrl?: string;
 }
 
 /** Complete browser-desktop access credential returned by sandbox providers. */
@@ -227,6 +235,7 @@ export interface RestoreConfig {
   sandboxSettings?: SandboxSettings;
   /** Multi-repo member list — see CreateSandboxConfig. */
   repositories?: SessionRepositoryInfo[];
+  scmGitProxyBaseUrl?: string;
 }
 
 /**

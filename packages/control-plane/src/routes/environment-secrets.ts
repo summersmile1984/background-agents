@@ -16,7 +16,7 @@ import { createLogger } from "../logger";
 import {
   type Route,
   type RequestContext,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   parsePattern,
   json,
@@ -298,7 +298,7 @@ async function handleImportEnvironmentSecrets(
   }
 }
 
-export const environmentSecretsRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const environmentSecretsRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   {
     method: "GET",
     pattern: parsePattern("/environments/:id/secrets"),

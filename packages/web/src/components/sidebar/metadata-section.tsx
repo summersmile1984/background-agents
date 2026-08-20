@@ -6,7 +6,8 @@ import { formatModelName, truncateBranch, copyToClipboard } from "@/lib/format";
 import { formatSessionCost } from "@/lib/session-cost";
 import { formatRelativeTime } from "@/lib/time";
 import { getSafeExternalUrl } from "@/lib/urls";
-import { getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
+import { getRepositoryBranchUrl, getScmBranchUrl, getScmRepoUrl } from "@/lib/scm";
+import type { Repo } from "@/hooks/use-repos";
 import { NO_REPOSITORY_LABEL } from "@/lib/repo-label";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import type { SessionRepositoryState } from "@open-inspect/shared/types/repositories";
@@ -52,6 +53,7 @@ interface MetadataSectionProps {
   warnings?: WarningEvent[];
   parentSessionId?: string | null;
   totalCost?: number;
+  repositoryCatalog?: Repo[];
 }
 
 /**
@@ -108,6 +110,7 @@ export function MetadataSection({
   warnings = [],
   parentSessionId,
   totalCost,
+  repositoryCatalog = [],
 }: MetadataSectionProps) {
   const [copied, setCopied] = useState(false);
 
@@ -125,8 +128,21 @@ export function MetadataSection({
     prArtifacts.length === 0
       ? getSafeExternalUrl(manualPrArtifact?.metadata?.createPrUrl || manualPrArtifact?.url)
       : null;
-  const branchUrl =
-    branchName && repoOwner && repoName ? getScmBranchUrl(repoOwner, repoName, branchName) : null;
+  const primaryState = repositories?.[0];
+  const primaryCatalogRepository = repositoryCatalog.find(
+    (repository) =>
+      (primaryState?.repositoryKey && repository.repositoryKey === primaryState.repositoryKey) ||
+      (!primaryState?.repositoryKey &&
+        repository.owner.toLowerCase() === repoOwner?.toLowerCase() &&
+        repository.name.toLowerCase() === repoName?.toLowerCase())
+  );
+  const branchUrl = branchName
+    ? primaryCatalogRepository
+      ? getRepositoryBranchUrl(primaryCatalogRepository, branchName)
+      : repoOwner && repoName
+        ? getScmBranchUrl(repoOwner, repoName, branchName)
+        : null
+    : null;
   const hasRepositoryMetadata = repoOwner !== undefined && repoName !== undefined;
 
   const handleCopyBranch = async () => {
@@ -262,7 +278,11 @@ export function MetadataSection({
               <BranchIcon className="w-4 h-4" />
               {repoOwner && repoName ? (
                 <a
-                  href={getScmBranchUrl(repoOwner, repoName, baseBranch)}
+                  href={
+                    (primaryCatalogRepository &&
+                      getRepositoryBranchUrl(primaryCatalogRepository, baseBranch)) ||
+                    getScmBranchUrl(repoOwner, repoName, baseBranch)
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-accent truncate max-w-[180px] hover:underline"
@@ -318,7 +338,7 @@ export function MetadataSection({
               <RepoIcon className="w-4 h-4 text-muted-foreground" />
               {repoOwner && repoName ? (
                 <a
-                  href={getScmRepoUrl(repoOwner, repoName)}
+                  href={primaryCatalogRepository?.webUrl ?? getScmRepoUrl(repoOwner, repoName)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-accent hover:underline"
@@ -341,20 +361,29 @@ export function MetadataSection({
             {showSyncButton && sessionId && <PullRequestSyncButton sessionId={sessionId} />}
           </div>
           {repositories.map((repo, index) => {
+            const catalogRepository = repositoryCatalog.find(
+              (candidate) =>
+                (repo.repositoryKey && candidate.repositoryKey === repo.repositoryKey) ||
+                (!repo.repositoryKey &&
+                  candidate.owner.toLowerCase() === repo.repoOwner.toLowerCase() &&
+                  candidate.name.toLowerCase() === repo.repoName.toLowerCase())
+            );
             const repoPrArtifacts = listPrArtifactsForRepo(artifacts, repo, index === 0);
             // The scalar mirror is only a fallback for sessions whose PR
             // artifacts have not synced yet.
             const repoFallbackPrUrl =
               repoPrArtifacts.length === 0 ? getSafeExternalUrl(repo.prUrl || undefined) : null;
             const repoBranchUrl = repo.branchName
-              ? getScmBranchUrl(repo.repoOwner, repo.repoName, repo.branchName)
+              ? catalogRepository
+                ? getRepositoryBranchUrl(catalogRepository, repo.branchName)
+                : getScmBranchUrl(repo.repoOwner, repo.repoName, repo.branchName)
               : null;
             return (
               <div key={`${repo.repoOwner}/${repo.repoName}`} className="space-y-1">
                 <div className="flex items-center gap-2 text-sm">
                   <RepoIcon className="w-4 h-4 text-muted-foreground" />
                   <a
-                    href={getScmRepoUrl(repo.repoOwner, repo.repoName)}
+                    href={catalogRepository?.webUrl ?? getScmRepoUrl(repo.repoOwner, repo.repoName)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-accent hover:underline truncate max-w-[170px]"

@@ -24,7 +24,7 @@ import type { Env } from "../types";
 import {
   defineRoutes,
   error,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   parsePattern,
   type Route,
 } from "./shared";
@@ -172,7 +172,7 @@ async function handleSessionPrompt(
   return response;
 }
 
-export const sessionPromptRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const sessionPromptRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   sessionRoute({
     method: "POST",
     pattern: parsePattern("/sessions/:id/prompt"),

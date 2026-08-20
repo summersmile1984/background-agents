@@ -77,6 +77,8 @@ export interface SessionLifecycleHandler {
 }
 
 const repositoryRefSchema = z.object({
+  repositoryKey: z.string().min(1).optional(),
+  connectionId: z.string().min(1).optional(),
   repoOwner: z.string(),
   repoName: z.string(),
   repoId: z.number(),
@@ -102,6 +104,8 @@ const initRequestSchema = z.object({
   repoOwner: z.string().nullable(),
   repoName: z.string().nullable(),
   repoId: z.number().nullable().optional(),
+  repositoryId: z.string().nullable().optional(),
+  scmConnectionId: z.string().nullable().optional(),
   defaultBranch: z.string().nullable().optional(),
   branch: z.string().nullable().optional(),
   /**
@@ -193,6 +197,18 @@ export function createSessionLifecycleHandler(
           { status: 400 }
         );
       }
+      if (!hasRepoOwner && (body.repositoryId || body.scmConnectionId)) {
+        return Response.json(
+          { error: "No-repository sessions must not include source-control identity" },
+          { status: 400 }
+        );
+      }
+      if ((body.repositoryId == null) !== (body.scmConnectionId == null)) {
+        return Response.json(
+          { error: "repositoryId and scmConnectionId must be provided together" },
+          { status: 400 }
+        );
+      }
 
       let encryptedToken = body.scmTokenEncrypted ?? null;
       if (body.scmToken && deps.tokenEncryptionKey) {
@@ -228,6 +244,8 @@ export function createSessionLifecycleHandler(
           primary.repoOwner !== repoOwner ||
           primary.repoName !== repoName ||
           primary.repoId !== body.repoId ||
+          (primary.repositoryKey ?? null) !== (body.repositoryId ?? null) ||
+          (primary.connectionId ?? null) !== (body.scmConnectionId ?? null) ||
           primary.baseBranch !== baseBranch
         ) {
           return Response.json(
@@ -251,6 +269,8 @@ export function createSessionLifecycleHandler(
         repoOwner,
         repoName,
         repoId: hasRepoOwner ? body.repoId : null,
+        repositoryId: hasRepoOwner ? body.repositoryId : null,
+        scmConnectionId: hasRepoOwner ? body.scmConnectionId : null,
         baseBranch,
         model,
         reasoningEffort,
@@ -275,11 +295,22 @@ export function createSessionLifecycleHandler(
         repositories.length > 0
           ? repositories
           : repoOwner !== null && repoName !== null && body.repoId != null && baseBranch !== null
-            ? [{ repoOwner, repoName, repoId: body.repoId, baseBranch }]
+            ? [
+                {
+                  repositoryKey: body.repositoryId ?? undefined,
+                  connectionId: body.scmConnectionId ?? undefined,
+                  repoOwner,
+                  repoName,
+                  repoId: body.repoId,
+                  baseBranch,
+                },
+              ]
             : [];
       deps.sessionCoreRepository.replaceSessionRepositories(
         memberRepositories.map((repo, position) => ({
           position,
+          ...(repo.repositoryKey ? { repositoryId: repo.repositoryKey } : {}),
+          ...(repo.connectionId ? { scmConnectionId: repo.connectionId } : {}),
           repoOwner: repo.repoOwner,
           repoName: repo.repoName,
           repoId: repo.repoId,
@@ -329,6 +360,8 @@ export function createSessionLifecycleHandler(
         title: session.title,
         repoOwner: session.repo_owner,
         repoName: session.repo_name,
+        ...(session.scm_connection_id ? { scmConnectionId: session.scm_connection_id } : {}),
+        ...(session.repository_id ? { repositoryId: session.repository_id } : {}),
         baseBranch: session.base_branch,
         branchName: session.branch_name,
         baseSha: session.base_sha,

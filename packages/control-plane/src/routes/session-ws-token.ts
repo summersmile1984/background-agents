@@ -4,7 +4,7 @@ import type { Env } from "../types";
 import {
   defineRoutes,
   error,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   parseJsonBody,
   parsePattern,
   type Route,
@@ -50,7 +50,7 @@ async function handleSessionWsToken(
   );
 }
 
-export const sessionWsTokenRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const sessionWsTokenRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   sessionRoute({
     method: "POST",
     pattern: parsePattern("/sessions/:id/ws-token"),

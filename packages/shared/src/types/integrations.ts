@@ -11,7 +11,10 @@ export interface IntegrationEntry<
   TGlobalDefaults extends object = TRepo,
 > {
   global: {
+    /** Legacy default-connection repository paths retained during migration. */
     enabledRepos?: string[];
+    /** Stable repository allowlist used by multi-connection clients. */
+    enabledRepositoryIds?: string[];
     defaults?: TGlobalDefaults;
   };
   repo: TRepo;
@@ -335,7 +338,7 @@ export function normalizeRoutingRules(rules: SlackRoutingRule[] | undefined): Sl
     const isEnvironment = rule?.targetType === "environment";
     const target = isEnvironment ? rawTarget : rawTarget.toLowerCase();
     if (!keyword || !target) continue;
-    const dedupeKey = `${keyword} ${isEnvironment ? "environment" : "repository"} ${target}`;
+    const dedupeKey = `${keyword}\0${isEnvironment ? "environment" : "repository"}\0${target}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     normalized.push(
@@ -408,6 +411,9 @@ export interface McpServerConfig {
   url?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  /** Stable repository identities for connection-aware scope matching. */
+  repositoryIds?: string[] | null;
+  /** Legacy owner/name scopes retained during the expand migration. */
   repoScopes?: string[] | null;
   enabled: boolean;
 }
@@ -416,6 +422,7 @@ export const DEFAULT_MCP_SERVER_ENABLED = true;
 
 const mcpServerCommonFields = {
   name: z.string().trim().min(1),
+  repositoryIds: z.array(z.string().trim().min(1)).nullable().optional(),
   repoScopes: z.array(z.string()).nullable().optional(),
   enabled: z.boolean().optional(),
 };
@@ -475,6 +482,9 @@ export interface McpServerMetadata {
   url?: string;
   hasEnv: boolean;
   hasHeaders: boolean;
+  /** Stable repository identities for connection-aware scope matching. */
+  repositoryIds?: string[] | null;
+  /** Legacy owner/name scopes retained during the expand migration. */
   repoScopes?: string[] | null;
   enabled: boolean;
 }

@@ -422,16 +422,26 @@ All secrets are configured via Terraform. Required secrets include:
 - `GITHUB_APP_INSTALLATION_ID` - Single installation for all users
 - `REPO_SECRETS_ENCRYPTION_KEY` - AES-GCM key for encrypting repo secrets in D1
 
-Optional variables:
+Optional source-control variables:
 
-- `SCM_PROVIDER` - Source control provider for this deployment (`github`, `bitbucket`, or `gitlab`,
-  default: `github`). `bitbucket` returns explicit `501 Not Implemented` responses until
-  implemented.
+- `SCM_PROVIDER` - Compatibility bootstrap provider (`github`, `gitea`, `gitlab`, or `bitbucket`,
+  default: `github`). New sessions pin an explicit connection; this value is not a runtime
+  connection selector. `bitbucket` remains unimplemented.
 - `GITLAB_ACCESS_TOKEN` - Personal Access Token for GitLab API access (required when
   `SCM_PROVIDER=gitlab`). Must have `read_api` scope for reads and `api` scope to create merge
   requests and push branches.
 - `GITLAB_NAMESPACE` - GitLab group namespace to scope repository listing (optional). When set,
   `GET /repos` lists projects within the group instead of all projects the token has access to.
+- `SCM_ALLOWED_HOSTS` - Comma-separated exact `host[:port]` allowlist for self-hosted SCM
+  connections. An empty value prevents creating a self-hosted connection.
+- `GITEA_SECURITY_CONFIRMED_VERSIONS` - Comma-separated exact Gitea Enterprise versions for which
+  the operator has vendor evidence that required upstream security fixes were backported. This is a
+  production safety gate, not a compatibility override.
+
+Gitea PATs are entered after deployment in **Settings → Source Control**. They are encrypted in D1
+and never returned to the browser or sandbox. Before a second connection can be enabled, the same
+page runs a checkpointed migration that assigns stable repository IDs to existing GitHub records;
+the server independently rejects connection creation until its preflight is clean.
 
 See
 [terraform/environments/production/terraform.tfvars.example](../../terraform/environments/production/terraform.tfvars.example)

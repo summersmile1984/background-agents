@@ -41,6 +41,7 @@ import { generateWebhookApiKey, hashApiKey, encryptSentrySecret } from "../auth/
 import { createLogger } from "../logger";
 import {
   automationRepositoriesInputSchema,
+  automationRepositoryKeysInputSchema,
   MAX_AUTOMATION_REPOSITORIES,
 } from "@open-inspect/shared/types/automations";
 import { agentHarnessSchema } from "@open-inspect/shared/types/agent-harness";
@@ -48,7 +49,7 @@ import { isEnvironmentId } from "@open-inspect/shared/types/environments";
 import {
   type Route,
   type RequestContext,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   parsePattern,
   json,
@@ -59,6 +60,7 @@ import {
 import type { Env } from "../types";
 import type { SqlDatabase, SqlStatement } from "../db/sql-database";
 import { z } from "zod";
+import { resolveSessionRepositoryKeys } from "../repos/resolve";
 
 const logger = createLogger("router:automations");
 
@@ -126,7 +128,11 @@ interface NormalizedRepositoryInput {
 
 type RepositorySelectionRequest =
   | { kind: "unchanged" }
-  | { kind: "replace"; repositories: NormalizedRepositoryInput[] };
+  | {
+      kind: "replace";
+      repositories: NormalizedRepositoryInput[];
+      repositoryKeys: Array<{ repositoryKey: string; baseBranch?: string | null }>;
+    };
 
 /**
  * Thrown by {@link parseRepositorySelection} and {@link parseEnvironmentBinding}
@@ -147,15 +153,32 @@ class TargetSelectionError extends Error {
  *
  * @throws TargetSelectionError when the `repositories` payload is invalid.
  */
-function parseRepositorySelection(body: { repositories?: unknown }): RepositorySelectionRequest {
-  if (body.repositories === undefined) return { kind: "unchanged" };
+function parseRepositorySelection(body: {
+  repositories?: unknown;
+  repositoryKeys?: unknown;
+}): RepositorySelectionRequest {
+  if (body.repositories !== undefined && body.repositoryKeys !== undefined) {
+    throw new TargetSelectionError("repositories and repositoryKeys are mutually exclusive");
+  }
+  if (body.repositories === undefined && body.repositoryKeys === undefined) {
+    return { kind: "unchanged" };
+  }
+  if (body.repositoryKeys !== undefined) {
+    const parsed = automationRepositoryKeysInputSchema.safeParse(body.repositoryKeys);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue?.path.length ? `[${String(issue.path[0])}]` : "";
+      throw new TargetSelectionError(`repositoryKeys${path}: ${issue?.message ?? "invalid"}`);
+    }
+    return { kind: "replace", repositories: [], repositoryKeys: parsed.data };
+  }
   const parsed = automationRepositoriesInputSchema.safeParse(body.repositories);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const path = issue?.path.length ? `[${String(issue.path[0])}]` : "";
     throw new TargetSelectionError(`repositories${path}: ${issue?.message ?? "invalid"}`);
   }
-  return { kind: "replace", repositories: parsed.data };
+  return { kind: "replace", repositories: parsed.data, repositoryKeys: [] };
 }
 
 /**
@@ -244,7 +267,7 @@ async function resolveRepositorySelection(
   env: Env,
   repositories: NormalizedRepositoryInput[],
   ctx: RequestContext
-): Promise<AutomationRepositoryInsert[]> {
+): Promise<{ connectionId: null; repositories: AutomationRepositoryInsert[] }> {
   const settled = await Promise.allSettled(
     repositories.map((repository) =>
       resolveRepoOrError(env, repository.repoOwner, repository.repoName, ctx, logger)
@@ -255,15 +278,45 @@ async function resolveRepositorySelection(
     return result.value;
   });
 
-  return repositories.map((repository, index) => {
-    const access = resolved[index];
-    return {
+  return {
+    connectionId: null,
+    repositories: repositories.map((repository, index) => {
+      const access = resolved[index];
+      return {
+        repo_owner: repository.repoOwner,
+        repo_name: repository.repoName,
+        repo_id: access.repoId,
+        base_branch: repository.baseBranch ?? access.defaultBranch,
+      };
+    }),
+  };
+}
+
+async function resolveStableRepositorySelection(
+  env: Env,
+  repositories: Array<{ repositoryKey: string; baseBranch?: string | null }>,
+  ctx: RequestContext
+): Promise<{ connectionId: string | null; repositories: AutomationRepositoryInsert[] }> {
+  if (repositories.length === 0) return { connectionId: null, repositories: [] };
+  const resolved = await resolveSessionRepositoryKeys(
+    env,
+    repositories.map((repository) => repository.repositoryKey),
+    ctx,
+    logger,
+    null,
+    repositories.map((repository) => repository.baseBranch)
+  );
+  return {
+    connectionId: resolved.connectionId,
+    repositories: resolved.repositories.map((repository) => ({
       repo_owner: repository.repoOwner,
       repo_name: repository.repoName,
-      repo_id: access.repoId,
-      base_branch: repository.baseBranch ?? access.defaultBranch,
-    };
-  });
+      repo_id: repository.repoId,
+      base_branch: repository.baseBranch,
+      scm_connection_id: resolved.connectionId,
+      repository_id: repository.repositoryKey ?? null,
+    })),
+  };
 }
 
 /**
@@ -472,6 +525,7 @@ async function handleCreateAutomation(
     throw e;
   }
   const requestedRepositories = selection.kind === "replace" ? selection.repositories : [];
+  const requestedRepositoryKeys = selection.kind === "replace" ? selection.repositoryKeys : [];
 
   // Validate trigger type
   const triggerType: AutomationTriggerType = body.triggerType || "schedule";
@@ -491,7 +545,11 @@ async function handleCreateAutomation(
     const environmentSelection = parseEnvironmentSelection(body);
     requestedEnvironmentIds =
       environmentSelection.kind === "replace" ? environmentSelection.environmentIds : [];
-    validateTargetCounts(triggerType, requestedRepositories.length, requestedEnvironmentIds.length);
+    validateTargetCounts(
+      triggerType,
+      requestedRepositories.length + requestedRepositoryKeys.length,
+      requestedEnvironmentIds.length
+    );
     await resolveEnvironmentSelection(ctx.db, requestedEnvironmentIds);
   } catch (e) {
     if (e instanceof TargetSelectionError) return error(e.message, 400);
@@ -559,7 +617,11 @@ async function handleCreateAutomation(
     return error("Invalid agent harness", 400);
   }
 
-  const newRepositories = await resolveRepositorySelection(env, requestedRepositories, ctx);
+  const resolvedSelection =
+    requestedRepositoryKeys.length > 0
+      ? await resolveStableRepositorySelection(env, requestedRepositoryKeys, ctx)
+      : await resolveRepositorySelection(env, requestedRepositories, ctx);
+  const newRepositories = resolvedSelection.repositories;
 
   // Compute next run (only for schedule triggers)
   const nextRunAt = isSchedule
@@ -620,6 +682,7 @@ async function handleCreateAutomation(
     event_type: body.eventType ?? null,
     trigger_config: body.triggerConfig ? JSON.stringify(body.triggerConfig) : null,
     trigger_auth_data: triggerAuthData,
+    scm_connection_id: resolvedSelection.connectionId,
   };
 
   // Persist the automation, its repository selection, and (for slack_event)
@@ -834,7 +897,7 @@ async function handleUpdateAutomation(
     try {
       const finalRepositoryCount =
         selection.kind === "replace"
-          ? selection.repositories.length
+          ? selection.repositories.length + selection.repositoryKeys.length
           : (await store.getRepositoriesForAutomation(id)).length;
       const finalEnvironmentCount =
         replacementEnvironmentIds !== null
@@ -853,7 +916,12 @@ async function handleUpdateAutomation(
       throw e;
     }
     if (selection.kind === "replace") {
-      replacementRepositories = await resolveRepositorySelection(env, selection.repositories, ctx);
+      const resolvedSelection =
+        selection.repositoryKeys.length > 0
+          ? await resolveStableRepositorySelection(env, selection.repositoryKeys, ctx)
+          : await resolveRepositorySelection(env, selection.repositories, ctx);
+      replacementRepositories = resolvedSelection.repositories;
+      updateFields.scm_connection_id = resolvedSelection.connectionId;
     }
   }
 
@@ -1291,7 +1359,7 @@ async function handleGetSlackChannels(
 
 // ─── Route exports ───────────────────────────────────────────────────────────
 
-export const automationRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const automationRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
   {
     method: "GET",
     pattern: parsePattern("/integration-settings/slack/watched-channels"),

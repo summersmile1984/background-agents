@@ -75,6 +75,35 @@ export type {
 } from "./repositories";
 
 export {
+  SOURCE_CONTROL_PROVIDERS,
+  SCM_CONNECTION_AUTH_MODES,
+  SCM_CREDENTIAL_SOURCES,
+  SCM_CONNECTION_HEALTH,
+  REPOSITORY_RESOLUTION_STATUSES,
+  EMPTY_SOURCE_CONTROL_CAPABILITIES,
+  sourceControlProviderNameSchema,
+  scmConnectionAuthModeSchema,
+  scmCredentialSourceSchema,
+  scmConnectionHealthSchema,
+  sourceControlCapabilitiesSchema,
+  sourceControlConnectionSummarySchema,
+  repositoryResolutionStatusSchema,
+  sourceControlRepositoryIdentitySchema,
+  sourceControlRepositoryCatalogItemSchema,
+} from "./source-control";
+export type {
+  SourceControlProviderName,
+  ScmConnectionAuthMode,
+  ScmCredentialSource,
+  ScmConnectionHealth,
+  SourceControlCapabilities,
+  SourceControlConnectionSummary,
+  RepositoryResolutionStatus,
+  SourceControlRepositoryIdentity,
+  SourceControlRepositoryCatalogItem,
+} from "./source-control";
+
+export {
   installationRepositorySchema,
   repoMetadataSchema,
   enrichedRepositorySchema,

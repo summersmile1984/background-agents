@@ -4,6 +4,7 @@ import { RepositoryMultiSelect } from "@/components/repository-multi-select";
 import { Combobox } from "@/components/ui/combobox";
 import { BranchIcon, ChevronDownIcon, RepoIcon } from "@/components/ui/icons";
 import type { SessionTargetPickerProps } from "@/hooks/use-session-target-picker";
+import { repoSelectionValue } from "@/lib/repository-selection";
 
 /**
  * The new-session target controls: the unified environment/repository
@@ -62,7 +63,12 @@ export function SessionTargetPicker({
           triggerLabel={
             sessionTarget.repoFullNames.length === 0
               ? "Choose repositories"
-              : sessionTarget.repoFullNames.join(", ")
+              : sessionTarget.repoFullNames
+                  .map(
+                    (value) =>
+                      repos.find((repo) => repoSelectionValue(repo) === value)?.fullName ?? value
+                  )
+                  .join(", ")
           }
           triggerClassName="max-w-[16rem] border-0 bg-transparent px-0 py-0 text-sm text-muted-foreground hover:text-foreground"
         />

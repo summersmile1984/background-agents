@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSourceControlProvider } from "./index";
 import { GitHubSourceControlProvider } from "./github-provider";
 import { GitLabSourceControlProvider } from "./gitlab-provider";
+import { GiteaSourceControlProvider } from "./gitea-provider";
 import { SourceControlProviderError } from "../errors";
 
 describe("createSourceControlProvider", () => {
@@ -16,6 +17,24 @@ describe("createSourceControlProvider", () => {
       gitlab: { accessToken: "glpat-test" },
     });
     expect(provider).toBeInstanceOf(GitLabSourceControlProvider);
+  });
+
+  it("creates a self-hosted Gitea provider when config is provided", () => {
+    const provider = createSourceControlProvider({
+      provider: "gitea",
+      gitea: {
+        baseUrl: "https://gitea.example.com/root",
+        accessToken: "gitea-token",
+        username: "agent-bot",
+      },
+    });
+    expect(provider).toBeInstanceOf(GiteaSourceControlProvider);
+  });
+
+  it("throws for gitea without configuration", () => {
+    expect(() => createSourceControlProvider({ provider: "gitea" })).toThrow(
+      "SCM provider 'gitea' requires gitea configuration."
+    );
   });
 
   it("throws for gitlab without configuration", () => {

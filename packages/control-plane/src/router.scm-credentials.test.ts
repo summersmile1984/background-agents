@@ -210,7 +210,7 @@ describe("SCM credentials router provider gate", () => {
     expect(new URL(fetch.mock.calls[0][0].url).pathname).toBe("/internal/verify-sandbox-token");
   });
 
-  it("continues blocking unrelated GitLab session routes", async () => {
+  it("allows GitLab deployments to reach provider-neutral PR routes", async () => {
     const { env, fetch } = createEnv();
 
     const response = await handleRequest(
@@ -222,10 +222,7 @@ describe("SCM credentials router provider gate", () => {
       TEST_BACKGROUND_TASK_CONTEXT
     );
 
-    expect(response.status).toBe(501);
-    await expect(response.json()).resolves.toEqual({
-      error: "SCM provider 'gitlab' is not implemented in this deployment.",
-    });
+    expect(response.status).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
   });
 

@@ -507,8 +507,16 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
     const envVars = buildImageBuildEnvVars({
       sandboxId,
       repositories: config.repositories,
-      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+      scmIdentity:
+        config.cloneHost && config.cloneUsername
+          ? {
+              host: config.cloneHost,
+              cloneUsername: config.cloneUsername,
+              secretHosts: [config.cloneHost],
+            }
+          : scmCloneIdentity(this.providerConfig.scmProvider),
       cloneToken: config.cloneToken,
+      cloneBaseUrl: config.cloneBaseUrl,
       baseEnvVars,
     });
 

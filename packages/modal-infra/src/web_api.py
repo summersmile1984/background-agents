@@ -50,6 +50,8 @@ class SnapshotBuildSandboxRequest(_ModalRequestModel):
 
 
 class BuildRepositoryRequest(_ModalRequestModel):
+    repository_key: str | None = None
+    connection_id: str | None = None
     repo_owner: NonEmptyString
     repo_name: NonEmptyString
     branch: NonEmptyString
@@ -66,6 +68,7 @@ class CreateBuildSandboxRequest(_ModalRequestModel):
     clone_token: str | None = None
     clone_host: str | None = None
     clone_username: str | None = None
+    clone_base_url: str | None = None
     user_env_vars: dict[str, str] | None = None
     build_execution_timeout_seconds: int | None = None
     provider_session_timeout_seconds: int | None = None
@@ -287,6 +290,7 @@ async def api_create_sandbox(
             session_config=session_config,
             control_plane_url=control_plane_url,
             sandbox_auth_token=request.get("sandbox_auth_token"),
+            scm_git_proxy_base_url=request.get("scm_git_proxy_base_url") or None,
             user_env_vars=request.get("user_env_vars") or None,
             repo_image_id=repo_image_id,
             repo_image_sha=request.get("repo_image_sha") or None,
@@ -590,7 +594,12 @@ async def api_restore_sandbox(
             }
 
         manager = SandboxManager()
-        clone_token = resolve_clone_token() if repo_owner and repo_name else None
+        scm_git_proxy_base_url = request.get("scm_git_proxy_base_url") or None
+        clone_token = (
+            resolve_clone_token()
+            if repo_owner and repo_name and not scm_git_proxy_base_url
+            else None
+        )
 
         code_server_enabled = bool(request.get("code_server_enabled", False))
         vnc_enabled = bool(request.get("vnc_enabled", DEFAULT_VNC_ENABLED))
@@ -604,6 +613,7 @@ async def api_restore_sandbox(
             sandbox_id=sandbox_id,
             control_plane_url=control_plane_url,
             sandbox_auth_token=sandbox_auth_token,
+            scm_git_proxy_base_url=scm_git_proxy_base_url,
             clone_token=clone_token,
             user_env_vars=user_env_vars,
             timeout_seconds=timeout_seconds,
@@ -701,6 +711,7 @@ async def api_create_build_sandbox(
         )
         clone_host = parsed_request.clone_host or None
         clone_username = parsed_request.clone_username or None
+        clone_base_url = parsed_request.clone_base_url or None
         callback_url = parsed_request.callback_url
         failure_callback_url = parsed_request.failure_callback_url
         if not validate_control_plane_url(callback_url) or not validate_control_plane_url(
@@ -720,6 +731,7 @@ async def api_create_build_sandbox(
             clone_token=parsed_request.clone_token or "",
             clone_host=clone_host,
             clone_username=clone_username,
+            clone_base_url=clone_base_url,
             user_env_vars=parsed_request.user_env_vars or None,
             build_execution_timeout_seconds=build_execution_timeout_seconds,
             timeout_seconds=provider_session_timeout_seconds,
@@ -918,6 +930,8 @@ def _validated_build_repositories(
             "repo_name": repository.name,
             "branch": repository.branch,
             **({"base_sha": repository.base_sha} if repository.base_sha else {}),
+            **({"repository_key": repository.repository_key} if repository.repository_key else {}),
+            **({"connection_id": repository.connection_id} if repository.connection_id else {}),
         }
         for repository in repositories
     ]

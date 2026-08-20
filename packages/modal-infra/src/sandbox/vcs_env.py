@@ -9,6 +9,7 @@ def inject_vcs_env_vars(
     *,
     clone_host: str | None = None,
     clone_username: str | None = None,
+    clone_base_url: str | None = None,
     include_github_cli_aliases: bool = False,
 ) -> None:
     """Inject provider metadata and optional one-shot clone credentials."""
@@ -27,9 +28,15 @@ def inject_vcs_env_vars(
         env_vars["VCS_CLONE_USERNAME"] = "x-access-token"
 
     if not clone_token:
+        if clone_base_url:
+            env_vars["VCS_CLONE_BASE_URL"] = clone_base_url.rstrip("/")
+            env_vars["OI_SCM_PROXY_MODE"] = "1"
         return
 
     env_vars["VCS_CLONE_TOKEN"] = clone_token
+    if clone_base_url:
+        env_vars["VCS_CLONE_BASE_URL"] = clone_base_url.rstrip("/")
+        env_vars["OI_SCM_PROXY_MODE"] = "1"
     if include_github_cli_aliases and scm_provider == "github":
         has_user_github_cli_token = any(
             env_vars.get(key) for key in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_APP_TOKEN")

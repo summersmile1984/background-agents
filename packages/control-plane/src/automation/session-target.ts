@@ -4,7 +4,7 @@ import type { Env } from "../types";
 import type { Logger } from "../logger";
 import type { RequestContext } from "../routes/shared";
 import { EnvironmentStore } from "../db/environments";
-import { resolveEnvironmentTarget, resolveSessionRepositories } from "../repos/resolve";
+import { resolveEnvironmentRepositorySet } from "../repos/resolve";
 
 /**
  * The repository fields of a run's SessionInitInput, ready to spread into the
@@ -15,6 +15,8 @@ export interface AutomationSessionTarget {
   repoOwner: string | null;
   repoName: string | null;
   repoId: number | null;
+  repositoryId?: string | null;
+  scmConnectionId?: string | null;
   defaultBranch: string | null;
   repositories?: RepositoryRef[];
   environmentId: string | null;
@@ -40,16 +42,21 @@ export async function resolveAutomationSessionTarget(
   log: Logger
 ): Promise<AutomationSessionTarget> {
   if (run.environment_id) {
-    const environmentInputs = await resolveEnvironmentTarget(
+    const environmentSet = await resolveEnvironmentRepositorySet(
+      env,
       new EnvironmentStore(ctx.db),
-      run.environment_id
+      run.environment_id,
+      ctx,
+      log
     );
-    const repositories = await resolveSessionRepositories(env, environmentInputs, ctx, log);
+    const repositories = environmentSet.repositories;
     const primary = repositories[0];
     return {
       repoOwner: primary.repoOwner,
       repoName: primary.repoName,
       repoId: primary.repoId,
+      repositoryId: primary.repositoryKey ?? null,
+      scmConnectionId: environmentSet.connectionId,
       defaultBranch: primary.baseBranch,
       repositories,
       environmentId: run.environment_id,
@@ -60,6 +67,8 @@ export async function resolveAutomationSessionTarget(
     repoOwner: run.repo_owner,
     repoName: run.repo_name,
     repoId: run.repo_id,
+    ...(run.repository_id ? { repositoryId: run.repository_id } : {}),
+    ...(run.scm_connection_id ? { scmConnectionId: run.scm_connection_id } : {}),
     defaultBranch: run.base_branch,
     environmentId: null,
   };

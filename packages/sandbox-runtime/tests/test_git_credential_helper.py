@@ -170,6 +170,23 @@ def test_proxy_request_uses_sandbox_capability_as_basic_username(
     assert calls[0] == 1
 
 
+def test_generic_scm_proxy_keeps_forge_secret_out_of_sandbox(
+    cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/session/sess-123")
+    monkeypatch.setenv("OI_SCM_PROXY_MODE", "1")
+    calls = [0]
+    with _patch_httpx(_mock_response({"should": "not be called"}), calls):
+        code, out, _err = _run(
+            "protocol=https\nhost=cp.example.com\npath=git/session/sess-123/repo_abc.git\n\n"
+        )
+
+    assert code == 0
+    assert "username=sandbox-token-xyz" in out
+    assert "password=sandbox-token-xyz" in out
+    assert calls[0] == 0
+
+
 def test_proxy_request_refuses_direct_github_host(
     cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

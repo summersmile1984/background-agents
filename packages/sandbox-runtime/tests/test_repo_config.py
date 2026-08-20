@@ -111,6 +111,39 @@ class TestParseRepositories:
             RepoEntry(owner="acme", name="app", branch="dev", path=WORKSPACE / "app")
         ]
 
+    def test_preserves_paired_stable_proxy_identity(self):
+        entries = parse_repositories(
+            _config(
+                {
+                    "repository_key": "repo_abc-123",
+                    "connection_id": "scm_gitea_1",
+                    "repo_owner": "acme",
+                    "repo_name": "app",
+                    "branch": "main",
+                }
+            ),
+            workspace_path=WORKSPACE,
+        )
+
+        assert entries[0].repository_key == "repo_abc-123"
+        assert entries[0].connection_id == "scm_gitea_1"
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            {"repository_key": "repo_1", "repo_owner": "acme", "repo_name": "app"},
+            {
+                "repository_key": "../escape",
+                "connection_id": "scm_1",
+                "repo_owner": "acme",
+                "repo_name": "app",
+            },
+        ],
+    )
+    def test_rejects_incomplete_or_unsafe_proxy_identity(self, entry):
+        with pytest.raises(RepoConfigError):
+            parse_repositories(_config(entry), workspace_path=WORKSPACE)
+
     @pytest.mark.parametrize("base_sha", ["abc123", "g" * 40, "a" * 41])
     def test_rejects_invalid_repository_baselines(self, base_sha):
         config = _config({"repo_owner": "acme", "repo_name": "app", "base_sha": base_sha})

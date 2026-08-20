@@ -12,6 +12,8 @@ export interface UpsertSessionData {
   repoOwner: string | null;
   repoName: string | null;
   repoId?: number | null;
+  scmConnectionId?: string | null;
+  repositoryId?: string | null;
   baseBranch?: string | null;
   model: string;
   reasoningEffort?: string | null;
@@ -35,6 +37,8 @@ export interface UpsertSessionData {
  */
 export interface SessionRepositoryData {
   position: number;
+  scmConnectionId?: string | null;
+  repositoryId?: string | null;
   repoOwner: string;
   repoName: string;
   repoId: number | null;
@@ -67,6 +71,12 @@ export class SessionCoreRepository {
     if (!hasRepoOwner && (data.repoId != null || data.baseBranch != null)) {
       throw new Error("No-repository sessions must not persist repoId or baseBranch");
     }
+    if (!hasRepoOwner && (data.scmConnectionId || data.repositoryId)) {
+      throw new Error("No-repository sessions must not persist source-control identity");
+    }
+    if ((data.scmConnectionId == null) !== (data.repositoryId == null)) {
+      throw new Error("Session SCM connection and repository identity must be paired");
+    }
 
     const commonParams = [
       data.id,
@@ -89,12 +99,34 @@ export class SessionCoreRepository {
       data.createdAt,
       data.updatedAt,
     ] as const;
+    const hasStableIdentity = data.scmConnectionId != null && data.repositoryId != null;
     if (data.agentHarness && data.agentHarness !== DEFAULT_AGENT_HARNESS) {
+      if (hasStableIdentity) {
+        this.sql.exec(
+          `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at, agent_harness, scm_connection_id, repository_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ...commonParams,
+          data.agentHarness,
+          data.scmConnectionId,
+          data.repositoryId
+        );
+        return;
+      }
       this.sql.exec(
         `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at, agent_harness)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ...commonParams,
         data.agentHarness
+      );
+      return;
+    }
+    if (hasStableIdentity) {
+      this.sql.exec(
+        `INSERT OR REPLACE INTO session (id, session_name, title, repo_owner, repo_name, repo_id, base_branch, model, reasoning_effort, status, parent_session_id, spawn_source, spawn_depth, code_server_enabled, vnc_enabled, sandbox_settings, environment_id, created_at, updated_at, scm_connection_id, repository_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ...commonParams,
+        data.scmConnectionId,
+        data.repositoryId
       );
       return;
     }
@@ -188,6 +220,20 @@ export class SessionCoreRepository {
   replaceSessionRepositories(repositories: SessionRepositoryData[]): void {
     this.sql.exec(`DELETE FROM session_repositories`);
     for (const repo of repositories) {
+      if (repo.scmConnectionId && repo.repositoryId) {
+        this.sql.exec(
+          `INSERT INTO session_repositories (position, repo_owner, repo_name, repo_id, base_branch, scm_connection_id, repository_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          repo.position,
+          repo.repoOwner,
+          repo.repoName,
+          repo.repoId,
+          repo.baseBranch,
+          repo.scmConnectionId,
+          repo.repositoryId
+        );
+        continue;
+      }
       this.sql.exec(
         `INSERT INTO session_repositories (position, repo_owner, repo_name, repo_id, base_branch)
          VALUES (?, ?, ?, ?, ?)`,
@@ -216,6 +262,8 @@ export class SessionCoreRepository {
       {
         repoOwner: session.repo_owner,
         repoName: session.repo_name,
+        repositoryKey: session.repository_id ?? null,
+        connectionId: session.scm_connection_id ?? null,
         baseBranch: session.base_branch,
       },
       this.getSessionRepositoryRows()

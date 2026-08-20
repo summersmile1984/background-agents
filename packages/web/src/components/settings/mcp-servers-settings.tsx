@@ -14,6 +14,7 @@ import {
   deleteMcpServer,
 } from "@/hooks/use-mcp-servers";
 import { useRepos } from "@/hooks/use-repos";
+import type { Repo } from "@/hooks/use-repos";
 import { parseMaybeEnvContent } from "@/lib/env-paste";
 import { PlusIcon, TerminalIcon, GlobeIcon, ChevronRightIcon } from "@/components/ui/icons";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,9 @@ const emptyForm: FormState = {
 };
 
 function metadataToForm(metadata: McpServerMetadata): FormState {
+  const scopes = metadata.repositoryIds?.length
+    ? metadata.repositoryIds.map((repositoryId) => `repo:${repositoryId}`)
+    : (metadata.repoScopes ?? []);
   return {
     name: metadata.name,
     type: metadata.type,
@@ -87,8 +91,8 @@ function metadataToForm(metadata: McpServerMetadata): FormState {
         .join(" ") ?? "",
     url: metadata.url ?? "",
     envRows: [createEnvRow()],
-    repoScopes: metadata.repoScopes ?? [],
-    scopeMode: metadata.repoScopes?.length ? "selected" : "global",
+    repoScopes: scopes,
+    scopeMode: scopes.length ? "selected" : "global",
     enabled: metadata.enabled,
   };
 }
@@ -260,7 +264,7 @@ function EnvRowsEditor({
 interface McpServerFormProps {
   form: FormState;
   setForm: (form: FormState) => void;
-  repos: { fullName: string; private?: boolean }[];
+  repos: Repo[];
   loadingRepos: boolean;
   radioPrefix: string;
   hasExistingCredentials?: boolean;
@@ -384,24 +388,26 @@ function McpServerForm({
               <p className="text-sm text-muted-foreground px-3 py-2">Loading repositories...</p>
             ) : repos.length === 0 ? (
               <p className="text-sm text-muted-foreground px-3 py-2 border border-border rounded-sm">
-                No repositories available. Connect a GitHub integration first.
+                No repositories available. Connect a source-control provider first.
               </p>
             ) : (
               <div className="border border-border max-h-40 overflow-y-auto rounded-sm">
                 {repos.map((repo) => {
-                  const fullName = repo.fullName.toLowerCase();
-                  const isChecked = selectedRepoScopes.has(fullName);
+                  const scopeValue = repo.repositoryKey
+                    ? `repo:${repo.repositoryKey}`
+                    : repo.fullName.toLowerCase();
+                  const isChecked = selectedRepoScopes.has(scopeValue);
                   return (
                     <label
-                      key={repo.fullName}
+                      key={scopeValue}
                       className="flex items-center gap-2 px-3 py-2 hover:bg-muted/50 transition cursor-pointer text-sm"
                     >
                       <Checkbox
                         checked={isChecked}
                         onCheckedChange={() => {
                           const next = isChecked
-                            ? form.repoScopes.filter((r) => r !== fullName)
-                            : [...form.repoScopes, fullName];
+                            ? form.repoScopes.filter((r) => r !== scopeValue)
+                            : [...form.repoScopes, scopeValue];
                           setForm({ ...form, repoScopes: next });
                         }}
                       />
@@ -486,6 +492,14 @@ export function McpServersSettings() {
       toast.error("Select at least one repository or switch to All repositories");
       return;
     }
+    const selectedStableIds = form.repoScopes
+      .filter((scope) => scope.startsWith("repo:"))
+      .map((scope) => scope.slice("repo:".length));
+    const selectedLegacyScopes = form.repoScopes.filter((scope) => !scope.startsWith("repo:"));
+    if (selectedStableIds.length > 0 && selectedLegacyScopes.length > 0) {
+      toast.error("Repository scope contains mixed legacy and stable identities; reload and retry");
+      return;
+    }
 
     const saveOwner = editor;
     if (!saveOwner) return;
@@ -495,8 +509,12 @@ export function McpServersSettings() {
       const common = {
         name: form.name.trim(),
         enabled: form.enabled,
+        repositoryIds:
+          form.scopeMode === "selected" && selectedStableIds.length > 0 ? selectedStableIds : null,
         repoScopes:
-          form.scopeMode === "selected" && form.repoScopes.length > 0 ? form.repoScopes : null,
+          form.scopeMode === "selected" && selectedLegacyScopes.length > 0
+            ? selectedLegacyScopes
+            : null,
       };
 
       const envRecord = envRowsToRecord(form.envRows);
@@ -653,12 +671,18 @@ export function McpServersSettings() {
                       </div>
                       <div className="text-xs text-muted-foreground truncate">
                         {server.type === "remote" ? server.url : server.command?.join(" ")}
-                        {server.repoScopes?.length ? (
+                        {server.repositoryIds?.length || server.repoScopes?.length ? (
                           <span className="ml-2 text-accent">
                             •{" "}
-                            {server.repoScopes.length === 1
-                              ? server.repoScopes[0]
-                              : `${server.repoScopes.length} repos`}
+                            {server.repositoryIds?.length === 1
+                              ? (repos.find(
+                                  (repo) => repo.repositoryKey === server.repositoryIds?.[0]
+                                )?.fullName ?? "1 repository")
+                              : server.repositoryIds?.length
+                                ? `${server.repositoryIds.length} repos`
+                                : server.repoScopes?.length === 1
+                                  ? server.repoScopes[0]
+                                  : `${server.repoScopes?.length ?? 0} repos`}
                           </span>
                         ) : (
                           <span className="ml-2 text-muted-foreground/60">• global</span>

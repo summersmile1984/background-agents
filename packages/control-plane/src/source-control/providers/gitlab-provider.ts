@@ -488,6 +488,8 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
           private: project.visibility !== "public",
           archived: project.archived,
           defaultBranch: project.default_branch,
+          webUrl: `https://gitlab.com/${encodeProjectWebPath(project.namespace.full_path, project.path)}`,
+          cloneUrl: `https://gitlab.com/${encodeProjectWebPath(project.namespace.full_path, project.path)}.git`,
         }));
     } catch (error) {
       if (error instanceof SourceControlProviderError) {
@@ -579,6 +581,10 @@ export class GitLabSourceControlProvider implements SourceControlProvider {
       authType: "pat",
       token: this.accessToken,
     };
+  }
+
+  async getServiceApiAuthorization(): Promise<SourceControlAuthContext> {
+    return { authType: "pat", token: this.accessToken };
   }
 
   async generateCredentialHelperAuth(): Promise<CredentialHelperAuth> {

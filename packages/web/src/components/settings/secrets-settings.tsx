@@ -5,6 +5,7 @@ import { useRepos } from "@/hooks/use-repos";
 import { useState } from "react";
 import { ChevronDownIcon, CheckIcon } from "@/components/ui/icons";
 import { Combobox } from "@/components/ui/combobox";
+import { repoSelectionValue } from "@/lib/repository-selection";
 
 const GLOBAL_SCOPE = "__global__";
 
@@ -12,7 +13,7 @@ export function SecretsSettings() {
   const { repos, loading: loadingRepos } = useRepos();
   const [selectedRepo, setSelectedRepo] = useState(GLOBAL_SCOPE);
 
-  const selectedRepoObj = repos.find((r) => r.fullName === selectedRepo);
+  const selectedRepoObj = repos.find((repo) => repoSelectionValue(repo) === selectedRepo);
   const isGlobal = selectedRepo === GLOBAL_SCOPE;
   const displayRepoName = isGlobal
     ? "All Repositories (Global)"
@@ -44,7 +45,7 @@ export function SecretsSettings() {
           value={selectedRepo}
           onChange={setSelectedRepo}
           items={repos.map((repo) => ({
-            value: repo.fullName,
+            value: repoSelectionValue(repo),
             label: repo.name,
             description: `${repo.owner}${repo.private ? " \u2022 private" : ""}`,
           }))}
@@ -92,6 +93,7 @@ export function SecretsSettings() {
           scope="repo"
           owner={selectedRepoObj?.owner}
           name={selectedRepoObj?.name}
+          repositoryKey={selectedRepoObj?.repositoryKey}
           disabled={loadingRepos}
         />
       )}

@@ -70,6 +70,43 @@ export class RepoSecretsStore {
     return { created, updated, keys: incomingKeys };
   }
 
+  async setSecretsByRepositoryId(
+    repositoryId: string,
+    secrets: Record<string, string>
+  ): Promise<SecretsWriteResult> {
+    const now = Date.now();
+    const normalized = prepareSecretsForWrite(secrets);
+    const existingKeys = await this.db
+      .prepare("SELECT key FROM scm_repository_secrets WHERE repository_id = ?")
+      .bind(repositoryId)
+      .all<{ key: string }>();
+    const existingKeySet = new Set((existingKeys.results || []).map((row) => row.key));
+    const incomingKeys = Object.keys(normalized);
+    assertScopeKeyCapacity("Repository", existingKeySet, incomingKeys);
+    const { entries, created, updated } = await encryptSecretEntries(
+      normalized,
+      existingKeySet,
+      this.encryptionKey
+    );
+    if (entries.length > 0) {
+      await this.db.batch(
+        entries.map((entry) =>
+          this.db
+            .prepare(
+              `INSERT INTO scm_repository_secrets
+               (repository_id, key, encrypted_value, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(repository_id, key) DO UPDATE SET
+                 encrypted_value = excluded.encrypted_value,
+                 updated_at = excluded.updated_at`
+            )
+            .bind(repositoryId, entry.key, entry.encryptedValue, now, now)
+        )
+      );
+    }
+    return { created, updated, keys: incomingKeys };
+  }
+
   async listSecretKeys(repoId: number): Promise<SecretMetadata[]> {
     const result = await this.db
       .prepare(
@@ -78,6 +115,17 @@ export class RepoSecretsStore {
       .bind(repoId)
       .all<{ key: string; created_at: number; updated_at: number }>();
 
+    return toSecretMetadata(result.results || []);
+  }
+
+  async listSecretKeysByRepositoryId(repositoryId: string): Promise<SecretMetadata[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT key, created_at, updated_at FROM scm_repository_secrets
+         WHERE repository_id = ? ORDER BY key`
+      )
+      .bind(repositoryId)
+      .all<{ key: string; created_at: number; updated_at: number }>();
     return toSecretMetadata(result.results || []);
   }
 
@@ -102,12 +150,39 @@ export class RepoSecretsStore {
     }
   }
 
+  async getDecryptedSecretsByRepositoryId(repositoryId: string): Promise<Record<string, string>> {
+    const result = await this.db
+      .prepare("SELECT key, encrypted_value FROM scm_repository_secrets WHERE repository_id = ?")
+      .bind(repositoryId)
+      .all<{ key: string; encrypted_value: string }>();
+    try {
+      return await decryptSecretRows(result.results || [], this.encryptionKey);
+    } catch (cause) {
+      if (cause instanceof SecretDecryptionError) {
+        log.error("Failed to decrypt stable repository secret", {
+          repository_id: repositoryId,
+          key: cause.key,
+        });
+        throw new Error(`Failed to decrypt secret '${cause.key}'`);
+      }
+      throw cause;
+    }
+  }
+
   async deleteSecret(repoId: number, key: string): Promise<boolean> {
     const result = await this.db
       .prepare("DELETE FROM repo_secrets WHERE repo_id = ? AND key = ?")
       .bind(repoId, normalizeKey(key))
       .run();
 
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
+  async deleteSecretByRepositoryId(repositoryId: string, key: string): Promise<boolean> {
+    const result = await this.db
+      .prepare("DELETE FROM scm_repository_secrets WHERE repository_id = ? AND key = ?")
+      .bind(repositoryId, normalizeKey(key))
+      .run();
     return (result.meta?.changes ?? 0) > 0;
   }
 }

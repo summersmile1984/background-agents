@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .diff_baseline import resolve_session_diff_baselines
 from .process_output import communicate_owned_subprocess, terminate_owned_subprocess
@@ -54,6 +54,8 @@ class RepositorySynchronizer:
         return raw_base_url
 
     def _build_repo_url(self, repo: RepoEntry) -> str:
+        if self.clone_base_url != f"https://{self.vcs_host}" and repo.repository_key:
+            return f"{self.clone_base_url}/{quote(repo.repository_key, safe='')}.git"
         return f"{self.clone_base_url}/{repo.owner}/{repo.name}.git"
 
     def _redact_git_stderr(self, stderr: bytes) -> str:

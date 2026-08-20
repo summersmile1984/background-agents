@@ -6,7 +6,15 @@ import { ScopeCheckbox } from "./shared";
 export function assignmentKey(assignment: SkillAssignmentInput): string {
   if (assignment.type === "global") return "global";
   if (assignment.type === "environment") return `environment:${assignment.environmentId}`;
-  return `repository:${assignment.repository.repoOwner}/${assignment.repository.repoName}`;
+  return assignment.repository.repositoryKey
+    ? `repository:${assignment.repository.repositoryKey}`
+    : `repository:${assignment.repository.repoOwner}/${assignment.repository.repoName}`;
+}
+
+function repoAssignmentKey(repo: Repo): string {
+  return repo.repositoryKey
+    ? `repository:${repo.repositoryKey}`
+    : `repository:${repo.owner}/${repo.name}`;
 }
 
 export function buildAssignments(
@@ -18,10 +26,17 @@ export function buildAssignments(
   const result: SkillAssignmentInput[] = [];
   if (assignmentKeys.has("global")) result.push({ type: "global" });
   for (const repo of repos) {
-    if (assignmentKeys.has(`repository:${repo.owner}/${repo.name}`)) {
+    if (assignmentKeys.has(repoAssignmentKey(repo))) {
       result.push({
         type: "repository",
-        repository: { repoOwner: repo.owner, repoName: repo.name, baseBranch: null },
+        repository: {
+          ...(repo.repositoryKey && repo.connectionId
+            ? { repositoryKey: repo.repositoryKey, connectionId: repo.connectionId }
+            : {}),
+          repoOwner: repo.owner,
+          repoName: repo.name,
+          baseBranch: null,
+        },
       });
     }
   }
@@ -74,10 +89,10 @@ export function SkillAssignments({
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
               {repos.map((repo) => {
-                const key = `repository:${repo.owner}/${repo.name}`;
+                const key = repoAssignmentKey(repo);
                 return (
                   <ScopeCheckbox
-                    key={repo.fullName}
+                    key={key}
                     checked={assignmentKeys.has(key)}
                     onChange={(value) => onToggle(key, value)}
                   >

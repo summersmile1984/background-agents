@@ -1,16 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  MAX_TARGET_REPOSITORIES,
-  parseRepositoryFullName,
-} from "@open-inspect/shared/types/repositories";
+import { MAX_TARGET_REPOSITORIES } from "@open-inspect/shared/types/repositories";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RepoIcon, FolderIcon, SearchIcon, ChevronDownIcon } from "@/components/ui/icons";
 import type { Repo } from "@/hooks/use-repos";
-import { repositorySelectionKey } from "@/lib/repository-selection";
+import { repoSelectionValue } from "@/lib/repository-selection";
 import { cn } from "@/lib/utils";
 
 /**
@@ -59,14 +56,23 @@ export function RepositoryMultiSelect({
   const selectedNamesByKey = useMemo(() => {
     const names = new Map<string, string>();
     for (const key of selected) {
-      const name = parseRepositoryFullName(key)?.repoName;
+      const name = repos.find((repo) => repoSelectionValue(repo) === key)?.name.toLowerCase();
       if (name) names.set(name, key);
     }
     return names;
-  }, [selected]);
+  }, [repos, selected]);
+  const selectedConnectionIds = useMemo(
+    () =>
+      new Set(
+        selected
+          .map((key) => repos.find((repo) => repoSelectionValue(repo) === key)?.connectionId)
+          .filter((id): id is string => Boolean(id))
+      ),
+    [repos, selected]
+  );
 
   const handleToggle = (repo: Repo) => {
-    const key = repositorySelectionKey(repo.owner, repo.name);
+    const key = repoSelectionValue(repo);
     if (selected.includes(key)) {
       onChange(selected.filter((entry) => entry !== key));
       return;
@@ -117,20 +123,27 @@ export function RepositoryMultiSelect({
         </div>
         <div className="max-h-72 overflow-y-auto py-1">
           {filteredRepos.map((repo) => {
-            const key = repositorySelectionKey(repo.owner, repo.name);
+            const key = repoSelectionValue(repo);
             const checked = selected.includes(key);
             const atCap = !checked && selected.length >= MAX_TARGET_REPOSITORIES;
             const nameCollision =
               !checked && selectedNamesByKey.get(repo.name.toLowerCase()) !== undefined;
-            const itemDisabled = atCap || nameCollision;
+            const connectionMismatch =
+              !checked &&
+              selectedConnectionIds.size > 0 &&
+              Boolean(repo.connectionId) &&
+              !selectedConnectionIds.has(repo.connectionId!);
+            const itemDisabled = atCap || nameCollision || connectionMismatch;
 
             return (
               <label
-                key={repo.fullName}
+                key={key}
                 title={
                   nameCollision
                     ? `Another selected repository is also named "${repo.name}" — checkout paths would collide`
-                    : undefined
+                    : connectionMismatch
+                      ? "All repositories in one session must use the same source-control connection"
+                      : undefined
                 }
                 className={cn(
                   "flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
@@ -149,6 +162,11 @@ export function RepositoryMultiSelect({
                 <span className="min-w-0 flex-1 truncate">
                   {repo.owner}/{repo.name}
                 </span>
+                {repo.connection?.displayName ? (
+                  <span className="text-xs text-muted-foreground">
+                    {repo.connection.displayName}
+                  </span>
+                ) : null}
                 {repo.private && <span className="text-xs text-muted-foreground">private</span>}
               </label>
             );

@@ -24,7 +24,7 @@ import { listSessionArtifactsFromRuntime, persistMediaArtifact } from "./session
 import {
   defineRoutes,
   error,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
+  SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
   json,
   parsePattern,
   type Route,
@@ -246,7 +246,7 @@ async function handleVideoUpload(input: {
   return json({ artifactId, objectKey }, 201);
 }
 
-export const sessionMediaUploadRoutes: Route[] = defineRoutes(GITHUB_SANDBOX_FALLBACK_ROUTE, [
+export const sessionMediaUploadRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE, [
   sessionRoute({
     method: "POST",
     pattern: parsePattern("/sessions/:id/media"),

@@ -7,9 +7,11 @@ import { GlobalSecretsStore } from "../db/global-secrets";
 import { SecretsValidationError, normalizeKey, validateKey } from "../db/secrets-validation";
 import type { Env } from "../types";
 import { createLogger } from "../logger";
+import { ScmRepositoryStore } from "../db/scm-repositories";
+import { SourceControlConnectionRegistry } from "../source-control/connection-registry";
 import {
   type Route,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   type RequestContext,
   parsePattern,
@@ -21,6 +23,112 @@ import {
 } from "./shared";
 
 const logger = createLogger("router:secrets");
+
+async function resolveStableRepository(env: Env, repositoryKey: string, ctx: RequestContext) {
+  const repository = await new ScmRepositoryStore(ctx.db).get(repositoryKey);
+  if (!repository || repository.resolutionStatus !== "resolved" || repository.removedAt != null) {
+    return error("SCM repository was not found or is unresolved", 404);
+  }
+  const { provider } = await new SourceControlConnectionRegistry(env, { db: ctx.db }).getConnection(
+    repository.connectionId
+  );
+  const access = await provider.checkRepositoryAccess({
+    owner: repository.owner,
+    name: repository.name,
+  });
+  if (!access || String(access.repoId) !== repository.externalId) {
+    return error("SCM repository is not accessible", 403);
+  }
+  return repository;
+}
+
+function stableRepositoryKey(match: RegExpMatchArray): string | Response {
+  const value = match.groups?.repositoryKey;
+  return value ? decodeURIComponent(value) : error("Repository key is required", 400);
+}
+
+async function handleSetStableRepoSecrets(
+  request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  if (!env.REPO_SECRETS_ENCRYPTION_KEY) return error("Encryption key not configured", 503);
+  const repositoryKey = stableRepositoryKey(match);
+  if (repositoryKey instanceof Response) return repositoryKey;
+  const repository = await resolveStableRepository(env, repositoryKey, ctx);
+  if (repository instanceof Response) return repository;
+  const body = await parseJsonBody<{ secrets?: Record<string, string> }>(request);
+  if (body instanceof Response) return body;
+  if (!body.secrets || typeof body.secrets !== "object") {
+    return error("Request body must include secrets object", 400);
+  }
+  try {
+    const result = await new RepoSecretsStore(
+      ctx.db,
+      env.REPO_SECRETS_ENCRYPTION_KEY
+    ).setSecretsByRepositoryId(repository.id, body.secrets);
+    return json({
+      status: "updated",
+      repositoryKey: repository.id,
+      repo: `${repository.owner}/${repository.name}`,
+      ...result,
+    });
+  } catch (cause) {
+    return cause instanceof SecretsValidationError
+      ? error(cause.message, 400)
+      : error("Secrets storage unavailable", 503);
+  }
+}
+
+async function handleListStableRepoSecrets(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  if (!env.REPO_SECRETS_ENCRYPTION_KEY) return error("Encryption key not configured", 503);
+  const repositoryKey = stableRepositoryKey(match);
+  if (repositoryKey instanceof Response) return repositoryKey;
+  const repository = await resolveStableRepository(env, repositoryKey, ctx);
+  if (repository instanceof Response) return repository;
+  const store = new RepoSecretsStore(ctx.db, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const globalStore = new GlobalSecretsStore(ctx.db, env.REPO_SECRETS_ENCRYPTION_KEY);
+  const [secrets, globalSecrets] = await Promise.all([
+    store.listSecretKeysByRepositoryId(repository.id),
+    globalStore.listSecretKeys(),
+  ]);
+  return json({ repositoryKey: repository.id, secrets, globalSecrets });
+}
+
+async function handleDeleteStableRepoSecret(
+  _request: Request,
+  env: Env,
+  match: RegExpMatchArray,
+  ctx: RequestContext
+): Promise<Response> {
+  if (!env.REPO_SECRETS_ENCRYPTION_KEY) return error("Encryption key not configured", 503);
+  const repositoryKey = stableRepositoryKey(match);
+  if (repositoryKey instanceof Response) return repositoryKey;
+  const repository = await resolveStableRepository(env, repositoryKey, ctx);
+  if (repository instanceof Response) return repository;
+  const key = match.groups?.key;
+  if (!key) return error("Secret key is required", 400);
+  try {
+    validateKey(normalizeKey(key));
+    const deleted = await new RepoSecretsStore(
+      ctx.db,
+      env.REPO_SECRETS_ENCRYPTION_KEY
+    ).deleteSecretByRepositoryId(repository.id, key);
+    return deleted
+      ? json({ status: "deleted", repositoryKey: repository.id, key: normalizeKey(key) })
+      : error("Secret not found", 404);
+  } catch (cause) {
+    return cause instanceof SecretsValidationError
+      ? error(cause.message, 400)
+      : error("Secrets storage unavailable", 503);
+  }
+}
 
 /**
  * Upsert secrets for a repository.
@@ -371,7 +479,22 @@ async function handleDeleteGlobalSecret(
   }
 }
 
-export const secretsRoutes: Route[] = defineRoutes(GITHUB_USER_OR_SERVICE_ROUTE, [
+export const secretsRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
+  {
+    method: "PUT",
+    pattern: parsePattern("/repos/:repositoryKey/secrets"),
+    handler: handleSetStableRepoSecrets,
+  },
+  {
+    method: "GET",
+    pattern: parsePattern("/repos/:repositoryKey/secrets"),
+    handler: handleListStableRepoSecrets,
+  },
+  {
+    method: "DELETE",
+    pattern: parsePattern("/repos/:repositoryKey/secrets/:key"),
+    handler: handleDeleteStableRepoSecret,
+  },
   {
     method: "PUT",
     pattern: parsePattern("/repos/:owner/:name/secrets"),

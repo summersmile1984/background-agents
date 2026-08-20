@@ -299,6 +299,61 @@ describe("McpServerStore", () => {
   });
 
   describe("getDecryptedForSession()", () => {
+    it("matches stable repository scopes and does not expose them by owner/name collision", async () => {
+      const scopedRow = { ...remoteRow, repo_scope: null };
+      const scopeRows = [{ mcp_server_id: scopedRow.id, repository_id: "repo_gitea_service" }];
+      const db = {
+        prepare(sql: string) {
+          const statement = {
+            bind(..._params: unknown[]) {
+              return statement;
+            },
+            async first<T>(): Promise<T | null> {
+              return null;
+            },
+            async run(): Promise<D1Result> {
+              return {
+                results: [],
+                success: true,
+                meta: { duration: 0, changes: 0 },
+              } as unknown as D1Result;
+            },
+            async all<T>(): Promise<D1Result<T>> {
+              const results = sql.includes("mcp_server_repository_scopes")
+                ? scopeRows
+                : [scopedRow];
+              return {
+                results: results as T[],
+                success: true,
+                meta: { duration: 0, changes: 0 },
+              } as unknown as D1Result<T>;
+            },
+          };
+          return statement;
+        },
+      } as unknown as D1Database;
+      const store = new McpServerStore(db);
+
+      await expect(
+        store.getDecryptedForSession([
+          {
+            repoOwner: "carboncopyinc",
+            repoName: "habakkuk",
+            repositoryKey: "repo_gitea_service",
+          },
+        ])
+      ).resolves.toHaveLength(1);
+      await expect(
+        store.getDecryptedForSession([
+          {
+            repoOwner: "carboncopyinc",
+            repoName: "habakkuk",
+            repositoryKey: "repo_github_same_path",
+          },
+        ])
+      ).resolves.toHaveLength(0);
+    });
+
     it("returns global and matching repo-scoped servers", async () => {
       const { db } = createFakeD1({ allResults: [sampleRow, remoteRow] });
       const store = new McpServerStore(db);
@@ -316,6 +371,20 @@ describe("McpServerStore", () => {
       ]);
       expect(results).toHaveLength(1); // only the global server
       expect(results[0].name).toBe("playwright");
+    });
+
+    it("does not apply a legacy owner/name scope to a stable repository on another forge", async () => {
+      const { db } = createFakeD1({ allResults: [remoteRow] });
+      const store = new McpServerStore(db);
+      const results = await store.getDecryptedForSession([
+        {
+          repoOwner: "carboncopyinc",
+          repoName: "habakkuk",
+          repositoryKey: "repo_gitea_same_path",
+        },
+      ]);
+
+      expect(results).toHaveLength(0);
     });
 
     it("matches scoped servers through any member of a multi-repo session", async () => {

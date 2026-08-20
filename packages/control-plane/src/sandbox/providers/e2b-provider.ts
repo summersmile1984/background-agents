@@ -115,7 +115,7 @@ export class E2BSandboxProvider implements SandboxProvider {
       const useCreateTimeEnv = this.providerConfig.useCreateTimeEnv ?? false;
       if (useCreateTimeEnv) {
         envVars.OI_USE_CREATE_TIME_ENV = "1";
-        if (this.providerConfig.scmProvider === "github") {
+        if (this.providerConfig.scmProvider === "github" && !config.scmGitProxyBaseUrl) {
           envVars.VCS_CLONE_BASE_URL = `${config.controlPlaneUrl.replace(/\/+$/, "")}/git/${encodeURIComponent(config.sessionId)}`;
         }
       }

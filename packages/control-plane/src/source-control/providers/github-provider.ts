@@ -23,6 +23,7 @@ import type {
   GitPushSpec,
   GitPushAuthContext,
   CredentialHelperAuth,
+  ServerOnlyGitAuth,
 } from "../types";
 import { SourceControlProviderError, parseProviderResponse } from "../errors";
 import {
@@ -461,7 +462,13 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         cacheStore: this.cacheStore,
         userAgent: this.userAgent,
       });
-      return result.repos.filter((repo) => !repo.archived);
+      return result.repos
+        .filter((repo) => !repo.archived)
+        .map((repo) => ({
+          ...repo,
+          webUrl: `https://github.com/${repo.fullName}`,
+          cloneUrl: `https://github.com/${repo.fullName}.git`,
+        }));
     } catch (error) {
       throw SourceControlProviderError.fromFetchError(
         `Failed to list repositories: ${error instanceof Error ? error.message : String(error)}`,
@@ -573,6 +580,11 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
     }
   }
 
+  async getServiceApiAuthorization(): Promise<SourceControlAuthContext> {
+    const auth = await this.generatePushAuth();
+    return { authType: "app", token: auth.token };
+  }
+
   async generateCredentialHelperAuth(): Promise<CredentialHelperAuth> {
     if (!this.appConfig) {
       throw new SourceControlProviderError(
@@ -601,6 +613,11 @@ export class GitHubSourceControlProvider implements SourceControlProvider {
         extractHttpStatus(error)
       );
     }
+  }
+
+  async getUpstreamGitAuthorization(_operation: "read" | "write"): Promise<ServerOnlyGitAuth> {
+    const auth = await this.generateCredentialHelperAuth();
+    return { username: auth.username, password: auth.password };
   }
 
   buildManualPullRequestUrl(config: BuildManualPullRequestUrlConfig): string {

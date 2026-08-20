@@ -90,7 +90,14 @@ export async function handleSlackNotify(
 
   const settingsStore = new IntegrationSettingsStore(ctx.db);
   const settings = repoScope
-    ? (await settingsStore.getResolvedConfig("slack", repoScope)).settings
+    ? (
+        await settingsStore.getResolvedConfig(
+          "slack",
+          repoScope,
+          undefined,
+          session.repositoryId ?? null
+        )
+      ).settings
     : ((await settingsStore.getGlobal("slack"))?.defaults ?? {});
   const { agentNotificationsEnabled, mentionsPolicy } = resolveSlackSettings(
     settings as Partial<SlackGlobalSettings>

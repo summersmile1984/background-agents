@@ -20,7 +20,11 @@ export type {
   CreatePullRequestResult,
   PullRequestSnapshot,
   RepositoryAccessResult,
+  ServerOnlyGitAuth,
+  ServerSideGitAuthProvider,
+  ServerSideApiAuthProvider,
 } from "./types";
+export { supportsServerSideApiAuth, supportsServerSideGitAuth } from "./types";
 
 // Errors
 export type { SourceControlErrorType } from "./errors";
@@ -32,7 +36,10 @@ export { createSourceControlProviderFromEnv } from "./provider-from-env";
 export {
   GitHubSourceControlProvider,
   createGitHubProvider,
+  GiteaSourceControlProvider,
+  createGiteaProvider,
   createSourceControlProvider,
+  type GiteaProviderConfig,
   type GitHubProviderConfig,
   type SourceControlProviderFactoryConfig,
 } from "./providers";

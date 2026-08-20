@@ -61,6 +61,12 @@ export interface Env {
   // GitLab secrets (for git operations and API access when SCM_PROVIDER=gitlab)
   GITLAB_ACCESS_TOKEN?: string;
   GITLAB_NAMESPACE?: string; // Group namespace to scope repository listing
+  GITEA_BASE_URL?: string;
+  GITEA_ACCESS_TOKEN?: string;
+  GITEA_USERNAME?: string;
+  SCM_ALLOWED_HOSTS?: string; // Explicit host[:port] allowlist for self-hosted SCM probes/proxying
+  // Exact enterprise versions whose required security fixes were confirmed as vendor backports.
+  GITEA_SECURITY_CONFIRMED_VERSIONS?: string;
 
   // Variables
   DEPLOYMENT_NAME: string;

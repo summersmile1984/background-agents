@@ -133,6 +133,26 @@ async def test_create_sandbox_forwards_timeout(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_sandbox_forwards_scm_git_proxy_base_url(monkeypatch):
+    captured = {}
+    _patch_auth(monkeypatch)
+    _patch_manager(monkeypatch, captured)
+
+    proxy_url = "https://control-plane.example/git/session/sess-1"
+    result = await _call_create_sandbox(
+        {
+            "session_id": "sess-1",
+            "control_plane_url": "https://control-plane.example",
+            "sandbox_auth_token": "sandbox-token",
+            "scm_git_proxy_base_url": proxy_url,
+        }
+    )
+
+    assert result["success"] is True
+    assert captured["config"].scm_git_proxy_base_url == proxy_url
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_forwards_vnc_and_returns_credentials(monkeypatch):
     captured = {}
     _patch_auth(monkeypatch)
@@ -381,6 +401,38 @@ async def test_restore_sandbox_uses_normalized_repo_context(monkeypatch):
     assert session_config["repo_owner"] == "acme"
     assert session_config["repo_name"] == "repo"
     assert captured["restore"]["clone_token"] == "ghs_token"
+
+
+@pytest.mark.asyncio
+async def test_restore_sandbox_proxy_does_not_resolve_forge_token(monkeypatch):
+    captured = {}
+    calls = []
+
+    _patch_auth(monkeypatch)
+    _patch_restore_manager(monkeypatch, captured)
+    monkeypatch.setattr(web_api, "resolve_clone_token", lambda: calls.append(True) or "secret")
+    proxy_url = "https://control-plane.example/git/session/sess-1"
+
+    result = await _call_restore_sandbox(
+        {
+            "snapshot_image_id": "img-abc",
+            "session_config": {
+                "session_id": "sess-1",
+                "repo_owner": "acme",
+                "repo_name": "repo",
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-6",
+            },
+            "control_plane_url": "https://control-plane.example",
+            "sandbox_auth_token": "sandbox-token",
+            "scm_git_proxy_base_url": proxy_url,
+        }
+    )
+
+    assert result["success"] is True
+    assert calls == []
+    assert captured["restore"]["clone_token"] is None
+    assert captured["restore"]["scm_git_proxy_base_url"] == proxy_url
 
 
 @pytest.mark.asyncio

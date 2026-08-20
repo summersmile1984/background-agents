@@ -28,3 +28,17 @@ export interface GitLabProviderConfig {
   /** User-Agent value sent on outbound GitLab API requests */
   userAgent?: string;
 }
+
+/** Configuration for one self-hosted Gitea connection. */
+export interface GiteaProviderConfig {
+  /** Normalized Gitea root URL, including an optional reverse-proxy path. */
+  baseUrl: string;
+  /** API root. Defaults to `${baseUrl}/api/v1`. */
+  apiBaseUrl?: string;
+  /** Dedicated service-account PAT. */
+  accessToken: string;
+  /** Service account login used as the Git HTTP username. */
+  username: string;
+  /** User-Agent value sent on outbound Gitea API requests. */
+  userAgent?: string;
+}

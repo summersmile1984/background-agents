@@ -6,6 +6,7 @@
 
 import type { InstallationRepository } from "@open-inspect/shared/types/repository-catalog";
 import type { PullRequestLifecycleState } from "@open-inspect/shared/types/artifacts";
+import type { SourceControlProviderName as SharedSourceControlProviderName } from "@open-inspect/shared/types/source-control";
 
 /**
  * Repository information.
@@ -28,7 +29,7 @@ export interface RepositoryInfo {
 /**
  * Supported source control provider names.
  */
-export type SourceControlProviderName = "github" | "bitbucket" | "gitlab";
+export type SourceControlProviderName = SharedSourceControlProviderName;
 
 /**
  * Authentication context for source control API operations.
@@ -69,6 +70,38 @@ export interface CredentialHelperAuth {
   password: string;
   /** Absolute epoch milliseconds when the password stops being valid. */
   expiresAtEpochMs: number;
+}
+
+/** Forge credential that is permitted to exist only inside the control plane. */
+export interface ServerOnlyGitAuth {
+  username: string;
+  password: string;
+}
+
+/** Optional provider contract consumed only by the server-side Git proxy. */
+export interface ServerSideGitAuthProvider {
+  getUpstreamGitAuthorization(operation: "read" | "write"): Promise<ServerOnlyGitAuth>;
+}
+
+/** Optional provider contract for installation/service API authority.
+ *
+ * The returned credential is control-plane-only. It must never be serialized
+ * into a sandbox request or a browser response.
+ */
+export interface ServerSideApiAuthProvider {
+  getServiceApiAuthorization(): Promise<SourceControlAuthContext>;
+}
+
+export function supportsServerSideGitAuth(
+  provider: SourceControlProvider
+): provider is SourceControlProvider & ServerSideGitAuthProvider {
+  return "getUpstreamGitAuthorization" in provider;
+}
+
+export function supportsServerSideApiAuth(
+  provider: SourceControlProvider
+): provider is SourceControlProvider & ServerSideApiAuthProvider {
+  return "getServiceApiAuthorization" in provider;
 }
 
 /**
@@ -296,7 +329,7 @@ export interface PullRequestSnapshot {
  */
 export interface SourceControlProvider {
   /** Provider name for logging and debugging */
-  readonly name: string;
+  readonly name: SourceControlProviderName;
 
   //
   // User-authenticated operations

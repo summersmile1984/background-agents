@@ -341,6 +341,15 @@ export function createSandboxHandler(deps: SandboxHandlerDeps): SandboxHandler {
           { status: 400 }
         );
       }
+      if (session.scm_connection_id) {
+        // Connection-pinned sessions authenticate Git with their short-lived
+        // sandbox capability at the server-side proxy. Returning any forge
+        // credential here would defeat that isolation boundary.
+        return Response.json(
+          { error: "Pinned SCM sessions use the server-side Git proxy" },
+          { status: 409, headers: { "Cache-Control": "no-store" } }
+        );
+      }
 
       const result = await deps.getScmCredentials(log);
       if (!result.ok) {

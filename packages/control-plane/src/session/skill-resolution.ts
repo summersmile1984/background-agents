@@ -23,7 +23,12 @@ export interface SessionSkillManifestInput {
 }
 
 interface SkillResolutionTarget {
-  repositories: readonly { repoOwner: string; repoName: string }[];
+  repositories: readonly {
+    repositoryKey?: string | null;
+    connectionId?: string | null;
+    repoOwner: string;
+    repoName: string;
+  }[];
   environmentId: string | null;
 }
 

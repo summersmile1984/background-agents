@@ -134,6 +134,8 @@ describe("refreshSessionPullRequests", () => {
     expect(harness.upsert).toHaveBeenCalledWith({
       artifactId: "artifact-1",
       sessionId: "public-session-1",
+      scmConnectionId: null,
+      repositoryId: null,
       repositoryExternalId: "9001",
       repoOwner: "acme",
       repoName: "web",

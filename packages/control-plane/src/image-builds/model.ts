@@ -43,6 +43,14 @@ export function repoImageBuildScope(repoOwner: string, repoName: string): ImageB
   };
 }
 
+export function repoImageBuildScopeByRepositoryKey(repositoryKey: string): ImageBuildScope {
+  return { kind: "repo", id: `repo:${repositoryKey}` };
+}
+
+export function parseRepoScopeRepositoryKey(scopeId: string): string | null {
+  return scopeId.startsWith("repo:") && scopeId.length > 5 ? scopeId.slice(5) : null;
+}
+
 /**
  * Split a repo scope id back into its structured identity. Null on malformed
  * values — callers fail closed (a malformed id can only come from a raw store

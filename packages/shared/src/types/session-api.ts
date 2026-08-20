@@ -170,6 +170,7 @@ function hasRepositoryIdentifier(value: string | null | undefined): boolean {
 interface CreateSessionRepositoryFields {
   repoOwner?: string | null;
   repoName?: string | null;
+  repositoryKey?: string | null;
   branch?: string;
 }
 
@@ -178,13 +179,18 @@ function hasMatchingRepositoryIdentifiers(data: CreateSessionRepositoryFields): 
 }
 
 function hasRepositoryForBranch(data: CreateSessionRepositoryFields): boolean {
-  return hasRepositoryIdentifier(data.repoOwner) || !data.branch?.trim();
+  return (
+    hasRepositoryIdentifier(data.repoOwner) ||
+    hasRepositoryIdentifier(data.repositoryKey) ||
+    !data.branch?.trim()
+  );
 }
 
 function hasScalarRepositoryTarget(data: CreateSessionRepositoryFields): boolean {
   return (
     hasRepositoryIdentifier(data.repoOwner) ||
     hasRepositoryIdentifier(data.repoName) ||
+    hasRepositoryIdentifier(data.repositoryKey) ||
     Boolean(data.branch?.trim())
   );
 }
@@ -192,6 +198,7 @@ function hasScalarRepositoryTarget(data: CreateSessionRepositoryFields): boolean
 function hasExclusiveSessionTarget(
   data: CreateSessionRepositoryFields & {
     repositories?: unknown[] | null;
+    repositoryKeys?: unknown[] | null;
     environmentId?: string | null;
   }
 ): boolean {
@@ -203,6 +210,7 @@ function hasExclusiveSessionTarget(
   // through).
   const activeModes = [
     Boolean(data.repositories),
+    Boolean(data.repositoryKeys),
     hasRepositoryIdentifier(data.environmentId),
     hasScalarRepositoryTarget(data),
   ].filter(Boolean).length;
@@ -210,6 +218,8 @@ function hasExclusiveSessionTarget(
 }
 
 const createSessionRequestBaseSchema = z.object({
+  /** Preferred stable single-repository target. */
+  repositoryKey: z.string().trim().min(1).nullish(),
   repoOwner: z.string().trim().min(1).nullish(),
   repoName: z.string().trim().min(1).nullish(),
   title: z.string().optional(),
@@ -223,6 +233,15 @@ const createSessionRequestBaseSchema = z.object({
    * scalar repoOwner/repoName/branch fields and environmentId.
    */
   repositories: sessionRepositoriesInputSchema.optional(),
+  /** Preferred stable multi-repository target; all entries must share one connection. */
+  repositoryKeys: z
+    .array(z.string().trim().min(1))
+    .min(1)
+    .max(10)
+    .refine((keys) => new Set(keys).size === keys.length, {
+      message: "repositoryKeys must not contain duplicates",
+    })
+    .optional(),
   /**
    * Launch from a named environment: its snapshotted repositories become the
    * session's repository list and sessions.environment_id records provenance
@@ -240,11 +259,21 @@ export const createSessionRequestSchema = createSessionRequestBaseSchema
     path: ["repoName"],
   })
   .refine(hasRepositoryForBranch, {
-    message: "branch requires repoOwner and repoName",
+    message: "branch requires repositoryKey or repoOwner/repoName",
     path: ["branch"],
   })
+  .refine(
+    (data) =>
+      !hasRepositoryIdentifier(data.repositoryKey) ||
+      (!hasRepositoryIdentifier(data.repoOwner) && !hasRepositoryIdentifier(data.repoName)),
+    {
+      message: "repositoryKey and repoOwner/repoName are mutually exclusive",
+      path: ["repositoryKey"],
+    }
+  )
   .refine(hasExclusiveSessionTarget, {
-    message: "environmentId, repositories, and repoOwner/repoName/branch are mutually exclusive",
+    message:
+      "environmentId, repositoryKeys, repositories, and scalar repository targets are mutually exclusive",
     path: ["repositories"],
   });
 
@@ -267,11 +296,21 @@ export const createSessionInputSchema = createSessionRequestBaseSchema
     path: ["repoName"],
   })
   .refine(hasRepositoryForBranch, {
-    message: "branch requires repoOwner and repoName",
+    message: "branch requires repositoryKey or repoOwner/repoName",
     path: ["branch"],
   })
+  .refine(
+    (data) =>
+      !hasRepositoryIdentifier(data.repositoryKey) ||
+      (!hasRepositoryIdentifier(data.repoOwner) && !hasRepositoryIdentifier(data.repoName)),
+    {
+      message: "repositoryKey and repoOwner/repoName are mutually exclusive",
+      path: ["repositoryKey"],
+    }
+  )
   .refine(hasExclusiveSessionTarget, {
-    message: "environmentId, repositories, and repoOwner/repoName/branch are mutually exclusive",
+    message:
+      "environmentId, repositoryKeys, repositories, and scalar repository targets are mutually exclusive",
     path: ["repositories"],
   });
 

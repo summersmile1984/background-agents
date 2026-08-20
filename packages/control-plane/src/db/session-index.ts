@@ -65,6 +65,8 @@ export interface SessionEntry {
   title: string | null;
   repoOwner: string | null;
   repoName: string | null;
+  scmConnectionId?: string | null;
+  repositoryId?: string | null;
   model: string;
   reasoningEffort: string | null;
   agentHarness?: AgentHarness;
@@ -110,6 +112,8 @@ interface SessionRow {
   title: string | null;
   repo_owner: string | null;
   repo_name: string | null;
+  scm_connection_id?: string | null;
+  primary_repository_id?: string | null;
   model: string;
   reasoning_effort: string | null;
   /** Absent only for rows created before migration 0064 during a rolling deploy. */
@@ -158,6 +162,8 @@ function toEntry(row: SessionRow): SessionEntry {
     title: row.title,
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
+    ...(row.scm_connection_id ? { scmConnectionId: row.scm_connection_id } : {}),
+    ...(row.primary_repository_id ? { repositoryId: row.primary_repository_id } : {}),
     model: row.model,
     reasoningEffort: row.reasoning_effort,
     ...(row.agent_harness ? { agentHarness: row.agent_harness } : {}),
@@ -218,14 +224,31 @@ export class SessionIndexStore {
   async create(session: SessionEntry): Promise<void> {
     const repository = normalizeSessionRepositoryFields(session);
 
+    if ((session.scmConnectionId == null) !== (session.repositoryId == null)) {
+      throw new Error("Session SCM connection and primary repository identity must be paired");
+    }
+    const memberConnectionIds = new Set(
+      (session.repositories ?? []).flatMap((member) =>
+        member.connectionId ? [member.connectionId] : []
+      )
+    );
+    if (
+      memberConnectionIds.size > 1 ||
+      (session.scmConnectionId &&
+        memberConnectionIds.size === 1 &&
+        !memberConnectionIds.has(session.scmConnectionId))
+    ) {
+      throw new Error("Session repositories must use the pinned SCM connection");
+    }
+
     if (session.skillManifest && session.skillManifestSourceSessionId) {
       throw new Error("Session cannot both resolve and copy a managed skill manifest");
     }
 
     const sessionStmt = this.db
       .prepare(
-        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at, agent_harness)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT OR IGNORE INTO sessions (id, title, repo_owner, repo_name, model, reasoning_effort, base_branch, status, parent_session_id, root_session_id, spawn_source, spawn_depth, automation_id, automation_run_id, scm_login, user_id, environment_id, created_at, updated_at, agent_harness, scm_connection_id, primary_repository_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN ? ELSE (SELECT root_session_id FROM sessions WHERE id = ?) END, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         session.id,
@@ -249,14 +272,16 @@ export class SessionIndexStore {
         session.environmentId ?? null,
         session.createdAt,
         session.updatedAt,
-        session.agentHarness ?? DEFAULT_AGENT_HARNESS
+        session.agentHarness ?? DEFAULT_AGENT_HARNESS,
+        session.scmConnectionId ?? null,
+        session.repositoryId ?? null
       );
 
     const repositoryStmts = (session.repositories ?? []).map((repo, position) =>
       this.db
         .prepare(
-          `INSERT INTO session_repositories (session_id, position, repo_owner, repo_name, repo_id, base_branch)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO session_repositories (session_id, position, repo_owner, repo_name, repo_id, base_branch, scm_connection_id, repository_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           session.id,
@@ -264,7 +289,9 @@ export class SessionIndexStore {
           normalizeRepoIdentifier(repo.repoOwner),
           normalizeRepoIdentifier(repo.repoName),
           repo.repoId,
-          repo.baseBranch
+          repo.baseBranch,
+          repo.connectionId ?? session.scmConnectionId ?? null,
+          repo.repositoryKey ?? null
         )
     );
 

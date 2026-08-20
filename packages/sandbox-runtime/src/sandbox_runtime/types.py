@@ -135,6 +135,8 @@ class SessionRepositoryConfig(TypedDict, total=False):
     Mirrors the control plane's per-repo spawn shape (snake_case wire form).
     """
 
+    repository_key: str
+    connection_id: str
     repo_owner: str
     repo_name: str
     branch: str | None

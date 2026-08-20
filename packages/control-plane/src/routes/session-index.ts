@@ -14,7 +14,7 @@ import { SessionIndexStore } from "../db/session-index";
 import {
   error,
   defineRoute,
-  GITHUB_USER_OR_SERVICE_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   json,
   parseJsonBody,
   parsePattern,
@@ -239,7 +239,7 @@ async function handleDeleteSession(
 }
 
 export const sessionIndexRoutes: Route[] = [
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "GET",
     pattern: parsePattern("/sessions"),
     handler: handleListSessions,
@@ -254,7 +254,7 @@ export const sessionIndexRoutes: Route[] = [
     pattern: parsePattern("/sessions/:id/read-state"),
     handler: handlePatchReadState,
   }),
-  defineRoute(GITHUB_USER_OR_SERVICE_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, {
     method: "DELETE",
     pattern: parsePattern("/sessions/:id"),
     handler: handleDeleteSession,

@@ -167,6 +167,8 @@ export const skillAssignmentSchema = z.discriminatedUnion("type", [
   z.strictObject({
     id: z.string(),
     type: z.literal("repository"),
+    repositoryKey: z.string().optional(),
+    connectionId: z.string().optional(),
     repoOwner: z.string(),
     repoName: z.string(),
   }),

@@ -465,6 +465,82 @@ describe("SessionPullRequestService", () => {
     });
   });
 
+  it("uses the pinned connection, service API auth, and credential-free Git proxy", async () => {
+    harness.setSession(
+      createSession({
+        scm_connection_id: "scm_gitea_1",
+        repository_id: "repo_gitea_1",
+      })
+    );
+    harness.setRepositories([
+      createRepositoryRow({
+        scm_connection_id: "scm_gitea_1",
+        repository_id: "repo_gitea_1",
+      }),
+    ]);
+    const gitea = {
+      ...createMockProvider(),
+      name: "gitea",
+      getServiceApiAuthorization: vi.fn(async () => ({
+        authType: "pat" as const,
+        token: "server-only-pat",
+      })),
+      generatePushAuth: vi.fn(async () => {
+        throw new Error("must not release a PAT to the sandbox");
+      }),
+    } as unknown as SourceControlProvider;
+    harness.deps.resolveSourceControlProvider = vi.fn(async () => gitea);
+    harness.deps.buildScmProxyPushSpec = vi.fn((config) => ({
+      remoteUrl: `https://control.example/git/session/${config.sessionId}/${config.repositoryKey}.git`,
+      redactedRemoteUrl: `https://control.example/git/session/${config.sessionId}/${config.repositoryKey}.git`,
+      refspec: `${config.sourceRef}:refs/heads/${config.targetBranch}`,
+      targetBranch: config.targetBranch,
+      repoOwner: config.repoOwner,
+      repoName: config.repoName,
+      force: config.force,
+    }));
+    harness.service = new SessionPullRequestService(harness.deps);
+
+    const result = await harness.service.createPullRequest(
+      createInput({ promptingAuth: { authType: "oauth", token: "github-user-token" } })
+    );
+
+    expect(result.kind).toBe("created");
+    expect(gitea.generatePushAuth).not.toHaveBeenCalled();
+    expect(harness.deps.buildScmProxyPushSpec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-name-1",
+        repositoryKey: "repo_gitea_1",
+      })
+    );
+    expect(harness.deps.pushBranchToRemote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        remoteUrl: "https://control.example/git/session/session-name-1/repo_gitea_1.git",
+      })
+    );
+    expect(gitea.createPullRequest).toHaveBeenCalledWith(
+      { authType: "pat", token: "server-only-pat" },
+      expect.anything()
+    );
+    expect(harness.sessionPullRequests.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scmConnectionId: "scm_gitea_1",
+        repositoryId: "repo_gitea_1",
+      })
+    );
+    expect(harness.deps.messenger.broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "artifact_created",
+        artifact: expect.objectContaining({
+          metadata: expect.objectContaining({
+            scmConnectionId: "scm_gitea_1",
+            repositoryId: "repo_gitea_1",
+          }),
+        }),
+      })
+    );
+  });
+
   it("uses the configured appName in the PR body footer", async () => {
     const customDeps = { ...harness.deps, appName: "Acme Bot" };
     const customService = new SessionPullRequestService(customDeps);
@@ -820,6 +896,8 @@ describe("SessionPullRequestService", () => {
       expect(harness.sessionPullRequests.upsert).toHaveBeenCalledWith({
         artifactId: "id-1",
         sessionId: "session-name-1",
+        scmConnectionId: null,
+        repositoryId: null,
         repositoryExternalId: null,
         repoOwner: "acme",
         repoName: "web",

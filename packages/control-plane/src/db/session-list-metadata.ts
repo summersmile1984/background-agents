@@ -12,6 +12,8 @@ interface SessionRepositoryRow {
   repo_name: string;
   repo_id: number | null;
   base_branch: string;
+  scm_connection_id?: string | null;
+  repository_id?: string | null;
 }
 
 /** Load repository rows and PR summaries in parallel for one D1-safe ID chunk. */
@@ -65,6 +67,8 @@ export async function attachSessionListMetadata<T extends { id: string }>(
   for (const row of chunkResults.flatMap((result) => result.repositoryRows)) {
     const repositories = repositoriesBySession.get(row.session_id) ?? [];
     repositories.push({
+      repositoryKey: row.repository_id ?? null,
+      connectionId: row.scm_connection_id ?? null,
       repoOwner: row.repo_owner,
       repoName: row.repo_name,
       repoId: row.repo_id,

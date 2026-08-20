@@ -6,6 +6,8 @@ export type ImageBuildWorkflowContext = CorrelationContext;
 
 /** One repository of a build scope, in position order ([0] = primary). */
 export interface ImageBuildRepository {
+  repositoryKey?: string;
+  connectionId?: string;
   repoOwner: string;
   repoName: string;
   baseBranch: string;
@@ -47,7 +49,13 @@ interface BaseImageBuildPlan {
 
 /** Clone auth handed to provider-session build sandboxes (provider-policy.ts). */
 export type ImageBuildCloneAuth =
-  | { type: "credential_helper"; host: string; username: string; token: string }
+  | {
+      type: "credential_helper";
+      host: string;
+      username: string;
+      token: string;
+      cloneBaseUrl?: string;
+    }
   | { type: "unavailable" };
 
 /** Every supported provider uses the same create-bind-launch session contract. */

@@ -48,7 +48,7 @@ function unexpired(expiresAt: string | undefined): boolean {
 export interface AgentRuntimeSecretTarget {
   environmentId: string | null;
   /** Repositories in session order (primary first). */
-  repositories?: readonly { repoId: number }[];
+  repositories?: readonly { repoId: number; repositoryKey?: string | null }[];
   /** Scalar repository fallback when repositories is absent. */
   repoId?: number | null;
 }
@@ -77,16 +77,20 @@ async function loadEffectiveSecrets(input: {
     return mergeSecretSources(sources).merged;
   }
 
-  const repositoryIds =
-    target.repositories?.map(({ repoId }) => repoId) ??
-    (target.repoId != null ? [target.repoId] : []);
+  const repositories =
+    target.repositories ?? (target.repoId != null ? [{ repoId: target.repoId }] : []);
   const repoStore = new RepoSecretsStore(input.db, input.encryptionKey);
   // Match the sandbox fold: secondary repositories merge first and the
   // primary repository (position zero) wins collisions.
-  for (const repoId of [...repositoryIds].reverse()) {
-    const repoSecrets = await repoStore.getDecryptedSecrets(repoId);
+  for (const repository of [...repositories].reverse()) {
+    const repoSecrets = repository.repositoryKey
+      ? await repoStore.getDecryptedSecretsByRepositoryId(repository.repositoryKey)
+      : await repoStore.getDecryptedSecrets(repository.repoId);
     if (Object.keys(repoSecrets).length > 0) {
-      sources.push({ label: `repo:${repoId}`, secrets: repoSecrets });
+      sources.push({
+        label: `repo:${repository.repositoryKey ?? repository.repoId}`,
+        secrets: repoSecrets,
+      });
     }
   }
   return mergeSecretSources(sources).merged;

@@ -21,6 +21,7 @@ from .constants import REPO_MANIFEST_FILE_PATH
 # be named ".github"); "." and ".." are rejected separately below.
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 _GIT_SHA_RE = re.compile(r"^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$")
+_OPAQUE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 class RepoConfigError(ValueError):
@@ -41,6 +42,8 @@ class RepoEntry:
     branch: str
     path: Path
     base_sha: str | None = None
+    repository_key: str | None = None
+    connection_id: str | None = None
 
 
 def is_safe_repo_segment(value: str) -> bool:
@@ -117,6 +120,14 @@ def parse_repositories(
             seen_names.add(name_key)
             branch = _str_field(item, "branch") or "main"
             base_sha = _optional_git_sha(item, "base_sha")
+            repository_key = _str_field(item, "repository_key") or None
+            connection_id = _str_field(item, "connection_id") or None
+            if (repository_key is None) != (connection_id is None):
+                raise RepoConfigError("repository_key and connection_id must be paired")
+            if repository_key and not _OPAQUE_ID_RE.fullmatch(repository_key):
+                raise RepoConfigError("invalid repository_key")
+            if connection_id and not _OPAQUE_ID_RE.fullmatch(connection_id):
+                raise RepoConfigError("invalid connection_id")
             entries.append(
                 RepoEntry(
                     owner=owner,
@@ -124,6 +135,8 @@ def parse_repositories(
                     branch=branch,
                     path=workspace_path / name,
                     base_sha=base_sha,
+                    repository_key=repository_key,
+                    connection_id=connection_id,
                 )
             )
     if entries:
@@ -168,6 +181,8 @@ def dump_repo_manifest(repositories: list[RepoEntry]) -> str:
                     "branch": r.branch,
                     "path": str(r.path),
                     **({"baseSha": r.base_sha} if r.base_sha else {}),
+                    **({"repositoryKey": r.repository_key} if r.repository_key else {}),
+                    **({"connectionId": r.connection_id} if r.connection_id else {}),
                 }
                 for r in repositories
             ]
@@ -189,6 +204,14 @@ def _manifest_entries(data: object) -> list[RepoEntry]:
                 if not owner or not name or not path_value:
                     continue
                 branch = _str_field(item, "branch") or "main"
+                repository_key = _str_field(item, "repositoryKey") or None
+                connection_id = _str_field(item, "connectionId") or None
+                if (repository_key is None) != (connection_id is None):
+                    raise RepoConfigError("repositoryKey and connectionId must be paired")
+                if repository_key and not _OPAQUE_ID_RE.fullmatch(repository_key):
+                    raise RepoConfigError("invalid repositoryKey")
+                if connection_id and not _OPAQUE_ID_RE.fullmatch(connection_id):
+                    raise RepoConfigError("invalid connectionId")
                 entries.append(
                     RepoEntry(
                         owner=owner,
@@ -196,6 +219,8 @@ def _manifest_entries(data: object) -> list[RepoEntry]:
                         branch=branch,
                         path=Path(path_value),
                         base_sha=_optional_git_sha(item, "baseSha"),
+                        repository_key=repository_key,
+                        connection_id=connection_id,
                     )
                 )
     except RepoConfigError:

@@ -61,6 +61,8 @@ export interface ImageBuildRegistration {
   repositoriesFingerprint: string;
   callbackTokenHash?: string;
   callbackTokenExpiresAt?: number;
+  scmConnectionId?: string | null;
+  repositoryId?: string | null;
 }
 
 /**
@@ -207,9 +209,11 @@ export class ImageBuildStore {
            status,
            callback_token_hash,
            callback_token_expires_at,
+           scm_connection_id,
+           repository_id,
            created_at
          )
-         SELECT ?, ?, ?, ?, ?, '[]', '', 'building', ?, ?, ?
+         SELECT ?, ?, ?, ?, ?, '[]', '', 'building', ?, ?, ?, ?, ?
          WHERE NOT EXISTS (
            SELECT 1 FROM image_builds
            WHERE scope_kind = ? AND scope_id = ? AND provider = ? AND status = 'building'
@@ -223,6 +227,8 @@ export class ImageBuildStore {
         build.repositoriesFingerprint,
         build.callbackTokenHash ?? null,
         build.callbackTokenExpiresAt ?? null,
+        build.scmConnectionId ?? null,
+        build.repositoryId ?? null,
         Date.now(),
         build.scope.kind,
         build.scope.id,

@@ -8,6 +8,7 @@ import {
   type AutomationSessionTarget,
   type SelectionMode,
   buildRepositoriesPayload,
+  buildRepositoryKeysPayload,
   collapseToSingleTarget,
   hydrateTargets,
   initialBaseBranch,
@@ -15,11 +16,12 @@ import {
   nextBaseBranch,
   repoNamesOf,
   toggleTarget,
+  type AutomationRepositorySelection,
 } from "./automation-target-selection";
 
 export interface UseAutomationTargetsOptions {
   /** Stored selection hydrated in edit mode (or a template pre-fill). */
-  initialRepositories: AutomationRepositoryInput[];
+  initialRepositories: AutomationRepositorySelection[];
   initialEnvironmentIds: string[];
   /**
    * Multi-target selections are schedule-only (the server rejects them for
@@ -31,7 +33,7 @@ export interface UseAutomationTargetsOptions {
    * repository, no environments, no repo-less selection.
    */
   repositoryRequired: boolean;
-  repos: Array<{ fullName: string; defaultBranch: string }>;
+  repos: Array<{ fullName: string; defaultBranch: string; repositoryKey?: string }>;
 }
 
 export interface UseAutomationTargetsResult {
@@ -56,6 +58,7 @@ export interface UseAutomationTargetsResult {
   toggleSelectionMode: () => void;
   /** The `repositories` payload field: full selection with branch rules applied. */
   buildRepositoriesPayload: () => AutomationRepositoryInput[];
+  buildRepositoryKeysPayload: () => Array<{ repositoryKey: string; baseBranch?: string }>;
 }
 
 /**
@@ -196,6 +199,16 @@ export function useAutomationTargets(
       ),
     [baseBranch, initialRepositories, selectedRepoNames, usesSingleRepository]
   );
+  const buildKeyPayload = useCallback(
+    () =>
+      buildRepositoryKeysPayload(
+        selectedRepoNames,
+        usesSingleRepository,
+        baseBranch,
+        initialRepositories
+      ),
+    [baseBranch, initialRepositories, selectedRepoNames, usesSingleRepository]
+  );
 
   return {
     selectedRepoNames,
@@ -211,5 +224,6 @@ export function useAutomationTargets(
     clearTargets,
     toggleSelectionMode,
     buildRepositoriesPayload: buildPayload,
+    buildRepositoryKeysPayload: buildKeyPayload,
   };
 }

@@ -26,6 +26,9 @@ export interface SessionInitInput {
   repoOwner: string | null;
   repoName: string | null;
   repoId?: number | null;
+  /** Stable source-control identities; nullable only during legacy expansion. */
+  repositoryId?: string | null;
+  scmConnectionId?: string | null;
   defaultBranch?: string | null;
   branch?: string | null;
   /**
@@ -101,6 +104,12 @@ export async function initializeSession(
   if (!hasRepoOwner && (hasBranchContext(input.branch) || hasBranchContext(input.defaultBranch))) {
     throw new Error("No-repository sessions must not include branch context");
   }
+  if (!hasRepoOwner && (input.repositoryId || input.scmConnectionId)) {
+    throw new Error("No-repository sessions must not include source-control identity");
+  }
+  if ((input.repositoryId == null) !== (input.scmConnectionId == null)) {
+    throw new Error("repositoryId and scmConnectionId must be provided together");
+  }
   const branch = hasRepoOwner ? input.branch : null;
   const defaultBranch = hasRepoOwner ? input.defaultBranch : null;
 
@@ -113,6 +122,8 @@ export async function initializeSession(
       primary.repoOwner !== input.repoOwner ||
       primary.repoName !== input.repoName ||
       primary.repoId !== input.repoId ||
+      (primary.repositoryKey ?? null) !== (input.repositoryId ?? null) ||
+      (primary.connectionId ?? null) !== (input.scmConnectionId ?? null) ||
       primary.baseBranch !== baseBranch
     ) {
       throw new Error("repositories[0] must match the scalar repository mirror");
@@ -123,6 +134,8 @@ export async function initializeSession(
     : hasRepoOwner && input.repoOwner && input.repoName && input.repoId != null && baseBranch
       ? [
           {
+            repositoryKey: input.repositoryId ?? undefined,
+            connectionId: input.scmConnectionId ?? undefined,
             repoOwner: input.repoOwner,
             repoName: input.repoName,
             repoId: input.repoId,
@@ -144,6 +157,8 @@ export async function initializeSession(
     baseBranch,
     repositories,
     environmentId: input.environmentId ?? null,
+    repositoryId: input.repositoryId ?? null,
+    scmConnectionId: input.scmConnectionId ?? null,
     status: "created",
     parentSessionId: input.parentSessionId,
     spawnSource: input.spawnSource,
@@ -179,6 +194,8 @@ export async function initializeSession(
           repoOwner: input.repoOwner,
           repoName: input.repoName,
           repoId: input.repoId,
+          repositoryId: input.repositoryId ?? null,
+          scmConnectionId: input.scmConnectionId ?? null,
           defaultBranch,
           branch,
           repositories,

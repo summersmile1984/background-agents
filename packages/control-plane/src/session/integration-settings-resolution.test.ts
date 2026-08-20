@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSessionScopedSettings } from "./integration-settings-resolution";
 
 const mockState = vi.hoisted(() => ({
-  resolvedCalls: [] as Array<{ id: string; repo: string; environmentId: string | null }>,
+  resolvedCalls: [] as Array<{
+    id: string;
+    repo: string;
+    environmentId: string | null;
+    repositoryId: string | null;
+  }>,
   globalCalls: [] as string[],
   resolved: {} as Record<
     string,
@@ -13,8 +18,18 @@ const mockState = vi.hoisted(() => ({
 
 vi.mock("../db/integration-settings", () => ({
   IntegrationSettingsStore: class {
-    async getResolvedConfig(id: string, repo: string, environmentId?: string | null) {
-      mockState.resolvedCalls.push({ id, repo, environmentId: environmentId ?? null });
+    async getResolvedConfig(
+      id: string,
+      repo: string,
+      environmentId?: string | null,
+      repositoryId?: string | null
+    ) {
+      mockState.resolvedCalls.push({
+        id,
+        repo,
+        environmentId: environmentId ?? null,
+        repositoryId: repositoryId ?? null,
+      });
       return mockState.resolved[id] ?? { enabledRepos: null, settings: {} };
     }
     async getGlobal(id: string) {
@@ -84,6 +99,23 @@ describe("resolveSessionScopedSettings", () => {
       "env_1",
       "env_1",
       "env_1",
+    ]);
+  });
+
+  it("pins every settings lookup to the primary stable repository id", async () => {
+    await resolveSessionScopedSettings(DB, [
+      {
+        repoOwner: "acme",
+        repoName: "web",
+        repositoryKey: "repo_gitea",
+        connectionId: "conn_gitea",
+      },
+    ]);
+
+    expect(mockState.resolvedCalls.map((call) => call.repositoryId)).toEqual([
+      "repo_gitea",
+      "repo_gitea",
+      "repo_gitea",
     ]);
   });
 

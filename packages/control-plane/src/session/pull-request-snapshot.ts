@@ -34,6 +34,8 @@ export const pullRequestSnapshotSchema = z
     headSha: z.string().optional(),
     repoOwner: z.string(),
     repoName: z.string(),
+    scmConnectionId: z.string().optional(),
+    repositoryId: z.string().optional(),
     repositoryExternalId: z.string().optional(),
     providerCreatedAt: z.number().optional(),
     providerUpdatedAt: z.number().optional(),
@@ -57,6 +59,8 @@ export function snapshotToRecord(
   return {
     artifactId: identity.artifactId,
     sessionId: identity.sessionId,
+    scmConnectionId: snapshot.scmConnectionId ?? null,
+    repositoryId: snapshot.repositoryId ?? null,
     repositoryExternalId: snapshot.repositoryExternalId ?? null,
     repoOwner: snapshot.repoOwner,
     repoName: snapshot.repoName,
@@ -111,6 +115,12 @@ export function mergeSnapshotMetadata(
     repoOwner: snapshot.repoOwner,
     repoName: snapshot.repoName,
   };
+  if (snapshot.scmConnectionId !== undefined) {
+    next.scmConnectionId = snapshot.scmConnectionId;
+  }
+  if (snapshot.repositoryId !== undefined) {
+    next.repositoryId = snapshot.repositoryId;
+  }
   if (snapshot.headSha !== undefined) next.headSha = snapshot.headSha;
   if (snapshot.repositoryExternalId !== undefined) {
     next.repositoryExternalId = snapshot.repositoryExternalId;

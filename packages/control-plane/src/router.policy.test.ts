@@ -112,17 +112,16 @@ describe("route policy table", () => {
     expect(routeFor(method, path)?.supportedScmProviders).toBe("all");
   });
 
-  it("keeps SCM credentials as the only GitLab-specific exception", () => {
+  it("does not keep provider-neutral session routes behind GitLab-specific gates", () => {
     expect(
       routes.filter(
         (route) =>
           route.supportedScmProviders !== "all" && route.supportedScmProviders.includes("gitlab")
       )
-    ).toEqual([routeFor("POST", "/sessions/session-1/scm-credentials")]);
-    expect(routeFor("POST", "/sessions/session-1/scm-credentials")?.supportedScmProviders).toEqual([
-      "github",
-      "gitlab",
-    ]);
+    ).toEqual([]);
+    expect(routeFor("POST", "/sessions/session-1/scm-credentials")?.supportedScmProviders).toBe(
+      "all"
+    );
   });
 });
 
@@ -162,7 +161,8 @@ describe("route policy dispatch ordering", () => {
     );
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: "Invalid SCM_PROVIDER value 'invalid'. Supported values: github, bitbucket, gitlab.",
+      error:
+        "Invalid SCM_PROVIDER value 'invalid'. Supported values: github, gitea, bitbucket, gitlab.",
     });
   });
 });

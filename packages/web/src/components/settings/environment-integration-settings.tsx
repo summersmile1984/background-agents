@@ -82,6 +82,7 @@ export function EnvironmentIntegrationSettings({
           environmentId={environmentId}
           owner={primary?.repoOwner}
           name={primary?.repoName}
+          repositoryKey={primary?.repositoryKey ?? undefined}
         />
       </div>
     </div>

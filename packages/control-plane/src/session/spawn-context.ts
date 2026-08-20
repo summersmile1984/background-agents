@@ -29,6 +29,8 @@ export const spawnContextSchema = z.object({
   repoOwner: z.string().nullable(),
   repoName: z.string().nullable(),
   repoId: z.number().nullable(),
+  repositoryId: z.string().nullable().optional(),
+  scmConnectionId: z.string().nullable().optional(),
   model: z.string(),
   reasoningEffort: z.string().nullable(),
   agentHarness: agentHarnessSchema.optional(),

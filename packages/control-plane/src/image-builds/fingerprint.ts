@@ -9,6 +9,8 @@
  */
 
 export interface FingerprintRepositoryInput {
+  repositoryKey?: string | null;
+  connectionId?: string | null;
   repoOwner: string;
   repoName: string;
   baseBranch: string;
@@ -24,11 +26,11 @@ export async function computeRepositoriesFingerprint(
   repositories: FingerprintRepositoryInput[]
 ): Promise<string> {
   const canonical = JSON.stringify(
-    repositories.map((repo) => [
-      repo.repoOwner.toLowerCase(),
-      repo.repoName.toLowerCase(),
-      repo.baseBranch,
-    ])
+    repositories.map((repo) =>
+      repo.repositoryKey && repo.connectionId
+        ? ["stable", repo.connectionId, repo.repositoryKey, repo.baseBranch]
+        : [repo.repoOwner.toLowerCase(), repo.repoName.toLowerCase(), repo.baseBranch]
+    )
   );
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest))

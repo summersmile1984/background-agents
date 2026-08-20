@@ -20,7 +20,7 @@ import { BranchIcon, ChevronDownIcon, RepoIcon } from "@/components/ui/icons";
 import { useBranches } from "@/hooks/use-branches";
 import { useRepos, type Repo } from "@/hooks/use-repos";
 import { RepositoryMultiSelect } from "@/components/repository-multi-select";
-import { repositorySelectionKey } from "@/lib/repository-selection";
+import { repositorySelectionKey, repoSelectionValue } from "@/lib/repository-selection";
 import { supportsRepoImages } from "@/lib/sandbox-provider";
 import { AgentHarnessSelector } from "@/components/agent-harness-selector";
 
@@ -29,7 +29,8 @@ export interface EnvironmentFormValues {
   description: string | null;
   prebuildEnabled: boolean;
   defaultAgentHarness: AgentHarness | null;
-  repositories: RepositoryInput[];
+  repositories?: RepositoryInput[];
+  repositoryKeys?: Array<{ repositoryKey: string; baseBranch?: string }>;
 }
 
 /**
@@ -63,13 +64,17 @@ export function EnvironmentForm({
   );
   const [selectedKeys, setSelectedKeys] = useState<string[]>(() =>
     (initialValues?.repositories ?? []).map((repository) =>
-      repositorySelectionKey(repository.repoOwner, repository.repoName)
+      repository.repositoryKey
+        ? `repo:${repository.repositoryKey}`
+        : repositorySelectionKey(repository.repoOwner, repository.repoName)
     )
   );
   const [branchByKey, setBranchByKey] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       (initialValues?.repositories ?? []).map((repository) => [
-        repositorySelectionKey(repository.repoOwner, repository.repoName),
+        repository.repositoryKey
+          ? `repo:${repository.repositoryKey}`
+          : repositorySelectionKey(repository.repoOwner, repository.repoName),
         repository.baseBranch,
       ])
     )
@@ -78,6 +83,7 @@ export function EnvironmentForm({
   const repoByKey = useMemo(() => {
     const byKey = new Map<string, Repo>();
     for (const repo of repos) {
+      byKey.set(repoSelectionValue(repo), repo);
       byKey.set(repositorySelectionKey(repo.owner, repo.name), repo);
     }
     return byKey;
@@ -118,20 +124,33 @@ export function EnvironmentForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
+    const selectedRepositories = selectedKeys.map((key) => repoByKey.get(key));
+    const stable = selectedRepositories.every((repository) => repository?.repositoryKey);
     onSubmit({
       name: name.trim(),
       description: description.trim() ? description.trim() : null,
       prebuildEnabled,
       defaultAgentHarness,
-      repositories: selectedKeys.map((key) => {
-        const entry: RepositoryInput = parseRepositoryFullName(key) ?? {
-          repoOwner: "",
-          repoName: "",
-        };
-        const branch = branchByKey[key]?.trim();
-        if (branch) entry.baseBranch = branch;
-        return entry;
-      }),
+      ...(stable
+        ? {
+            repositoryKeys: selectedRepositories.map((repository, index) => ({
+              repositoryKey: repository!.repositoryKey!,
+              ...(branchByKey[selectedKeys[index]]?.trim()
+                ? { baseBranch: branchByKey[selectedKeys[index]].trim() }
+                : {}),
+            })),
+          }
+        : {
+            repositories: selectedKeys.map((key) => {
+              const repository = repoByKey.get(key);
+              const entry: RepositoryInput = repository
+                ? { repoOwner: repository.owner, repoName: repository.name }
+                : (parseRepositoryFullName(key) ?? { repoOwner: "", repoName: "" });
+              const branch = branchByKey[key]?.trim();
+              if (branch) entry.baseBranch = branch;
+              return entry;
+            }),
+          }),
     });
   };
 
@@ -206,6 +225,7 @@ export function EnvironmentForm({
             <EnvironmentRepositoryRow
               key={key}
               repositoryKey={key}
+              repository={repoByKey.get(key)}
               isPrimary={index === 0}
               branch={branchByKey[key] ?? ""}
               onBranchChange={(branch) =>
@@ -278,6 +298,7 @@ export function EnvironmentForm({
  */
 function EnvironmentRepositoryRow({
   repositoryKey,
+  repository,
   isPrimary,
   branch,
   onBranchChange,
@@ -289,6 +310,7 @@ function EnvironmentRepositoryRow({
   disabled,
 }: {
   repositoryKey: string;
+  repository?: Repo;
   isPrimary: boolean;
   branch: string;
   onBranchChange: (branch: string) => void;
@@ -299,17 +321,19 @@ function EnvironmentRepositoryRow({
   onRemove: () => void;
   disabled: boolean;
 }) {
-  const repository = parseRepositoryFullName(repositoryKey);
+  const legacyRepository = parseRepositoryFullName(repositoryKey);
   const { branches, loading: loadingBranches } = useBranches(
-    repository?.repoOwner ?? "",
-    repository?.repoName ?? ""
+    repository?.owner ?? legacyRepository?.repoOwner ?? "",
+    repository?.name ?? legacyRepository?.repoName ?? "",
+    repository?.repositoryKey
   );
+  const displayName = repository?.fullName ?? repositoryKey;
 
   return (
     <div className="flex flex-wrap items-center gap-2 border border-border-muted px-3 py-2">
       <RepoIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={repositoryKey}>
-        {repositoryKey}
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={displayName}>
+        {displayName}
       </span>
       {isPrimary && (
         <Badge variant="info" className="text-[10px]">
