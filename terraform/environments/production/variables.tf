@@ -322,10 +322,9 @@ variable "anthropic_api_key" {
   validation {
     condition = (
       !contains(["modal", "opencomputer"], var.sandbox_provider) &&
-      !var.enable_slack_bot &&
       !var.enable_linear_bot
     ) || trimspace(var.anthropic_api_key) != ""
-    error_message = "anthropic_api_key must be non-blank when Modal, OpenComputer, Slack, or Linear execution is enabled."
+    error_message = "anthropic_api_key must be non-blank when Modal, OpenComputer, or Linear execution is enabled."
   }
 }
 

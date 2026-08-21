@@ -108,6 +108,24 @@ describe("RepoClassifier", () => {
     mockBuildRepoDescriptions.mockReturnValue("- acme/prod\n- acme/web");
   });
 
+  it("falls back to the target picker when Anthropic classification is not configured", async () => {
+    const classifier = new RepoClassifier({
+      ...TEST_ENV,
+      ANTHROPIC_API_KEY: undefined,
+    });
+
+    const result = await classifier.classify("please fix the deployment");
+
+    expect(result).toEqual({
+      target: null,
+      confidence: "low",
+      reasoning: "Automatic target classification is not configured. Please pick one below.",
+      alternatives: undefined,
+      needsClarification: true,
+    });
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+  });
+
   it("uses tool output when provider returns valid structured classification", async () => {
     mockMessagesCreate.mockResolvedValue({
       content: [

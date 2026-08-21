@@ -195,14 +195,15 @@ function extractStructuredResponse(response: Anthropic.Messages.Message): LLMRes
  * Repository classifier class.
  */
 export class RepoClassifier {
-  private client: Anthropic;
+  private client?: Anthropic;
   private env: Env;
 
   constructor(env: Env) {
     this.env = env;
-    this.client = new Anthropic({
-      apiKey: env.ANTHROPIC_API_KEY,
-    });
+    const apiKey = env.ANTHROPIC_API_KEY?.trim();
+    if (apiKey) {
+      this.client = new Anthropic({ apiKey });
+    }
   }
 
   /**
@@ -346,6 +347,20 @@ export class RepoClassifier {
         confidence: "high",
         reasoning: "Only one repository is available.",
         needsClarification: false,
+      };
+    }
+
+    // Anthropic classification is an optional convenience. Deployments that
+    // use Codex, DeepSeek, or another harness must still be able to run Slack
+    // without a separate Anthropic API account; Slack's searchable target
+    // picker is the safe deterministic fallback for ambiguous requests.
+    if (!this.client) {
+      return {
+        target: null,
+        confidence: "low",
+        reasoning: "Automatic target classification is not configured. Please pick one below.",
+        alternatives: undefined,
+        needsClarification: true,
       };
     }
 
