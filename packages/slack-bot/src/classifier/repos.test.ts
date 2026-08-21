@@ -133,6 +133,9 @@ describe("getAvailableRepos", () => {
             private: true,
             defaultBranch: "main",
             archived: false,
+            repositoryKey: "repo-gitea-n9n",
+            connectionId: "scm-gitea-primary",
+            provider: "gitea",
             metadata: {
               description: "Slack-facing description",
               aliases: ["agents"],
@@ -151,6 +154,9 @@ describe("getAvailableRepos", () => {
     expect(repos).toEqual([
       {
         id: "open-inspect/background-agents",
+        repositoryKey: "repo-gitea-n9n",
+        connectionId: "scm-gitea-primary",
+        provider: "gitea",
         owner: "open-inspect",
         name: "background-agents",
         fullName: "open-inspect/background-agents",

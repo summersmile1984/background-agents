@@ -181,6 +181,21 @@ describe("resolveTargetValue", () => {
     expect(await resolveTargetValue(env, "acme/web")).toEqual(target);
   });
 
+  it("resolves a stable repository key to the exact SCM target", async () => {
+    const stableTarget: SlackSessionTarget = {
+      kind: "repository",
+      repo: {
+        ...repo("huangdong/n9n"),
+        repositoryKey: "repo-gitea-n9n",
+        connectionId: "scm-gitea-primary",
+        provider: "gitea",
+      },
+    };
+    mockGetAvailableRepos.mockResolvedValue([stableTarget.repo]);
+
+    expect(await resolveTargetValue(env, "repo-gitea-n9n")).toEqual(stableTarget);
+  });
+
   it("resolves an env: value against the live environments", async () => {
     mockGetEnvironmentById.mockResolvedValue(
       envTarget.kind === "environment" ? envTarget.environment : null

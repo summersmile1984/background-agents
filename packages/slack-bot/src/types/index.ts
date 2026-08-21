@@ -86,7 +86,7 @@ export type { SlackInteractionPayload } from "../interaction-payload";
  */
 export interface ThreadSession {
   sessionId: string;
-  /** Session-target id: the repo id ("owner/name") or environment id ("env_…"). */
+  /** Session-target id: repository key (or legacy owner/name), or environment id. */
   repoId: string;
   /** Session-target display label: the repo fullName or environment name. */
   repoFullName: string;

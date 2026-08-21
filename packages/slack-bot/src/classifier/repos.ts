@@ -2,8 +2,8 @@
  * Dynamic repository fetching from the control plane.
  *
  * This module replaces the static REPO_REGISTRY with dynamic fetching
- * from the control plane's GET /repos endpoint, which queries the
- * GitHub App installation to get the list of accessible repositories.
+ * from the control plane's GET /repos endpoint, which queries every enabled
+ * source-control connection for the list of accessible repositories.
  */
 
 import type { Env } from "../types";
@@ -49,7 +49,7 @@ const FALLBACK_REPOS: RepoConfig[] = [];
  * a far better outcome than dropping the request. A warm fetch takes well under
  * a second, so this only trips when something is genuinely wrong.
  */
-export const REPOS_FETCH_TIMEOUT_MS = 5_000;
+export const REPOS_FETCH_TIMEOUT_MS = 12_000;
 
 /**
  * Local in-memory cache for repos.
@@ -79,6 +79,9 @@ function toRepoConfig(repo: ParsedControlPlaneRepo): RepoConfig {
 
   return {
     id: normalizeRepoId(repo.owner, repo.name),
+    ...(repo.repositoryKey ? { repositoryKey: repo.repositoryKey } : {}),
+    ...(repo.connectionId ? { connectionId: repo.connectionId } : {}),
+    ...(repo.provider ? { provider: repo.provider } : {}),
     owner: normalizedOwner,
     name: normalizedName,
     fullName: `${normalizedOwner}/${normalizedName}`,

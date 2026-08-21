@@ -53,6 +53,10 @@ export type EnrichedRepository = z.infer<typeof enrichedRepositorySchema>;
 
 export const repoConfigSchema = z.object({
   id: z.string(),
+  /** Stable Open-Inspect identity used to launch the exact SCM connection. */
+  repositoryKey: z.string().min(1).optional(),
+  connectionId: z.string().min(1).optional(),
+  provider: sourceControlProviderNameSchema.optional(),
   owner: z.string(),
   name: z.string(),
   fullName: z.string(),

@@ -69,8 +69,12 @@ export const MAX_TARGET_QUICK_PICKS = 5;
 function toRepoSelectOption(repo: RepoConfig): SlackSelectOption {
   return {
     text: plainTextOption(repo.displayName),
-    description: plainTextOption(repo.description),
-    value: repo.id,
+    description: plainTextOption(
+      repo.provider
+        ? `${repo.provider.toUpperCase()} · ${repo.fullName} · ${repo.description}`
+        : repo.description
+    ),
+    value: targetValue({ kind: "repository", repo }),
   };
 }
 
@@ -120,7 +124,9 @@ export async function resolveTargetValue(
     return environment ? { kind: "environment", environment } : null;
   }
   const repos = await getAvailableRepos(env, traceId);
-  const repo = repos.find((r) => r.id === ref.repoId);
+  const repo = repos.find(
+    (candidate) => targetValue({ kind: "repository", repo: candidate }) === ref.repoId
+  );
   return repo ? { kind: "repository", repo } : null;
 }
 

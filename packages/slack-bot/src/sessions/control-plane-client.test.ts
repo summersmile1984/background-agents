@@ -173,6 +173,36 @@ describe("control plane client request payloads", () => {
     });
   });
 
+  it("creates a session against the exact Gitea connection by repository key", async () => {
+    const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      okJson({ sessionId: "session-gitea", status: "created" })
+    );
+
+    await createSession(makeEnv(fetch), {
+      target: {
+        kind: "repository",
+        repo: {
+          ...target.repo,
+          id: "huangdong/n9n",
+          owner: "huangdong",
+          name: "n9n",
+          fullName: "huangdong/n9n",
+          repositoryKey: "repo-gitea-n9n",
+          connectionId: "scm-gitea-primary",
+          provider: "gitea",
+        },
+      },
+      model: "deepseek/deepseek-chat",
+      branch: "main",
+    });
+
+    expect(parseRequestBody(fetch)).toEqual({
+      repositoryKey: "repo-gitea-n9n",
+      branch: "main",
+      model: "deepseek/deepseek-chat",
+    });
+  });
+
   it("sends prompt attachment references only when present", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       okJson({ messageId: "message-1", status: "queued" })

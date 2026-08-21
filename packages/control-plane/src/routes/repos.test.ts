@@ -13,6 +13,7 @@ const {
   mockGetBatch,
   mockGetBatchByRepositoryIds,
   mockListRepositories,
+  mockConnectionList,
   mockLogger,
   mockUpsert,
   mockUpsertRepository,
@@ -23,6 +24,7 @@ const {
   mockGetBatch: vi.fn(),
   mockGetBatchByRepositoryIds: vi.fn(),
   mockListRepositories: vi.fn(),
+  mockConnectionList: vi.fn(),
   mockLogger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -36,18 +38,7 @@ const {
 vi.mock("../db/scm-connections", () => ({
   ScmConnectionStore: class {
     async list() {
-      return [
-        {
-          id: "scm_github_default",
-          provider: "github",
-          displayName: "GitHub",
-          baseUrl: "https://github.com",
-          cloneBaseUrl: "https://github.com",
-          revision: 1,
-          isDefault: true,
-          enabled: true,
-        },
-      ];
+      return mockConnectionList();
     }
   },
   ScmConnectionCredentialStore: class {},
@@ -63,8 +54,8 @@ vi.mock("../db/scm-repositories", () => ({
 
 vi.mock("../source-control/connection-registry", () => ({
   SourceControlConnectionRegistry: class {
-    async getConnection() {
-      return { provider: { listRepositories: mockListRepositories } };
+    async getConnection(connectionId: string) {
+      return { provider: { listRepositories: () => mockListRepositories(connectionId) } };
     }
   },
 }));
@@ -138,6 +129,18 @@ function getUpdateHandler(path: string) {
 describe("repository list route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockConnectionList.mockReturnValue([
+      {
+        id: "scm_github_default",
+        provider: "github",
+        displayName: "GitHub",
+        baseUrl: "https://github.com",
+        cloneBaseUrl: "https://github.com",
+        revision: 1,
+        isDefault: true,
+        enabled: true,
+      },
+    ]);
     mockCacheGet.mockResolvedValue(null);
     mockCachePut.mockResolvedValue(undefined);
     mockGetBatch.mockResolvedValue(new Map());
@@ -180,6 +183,130 @@ describe("repository list route", () => {
     expect(mockCachePut).toHaveBeenCalledTimes(1);
     expect(waitUntil).toHaveBeenCalledTimes(1);
     await expect(waitUntil.mock.calls[0][0]).resolves.not.toThrow();
+  });
+
+  it("shares a connection catalog cache between user and service principals", async () => {
+    mockCacheGet.mockResolvedValue({
+      repos: [
+        {
+          id: 1,
+          owner: "acme",
+          name: "widgets",
+          fullName: "acme/widgets",
+          description: null,
+          private: true,
+          archived: false,
+          defaultBranch: "main",
+          repositoryKey: "repo-1",
+          connectionId: "scm_github_default",
+          provider: "github",
+          webUrl: "https://github.com/acme/widgets",
+          cloneUrl: "https://github.com/acme/widgets.git",
+        },
+      ],
+      cachedAt: "2026-08-21T00:00:00.000Z",
+      freshUntil: Date.now() + 60_000,
+    });
+    const { handler, match } = getListHandler();
+    const userContext = createContext();
+    const serviceContext: RequestContext = {
+      ...createContext(),
+      principal: { kind: "service", service: "slack-bot", actor: null },
+    };
+
+    await handler(
+      new Request("https://test.local/repos"),
+      { REPOS_CACHE: {} as KVNamespace, TOKEN_ENCRYPTION_KEY: "unused" } as Env,
+      match,
+      userContext
+    );
+    await handler(
+      new Request("https://test.local/repos"),
+      { REPOS_CACHE: {} as KVNamespace, TOKEN_ENCRYPTION_KEY: "unused" } as Env,
+      match,
+      serviceContext
+    );
+
+    expect(mockCacheGet.mock.calls.map(([key]) => key)).toEqual([
+      "repos:list:v4:scm_github_default:1",
+      "repos:list:v4:scm_github_default:1",
+    ]);
+    expect(mockListRepositories).not.toHaveBeenCalled();
+  });
+
+  it("loads enabled SCM connections concurrently", async () => {
+    mockConnectionList.mockReturnValue([
+      {
+        id: "scm_github_default",
+        provider: "github",
+        displayName: "GitHub",
+        baseUrl: "https://github.com",
+        cloneBaseUrl: "https://github.com",
+        revision: 1,
+        isDefault: true,
+        enabled: true,
+      },
+      {
+        id: "scm_gitea_primary",
+        provider: "gitea",
+        displayName: "Gitea",
+        baseUrl: "https://gitea.example.com",
+        cloneBaseUrl: "https://gitea.example.com",
+        revision: 1,
+        isDefault: false,
+        enabled: true,
+      },
+    ]);
+    let resolveGitHub!: (repositories: unknown[]) => void;
+    const githubRepositories = new Promise<unknown[]>((resolve) => {
+      resolveGitHub = resolve;
+    });
+    mockListRepositories.mockImplementation((connectionId: string) => {
+      if (connectionId === "scm_github_default") return githubRepositories;
+      return Promise.resolve([
+        {
+          id: 2,
+          owner: "huangdong",
+          name: "n9n",
+          fullName: "huangdong/n9n",
+          description: null,
+          private: true,
+          archived: false,
+          defaultBranch: "main",
+          webUrl: "https://gitea.example.com/huangdong/n9n",
+          cloneUrl: "https://gitea.example.com/huangdong/n9n.git",
+        },
+      ]);
+    });
+    mockUpsertRepository
+      .mockResolvedValueOnce({ id: "repo-gitea" })
+      .mockResolvedValueOnce({ id: "repo-github" });
+    const { handler, match } = getListHandler();
+    const responsePromise = handler(
+      new Request("https://test.local/repos"),
+      { REPOS_CACHE: {} as KVNamespace, TOKEN_ENCRYPTION_KEY: "unused" } as Env,
+      match,
+      createContext()
+    );
+
+    await vi.waitFor(() => expect(mockListRepositories).toHaveBeenCalledTimes(2));
+    resolveGitHub([
+      {
+        id: 1,
+        owner: "acme",
+        name: "widgets",
+        fullName: "acme/widgets",
+        description: null,
+        private: true,
+        archived: false,
+        defaultBranch: "main",
+      },
+    ]);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { repos: Array<{ owner: string }> };
+    expect(body.repos.map((repository) => repository.owner).sort()).toEqual(["acme", "huangdong"]);
   });
 });
 

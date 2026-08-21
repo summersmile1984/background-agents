@@ -21,9 +21,9 @@ export type SlackSessionTarget =
 
 /**
  * Prefix for environment values in Slack select options and quick-pick buttons.
- * Repository values are bare repo ids ("owner/name"), which always contain a
- * slash and never a colon-prefixed form, so the two namespaces cannot collide.
- * Mirrors the web picker's `env:<id>` select-value convention.
+ * Repository values prefer the stable Open-Inspect repository key and fall
+ * back to the legacy `owner/name` id. Environment values are explicitly
+ * prefixed, mirroring the web picker's `env:<id>` convention.
  */
 const ENVIRONMENT_VALUE_PREFIX = "env:";
 
@@ -32,17 +32,17 @@ export type SlackTargetRef =
   | { kind: "repository"; repoId: string }
   | { kind: "environment"; environmentId: string };
 
-/** Stable option/button value for a target: the repo id or `env:<id>`. */
+/** Stable option/button value: repository key (or legacy id), or `env:<id>`. */
 export function targetValue(target: SlackSessionTarget): string {
   return target.kind === "environment"
     ? `${ENVIRONMENT_VALUE_PREFIX}${target.environment.id}`
-    : target.repo.id;
+    : (target.repo.repositoryKey ?? target.repo.id);
 }
 
 /**
  * Decode a Slack option/button value back into a target reference. Bare values
- * are repository ids — including every value in clarification messages posted
- * before environments existed.
+ * are repository keys or legacy repository ids — including every value in
+ * clarification messages posted before environments existed.
  */
 export function parseTargetValue(value: string): SlackTargetRef {
   if (value.startsWith(ENVIRONMENT_VALUE_PREFIX)) {
@@ -62,23 +62,28 @@ export function targetLabel(target: SlackSessionTarget): string {
   return target.kind === "environment" ? target.environment.name : target.repo.fullName;
 }
 
-/** Stable id for storage: the repo id ("owner/name") or environment id ("env_…"). */
+/** Stable id for storage: repository key (or legacy id), or environment id. */
 export function targetId(target: SlackSessionTarget): string {
-  return target.kind === "environment" ? target.environment.id : target.repo.id;
+  return target.kind === "environment"
+    ? target.environment.id
+    : (target.repo.repositoryKey ?? target.repo.id);
 }
 
 /**
- * Create-session request fields for a target: scalar repoOwner/repoName
- * (+ optional branch) or environmentId only — the create schema makes the two
- * mutually exclusive, and the environment defines its own branches.
+ * Create-session request fields for a target: stable repositoryKey when
+ * available, legacy repoOwner/repoName otherwise, or environmentId. The create
+ * schema makes these mutually exclusive, and an environment defines branches.
  */
 export function buildSessionTargetRequestFields(
   target: SlackSessionTarget,
   branch: string | undefined
-): { repoOwner: string; repoName: string; branch?: string } | { environmentId: string } {
-  return target.kind === "environment"
-    ? { environmentId: target.environment.id }
-    : { repoOwner: target.repo.owner, repoName: target.repo.name, branch };
+):
+  | { repositoryKey: string; branch?: string }
+  | { repoOwner: string; repoName: string; branch?: string }
+  | { environmentId: string } {
+  if (target.kind === "environment") return { environmentId: target.environment.id };
+  if (target.repo.repositoryKey) return { repositoryKey: target.repo.repositoryKey, branch };
+  return { repoOwner: target.repo.owner, repoName: target.repo.name, branch };
 }
 
 /**

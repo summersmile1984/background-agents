@@ -31,9 +31,10 @@ import {
 const logger = createLogger("router:repos");
 
 const REPOS_CACHE_KEY = "repos:list:v2";
-const CONNECTION_REPOS_CACHE_PREFIX = "repos:list:v3";
+const CONNECTION_REPOS_CACHE_PREFIX = "repos:list:v4";
 const REPOS_CACHE_FRESH_MS = 5 * 60 * 1000; // Serve without revalidation for 5 minutes
 const REPOS_CACHE_KV_TTL_SECONDS = 3600; // Keep stale data in KV for 1 hour
+const CONNECTION_CATALOG_RESPONSE_TIMEOUT_MS = 10_000;
 
 /**
  * Cached repos list structure stored in KV.
@@ -104,21 +105,21 @@ async function applyCatalogMetadata(
   }
 }
 
-async function loadConnectionCatalog(
+interface ConnectionCatalogResult {
+  repos: EnrichedRepository[];
+  cached: boolean;
+  cachedAt: string;
+  revalidate?: Promise<ConnectionCatalogResult>;
+}
+
+async function refreshConnectionCatalog(
   env: Env,
   db: SqlDatabase,
   connection: ScmConnectionRecord,
-  actor: string,
   timeScmApi: <T>(fn: () => Promise<T>) => Promise<T>
-): Promise<{ repos: EnrichedRepository[]; cached: boolean; cachedAt: string }> {
+): Promise<ConnectionCatalogResult> {
   const cacheStore = createKvCacheStore(env.REPOS_CACHE);
-  const cacheKey = `${CONNECTION_REPOS_CACHE_PREFIX}:${connection.id}:${connection.revision}:${actor}`;
-  const cached = await cacheStore.get<CachedReposList>(cacheKey, "json").catch(() => null);
-  if (cached?.freshUntil && cached.freshUntil > Date.now()) {
-    const repos = structuredClone(cached.repos);
-    await applyCatalogMetadata(db, connection, repos);
-    return { repos, cached: true, cachedAt: cached.cachedAt };
-  }
+  const cacheKey = `${CONNECTION_REPOS_CACHE_PREFIX}:${connection.id}:${connection.revision}`;
 
   const resolved = await registry(env, db).getConnection(connection.id);
   const upstream = await timeScmApi(() => resolved.provider.listRepositories());
@@ -167,6 +168,46 @@ async function loadConnectionCatalog(
   return { repos: catalog, cached: false, cachedAt };
 }
 
+async function loadConnectionCatalog(
+  env: Env,
+  db: SqlDatabase,
+  connection: ScmConnectionRecord,
+  timeScmApi: <T>(fn: () => Promise<T>) => Promise<T>
+): Promise<ConnectionCatalogResult> {
+  const cacheStore = createKvCacheStore(env.REPOS_CACHE);
+  const cacheKey = `${CONNECTION_REPOS_CACHE_PREFIX}:${connection.id}:${connection.revision}`;
+  const cached = await cacheStore.get<CachedReposList>(cacheKey, "json").catch(() => null);
+  if (!cached) return refreshConnectionCatalog(env, db, connection, timeScmApi);
+
+  const repos = structuredClone(cached.repos);
+  await applyCatalogMetadata(db, connection, repos);
+  if (cached.freshUntil && cached.freshUntil > Date.now()) {
+    return { repos, cached: true, cachedAt: cached.cachedAt };
+  }
+
+  return {
+    repos,
+    cached: true,
+    cachedAt: cached.cachedAt,
+    revalidate: refreshConnectionCatalog(env, db, connection, timeScmApi),
+  };
+}
+
+async function waitForCatalogResponse<T>(promise: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error("SCM catalog response timed out")),
+      CONNECTION_CATALOG_RESPONSE_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
 /**
  * List all repositories accessible via the SCM provider's app-level credentials.
  *
@@ -194,29 +235,45 @@ async function handleListRepos(
     return error("SCM connection was not found or is disabled", 404);
   }
 
-  const actor =
-    ctx.principal?.kind === "user"
-      ? `user:${ctx.principal.userId}`
-      : ctx.principal?.kind === "service"
-        ? `service:${ctx.principal.service}`
-        : "unknown";
   const repos: EnrichedRepository[] = [];
   const connectionErrors: Array<{ connectionId: string; code: string }> = [];
   let allCached = true;
   let cachedAt = new Date(0).toISOString();
 
-  for (const connection of connections) {
-    try {
-      const refresh = loadConnectionCatalog(env, ctx.db, connection, actor, (fn) =>
+  const results = await Promise.allSettled(
+    connections.map(async (connection) => {
+      const refresh = loadConnectionCatalog(env, ctx.db, connection, (fn) =>
         ctx.metrics.time("scm_api", fn)
       );
-      // Keep a cold provider refresh alive if the requesting browser aborts.
+      // Keep a cold provider refresh alive if the requesting client aborts or
+      // this response stops waiting for a slow connection.
       ctx.executionCtx.submit(refresh);
-      const result = await refresh;
-      repos.push(...result.repos);
-      allCached &&= result.cached;
-      if (result.cachedAt > cachedAt) cachedAt = result.cachedAt;
-    } catch (cause) {
+      const result = await waitForCatalogResponse(refresh);
+      if (result.revalidate) {
+        ctx.executionCtx.submit(
+          result.revalidate.catch((cause) => {
+            logger.warn("Failed to revalidate connection repository catalog", {
+              connection_id: connection.id,
+              error_type: cause instanceof Error ? cause.name : "unknown",
+              request_id: ctx.request_id,
+              trace_id: ctx.trace_id,
+            });
+            return result;
+          })
+        );
+      }
+      return { connection, result };
+    })
+  );
+
+  results.forEach((settled, index) => {
+    const connection = connections[index];
+    if (settled.status === "fulfilled") {
+      repos.push(...settled.value.result.repos);
+      allCached &&= settled.value.result.cached;
+      if (settled.value.result.cachedAt > cachedAt) cachedAt = settled.value.result.cachedAt;
+    } else {
+      const cause = settled.reason;
       logger.warn("Failed to load connection repository catalog", {
         connection_id: connection.id,
         error_type: cause instanceof Error ? cause.name : "unknown",
@@ -225,7 +282,7 @@ async function handleListRepos(
       });
       connectionErrors.push({ connectionId: connection.id, code: "SCM_CATALOG_UNAVAILABLE" });
     }
-  }
+  });
 
   if (requestedConnectionId && connectionErrors.length > 0) {
     return error("Failed to fetch repositories for the selected connection", 503);

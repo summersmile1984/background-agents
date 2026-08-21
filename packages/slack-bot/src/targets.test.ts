@@ -33,6 +33,10 @@ const ENVIRONMENT: Environment = {
 };
 
 const repoTarget: SlackSessionTarget = { kind: "repository", repo: REPO };
+const stableRepoTarget: SlackSessionTarget = {
+  kind: "repository",
+  repo: { ...REPO, repositoryKey: "repo-gitea-web", connectionId: "scm-gitea" },
+};
 const environmentTarget: SlackSessionTarget = { kind: "environment", environment: ENVIRONMENT };
 
 describe("target values", () => {
@@ -49,6 +53,10 @@ describe("target values", () => {
 
   it("treats bare values as repository ids (messages posted before environments)", () => {
     expect(parseTargetValue("acme/web")).toEqual({ kind: "repository", repoId: "acme/web" });
+  });
+
+  it("uses the stable repository key for multi-SCM targets", () => {
+    expect(targetValue(stableRepoTarget)).toBe("repo-gitea-web");
   });
 });
 
@@ -83,6 +91,13 @@ describe("buildSessionTargetRequestFields", () => {
   it("builds environmentId only — never a branch", () => {
     expect(buildSessionTargetRequestFields(environmentTarget, "dev")).toEqual({
       environmentId: "env_abc123",
+    });
+  });
+
+  it("builds a stable repository-key request for a connected SCM repository", () => {
+    expect(buildSessionTargetRequestFields(stableRepoTarget, "dev")).toEqual({
+      repositoryKey: "repo-gitea-web",
+      branch: "dev",
     });
   });
 });

@@ -274,7 +274,7 @@ async function handleIncomingMessage(params: IncomingMessageParams): Promise<voi
       await postMessage(
         env.SLACK_BOT_TOKEN,
         channel,
-        "Sorry, no repositories or environments are currently available. Please check that the GitHub App is installed and configured.",
+        "Sorry, no repositories or environments are currently available. Please check that at least one source-control connection is enabled, healthy, and has repository access.",
         { thread_ts: threadTs || ts }
       );
       return;
