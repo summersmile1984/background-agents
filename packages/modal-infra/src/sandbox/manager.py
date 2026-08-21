@@ -53,6 +53,7 @@ _RESERVED_LAUNCH_ENV_VARS = {
     "TERMINAL_ENABLED",
     "AGENT_SLACK_NOTIFY_ENABLED",
     "SESSION_CONFIG",
+    "SCM_GIT_CAPABILITY",
     VNC_PASSWORD_ENV_VAR,
     NOVNC_PORT_ENV_VAR,
 }
@@ -100,6 +101,7 @@ class SandboxConfig:
     control_plane_url: str = ""
     sandbox_auth_token: str = ""
     scm_git_proxy_base_url: str | None = None
+    scm_git_capability: str | None = None
     timeout_seconds: int = DEFAULT_SANDBOX_TIMEOUT_SECONDS
     user_env_vars: dict[str, str] | None = None  # User-provided env vars (repo secrets)
     repo_image_id: str | None = None  # Pre-built repo image ID from provider
@@ -424,10 +426,13 @@ class SandboxManager:
             parsed_proxy = urlsplit(config.scm_git_proxy_base_url)
             if parsed_proxy.scheme != "https" or not parsed_proxy.hostname:
                 raise ValueError("scm_git_proxy_base_url must be an absolute HTTPS URL")
+            if not config.scm_git_capability:
+                raise ValueError("scm_git_proxy_base_url requires scm_git_capability")
             env_vars["VCS_CLONE_BASE_URL"] = config.scm_git_proxy_base_url.rstrip("/")
             env_vars["VCS_HOST"] = parsed_proxy.netloc
             env_vars["VCS_CLONE_USERNAME"] = "open-inspect-capability"
             env_vars["OI_SCM_PROXY_MODE"] = "1"
+            env_vars["SCM_GIT_CAPABILITY"] = config.scm_git_capability
 
         code_server_password: str | None = None
         if config.code_server_enabled:
@@ -638,6 +643,7 @@ class SandboxManager:
         control_plane_url: str = "",
         sandbox_auth_token: str = "",
         scm_git_proxy_base_url: str | None = None,
+        scm_git_capability: str | None = None,
         clone_token: str | None = None,
         user_env_vars: dict[str, str] | None = None,
         timeout_seconds: int = DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -691,6 +697,7 @@ class SandboxManager:
                     control_plane_url=control_plane_url,
                     sandbox_auth_token=sandbox_auth_token,
                     scm_git_proxy_base_url=scm_git_proxy_base_url,
+                    scm_git_capability=scm_git_capability,
                     timeout_seconds=timeout_seconds,
                     user_env_vars=user_env_vars,
                     code_server_enabled=code_server_enabled,

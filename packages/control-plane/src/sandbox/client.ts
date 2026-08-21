@@ -176,6 +176,7 @@ export interface CreateSandboxRequest {
   sandboxSettings?: SandboxSettings;
   repositories?: SessionRepositoryInfo[];
   scmGitProxyBaseUrl?: string;
+  scmGitCapability?: string;
 }
 
 export interface CreateSandboxResponse {
@@ -213,6 +214,7 @@ export interface RestoreSandboxRequest {
   sandboxSettings?: SandboxSettings;
   repositories?: SessionRepositoryInfo[];
   scmGitProxyBaseUrl?: string;
+  scmGitCapability?: string;
 }
 
 export interface RestoreSandboxResponse {
@@ -405,6 +407,7 @@ export class ModalClient {
             ? request.repositories.map(toRepositoryConfigPayload)
             : null,
           scm_git_proxy_base_url: request.scmGitProxyBaseUrl ?? null,
+          scm_git_capability: request.scmGitCapability ?? null,
         }),
       });
 
@@ -479,6 +482,7 @@ export class ModalClient {
           agent_slack_notify_enabled: request.agentSlackNotifyEnabled ?? false,
           sandbox_settings: request.sandboxSettings ?? null,
           scm_git_proxy_base_url: request.scmGitProxyBaseUrl ?? null,
+          scm_git_capability: request.scmGitCapability ?? null,
         }),
       });
 

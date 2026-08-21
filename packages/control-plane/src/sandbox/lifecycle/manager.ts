@@ -16,6 +16,7 @@ import { extractProviderAndModel } from "@open-inspect/shared/models";
 import type { SandboxStatus } from "@open-inspect/shared/types/sessions";
 import { sessionHasRepository, type SandboxRow, type SessionRow } from "../../session/types";
 import {
+  DEFAULT_SANDBOX_TIMEOUT_SECONDS,
   SandboxProviderError,
   type SandboxProvider,
   type CreateSandboxConfig,
@@ -61,6 +62,7 @@ const log = createLogger("lifecycle-manager");
 /** TTL for terminal auth JWTs (24 hours, matching typical sandbox lifetime). */
 const TERMINAL_TOKEN_TTL_SECONDS = 86400;
 const PROVIDER_REPLACEMENT_STOP_TIMEOUT_MS = 10_000;
+const SESSION_GIT_CAPABILITY_EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 // ==================== Dependency Interfaces ====================
 
@@ -193,6 +195,8 @@ export interface SandboxLifecycleConfig {
   mcpServerLookup?: McpServerLookup;
   /** Resolves the spawn-time agent-slack-notify gate. */
   slackAgentNotifyLookup?: SlackAgentNotifyLookup;
+  /** Issues the Git-only capability injected into connection-pinned sandboxes. */
+  sessionGitCapabilityIssuer?: SessionGitCapabilityIssuer;
   /** Builds a provider dashboard URL for a persisted provider object ID. */
   sandboxDashboardUrlBuilder?: (providerObjectId: string) => string | null;
 }
@@ -232,13 +236,11 @@ function multiRepoSpawnFields(
     : {};
 }
 
-function scmGitProxyBaseUrl(
+function pinnedScmGitIdentity(
   session: SessionRow,
-  repositories: SessionRepositoryInfo[],
-  controlPlaneUrl: string,
-  sessionId: string
-): string | undefined {
-  if (!session.scm_connection_id) return undefined;
+  repositories: SessionRepositoryInfo[]
+): { connectionId: string; repositoryIds: string[] } | null {
+  if (!session.scm_connection_id) return null;
   if (
     repositories.length === 0 ||
     repositories.some(
@@ -251,7 +253,43 @@ function scmGitProxyBaseUrl(
       "permanent"
     );
   }
+  return {
+    connectionId: session.scm_connection_id,
+    repositoryIds: repositories.map((repository) => repository.repositoryKey!),
+  };
+}
+
+function scmGitProxyBaseUrl(
+  session: SessionRow,
+  repositories: SessionRepositoryInfo[],
+  controlPlaneUrl: string,
+  sessionId: string
+): string | undefined {
+  if (!pinnedScmGitIdentity(session, repositories)) return undefined;
   return `${controlPlaneUrl.replace(/\/+$/, "")}/git/session/${encodeURIComponent(sessionId)}`;
+}
+
+async function issueSessionGitCapability(
+  session: SessionRow,
+  repositories: SessionRepositoryInfo[],
+  sessionId: string,
+  timeoutSeconds: number,
+  issuer: SessionGitCapabilityIssuer | undefined
+): Promise<string | undefined> {
+  const identity = pinnedScmGitIdentity(session, repositories);
+  if (!identity) return undefined;
+  if (!issuer) {
+    throw new SandboxProviderError(
+      "Pinned SCM session cannot issue a repository-scoped Git capability",
+      "permanent"
+    );
+  }
+  return issuer.issue({
+    sessionId,
+    connectionId: identity.connectionId,
+    repositoryIds: identity.repositoryIds,
+    expiresAt: Date.now() + timeoutSeconds * 1000 + SESSION_GIT_CAPABILITY_EXPIRY_BUFFER_MS,
+  });
 }
 
 function withManagedRuntimeEnv(
@@ -297,6 +335,16 @@ export interface SlackAgentNotifyLookup {
     repoName: string | null,
     repositoryId?: string | null
   ): Promise<boolean>;
+}
+
+/** Issues a repository-scoped Git authority without exposing the forge credential. */
+export interface SessionGitCapabilityIssuer {
+  issue(input: {
+    sessionId: string;
+    connectionId: string;
+    repositoryIds: string[];
+    expiresAt: number;
+  }): Promise<string>;
 }
 
 // ==================== Callbacks ====================
@@ -537,6 +585,13 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const agentSlackNotifyEnabled = await this.resolveAgentSlackNotifyEnabled(session);
       const sandboxSettings = this.parseSandboxSettings(session);
       const timeoutSeconds = this.resolveSandboxTimeoutSeconds(sandboxSettings);
+      const gitCapability = await issueSessionGitCapability(
+        session,
+        repositories,
+        sessionId,
+        timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS,
+        this.config.sessionGitCapabilityIssuer
+      );
       const createConfig: CreateSandboxConfig = {
         sessionId,
         sandboxId: expectedSandboxId,
@@ -559,6 +614,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         mcpServers,
         sandboxSettings,
         scmGitProxyBaseUrl: gitProxyBaseUrl,
+        scmGitCapability: gitCapability,
         ...multiRepoFields,
       };
 
@@ -854,6 +910,13 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const mcpServers = await this.loadMcpServers(repositories);
       const sandboxSettings = this.parseSandboxSettings(session);
       const timeoutSeconds = this.resolveSandboxTimeoutSeconds(sandboxSettings);
+      const gitCapability = await issueSessionGitCapability(
+        session,
+        repositories,
+        publicSessionId,
+        timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS,
+        this.config.sessionGitCapabilityIssuer
+      );
       const result = await this.provider.restoreFromSnapshot({
         snapshotImageId,
         sessionId: publicSessionId,
@@ -875,6 +938,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         mcpServers,
         sandboxSettings,
         scmGitProxyBaseUrl: gitProxyBaseUrl,
+        scmGitCapability: gitCapability,
         ...multiRepoSpawnFields(repositories),
       });
 

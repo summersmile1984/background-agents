@@ -11,7 +11,16 @@ const mocks = vi.hoisted(() => ({
     cloneUrl: "https://gitea.example.com/root/acme/app.git",
   } as Record<string, unknown> | null,
   connectionEnabled: true,
+  verifyCapability: vi.fn(),
   upstreamAuth: vi.fn(),
+}));
+
+vi.mock("./db/scm-git-capabilities", () => ({
+  ScmGitCapabilityStore: class {
+    async verify(...args: unknown[]) {
+      return mocks.verifyCapability(...args);
+    }
+  },
 }));
 
 vi.mock("./db/scm-repositories", () => ({
@@ -60,7 +69,7 @@ function basic(token: string): string {
   return `Basic ${btoa(`${token}:${token}`)}`;
 }
 
-function env(verified = true): Env {
+function env(): Env {
   return {
     TOKEN_ENCRYPTION_KEY: "unused",
     DB: {
@@ -69,12 +78,6 @@ function env(verified = true): Env {
           first: async () =>
             mocks.memberConnectionId ? { scm_connection_id: mocks.memberConnectionId } : null,
         }),
-      }),
-    },
-    SESSION: {
-      idFromName: () => ({}) as DurableObjectId,
-      get: () => ({
-        fetch: async () => new Response(null, { status: verified ? 204 : 401 }),
       }),
     },
   } as unknown as Env;
@@ -97,6 +100,7 @@ describe("session-authorized SCM Git proxy", () => {
       cloneUrl: "https://gitea.example.com/root/acme/app.git",
     };
     mocks.connectionEnabled = true;
+    mocks.verifyCapability.mockReset().mockResolvedValue({ connectionId: "scm_gitea_1" });
     mocks.upstreamAuth.mockReset().mockResolvedValue({
       username: "agent-bot",
       password: "server-only-pat",
@@ -107,14 +111,20 @@ describe("session-authorized SCM Git proxy", () => {
   it("rejects absent and invalid sandbox capabilities before database/provider access", async () => {
     const url = new URL(`https://control.example.com${path}`);
     const absent = await proxy(new Request(url), url);
+    mocks.verifyCapability.mockResolvedValueOnce(null);
     const invalid = await proxy(
       new Request(url, { headers: { Authorization: basic("wrong") } }),
-      url,
-      env(false)
+      url
     );
 
     expect(absent?.status).toBe(401);
     expect(invalid?.status).toBe(401);
+    expect(mocks.verifyCapability).toHaveBeenCalledWith("wrong", {
+      audience: "session_git",
+      subjectId: "session_1",
+      repositoryId: "repo_1",
+      operation: "read",
+    });
     expect(mocks.upstreamAuth).not.toHaveBeenCalled();
   });
 
@@ -129,6 +139,38 @@ describe("session-authorized SCM Git proxy", () => {
 
     expect(response?.status).toBe(403);
     expect(mocks.upstreamAuth).not.toHaveBeenCalled();
+  });
+
+  it("rejects a capability issued for a different SCM connection", async () => {
+    mocks.verifyCapability.mockResolvedValueOnce({ connectionId: "scm_other" });
+    const url = new URL(`https://control.example.com${path}`);
+    const response = await proxy(
+      new Request(url, { headers: { Authorization: basic("repo-capability") } }),
+      url
+    );
+
+    expect(response?.status).toBe(403);
+    expect(mocks.upstreamAuth).not.toHaveBeenCalled();
+  });
+
+  it("requires write authority for receive-pack discovery", async () => {
+    const url = new URL(
+      "https://control.example.com/git/session/session_1/repo_1.git/info/refs?service=git-receive-pack"
+    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("write-pack")));
+
+    const response = await proxy(
+      new Request(url, { headers: { Authorization: basic("repo-capability") } }),
+      url
+    );
+
+    expect(response?.status).toBe(200);
+    expect(mocks.verifyCapability).toHaveBeenCalledWith("repo-capability", {
+      audience: "session_git",
+      subjectId: "session_1",
+      repositoryId: "repo_1",
+      operation: "write",
+    });
   });
 
   it("streams to the pinned upstream and keeps its PAT server-side", async () => {

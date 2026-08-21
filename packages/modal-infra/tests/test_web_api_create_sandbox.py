@@ -139,17 +139,20 @@ async def test_create_sandbox_forwards_scm_git_proxy_base_url(monkeypatch):
     _patch_manager(monkeypatch, captured)
 
     proxy_url = "https://control-plane.example/git/session/sess-1"
+    capability = "oig_repo_scoped"
     result = await _call_create_sandbox(
         {
             "session_id": "sess-1",
             "control_plane_url": "https://control-plane.example",
             "sandbox_auth_token": "sandbox-token",
             "scm_git_proxy_base_url": proxy_url,
+            "scm_git_capability": capability,
         }
     )
 
     assert result["success"] is True
     assert captured["config"].scm_git_proxy_base_url == proxy_url
+    assert captured["config"].scm_git_capability == capability
 
 
 @pytest.mark.asyncio
@@ -412,6 +415,7 @@ async def test_restore_sandbox_proxy_does_not_resolve_forge_token(monkeypatch):
     _patch_restore_manager(monkeypatch, captured)
     monkeypatch.setattr(web_api, "resolve_clone_token", lambda: calls.append(True) or "secret")
     proxy_url = "https://control-plane.example/git/session/sess-1"
+    capability = "oig_repo_scoped"
 
     result = await _call_restore_sandbox(
         {
@@ -426,6 +430,7 @@ async def test_restore_sandbox_proxy_does_not_resolve_forge_token(monkeypatch):
             "control_plane_url": "https://control-plane.example",
             "sandbox_auth_token": "sandbox-token",
             "scm_git_proxy_base_url": proxy_url,
+            "scm_git_capability": capability,
         }
     )
 
@@ -433,6 +438,7 @@ async def test_restore_sandbox_proxy_does_not_resolve_forge_token(monkeypatch):
     assert calls == []
     assert captured["restore"]["clone_token"] is None
     assert captured["restore"]["scm_git_proxy_base_url"] == proxy_url
+    assert captured["restore"]["scm_git_capability"] == capability
 
 
 @pytest.mark.asyncio

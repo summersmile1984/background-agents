@@ -122,6 +122,7 @@ export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildPro
           sandboxSettings: config.sandboxSettings,
           repositories: config.repositories,
           scmGitProxyBaseUrl: config.scmGitProxyBaseUrl,
+          scmGitCapability: config.scmGitCapability,
         },
         config.correlation
       );
@@ -170,6 +171,7 @@ export class ModalSandboxProvider implements SandboxProvider, ModalImageBuildPro
           sandboxSettings: config.sandboxSettings,
           repositories: config.repositories,
           scmGitProxyBaseUrl: config.scmGitProxyBaseUrl,
+          scmGitCapability: config.scmGitCapability,
         },
         config.correlation
       );

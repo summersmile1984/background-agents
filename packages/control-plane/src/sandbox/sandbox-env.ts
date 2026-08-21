@@ -180,6 +180,8 @@ export const RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS: readonly string[] = [
 ];
 /** One-shot clone token used only by image-build sandboxes. */
 export const VCS_CLONE_TOKEN_ENV_VAR = "VCS_CLONE_TOKEN";
+/** Repository-scoped capability for session smart-HTTP Git proxy requests. */
+export const SCM_GIT_CAPABILITY_ENV_VAR = "SCM_GIT_CAPABILITY";
 
 /** Host/username pair git pairs with the brokered clone token in the sandbox. */
 export interface ScmCloneIdentity {
@@ -288,6 +290,7 @@ export function buildSandboxEnvVars(
   options: SandboxEnvVarsOptions
 ): Record<string, string> {
   const envVars: Record<string, string> = { ...(options.baseEnvVars ?? config.userEnvVars ?? {}) };
+  delete envVars[SCM_GIT_CAPABILITY_ENV_VAR];
   delete envVars.VNC_PASSWORD;
   delete envVars.NOVNC_PORT;
 
@@ -333,18 +336,19 @@ export function buildSandboxEnvVars(
   if (proxyBaseUrl) {
     envVars.VCS_CLONE_BASE_URL = proxyBaseUrl;
     envVars.OI_SCM_PROXY_MODE = "1";
+    if (!config.scmGitCapability) {
+      throw new Error("SCM Git proxy mode requires a repository-scoped capability");
+    }
+    envVars[SCM_GIT_CAPABILITY_ENV_VAR] = config.scmGitCapability;
   }
 
-  // Note: this builder never sets VCS_CLONE_TOKEN / GITHUB_TOKEN /
-  // GITHUB_APP_TOKEN as system vars. Git operations in the sandbox
-  // authenticate per-request via the system git credential helper, which hits
-  // /sessions/:id/scm-credentials. Embedding a system token in env would
-  // silently fail once the token expires (immediately so, for GitHub App
-  // installation tokens) — exactly the failure that broke long-running and
-  // resumed sessions before brokered credentials landed. User-defined secrets
-  // are passed through verbatim, though, so a user-supplied VCS_CLONE_TOKEN
-  // survives — OpenComputer deliberately preserves one on prebuilt-image
-  // boots (see its provider tests).
+  // This builder never sets a forge credential (VCS_CLONE_TOKEN / GITHUB_TOKEN /
+  // GITHUB_APP_TOKEN) as a system var. Connection-pinned sessions receive only
+  // the repository-scoped proxy capability above; legacy sessions broker a
+  // fresh short-lived forge credential through /sessions/:id/scm-credentials.
+  // User-defined secrets are passed through verbatim, so a user-supplied
+  // VCS_CLONE_TOKEN survives — OpenComputer deliberately preserves one on
+  // prebuilt-image boots (see its provider tests).
 
   return envVars;
 }

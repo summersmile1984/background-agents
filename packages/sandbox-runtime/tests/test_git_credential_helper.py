@@ -175,6 +175,7 @@ def test_generic_scm_proxy_keeps_forge_secret_out_of_sandbox(
 ) -> None:
     monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/session/sess-123")
     monkeypatch.setenv("OI_SCM_PROXY_MODE", "1")
+    monkeypatch.setenv("SCM_GIT_CAPABILITY", "oig_repo_scoped")
     calls = [0]
     with _patch_httpx(_mock_response({"should": "not be called"}), calls):
         code, out, _err = _run(
@@ -182,9 +183,25 @@ def test_generic_scm_proxy_keeps_forge_secret_out_of_sandbox(
         )
 
     assert code == 0
-    assert "username=sandbox-token-xyz" in out
-    assert "password=sandbox-token-xyz" in out
+    assert "username=oig_repo_scoped" in out
+    assert "password=oig_repo_scoped" in out
+    assert "sandbox-token-xyz" not in out
     assert calls[0] == 0
+
+
+def test_generic_scm_proxy_does_not_fall_back_to_sandbox_token(
+    cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/session/sess-123")
+    monkeypatch.setenv("OI_SCM_PROXY_MODE", "1")
+
+    code, out, err = _run(
+        "protocol=https\nhost=cp.example.com\npath=git/session/sess-123/repo_abc.git\n\n"
+    )
+
+    assert code == 1
+    assert "password=" not in out
+    assert "SCM_GIT_CAPABILITY" in err
 
 
 def test_proxy_request_refuses_direct_github_host(

@@ -205,6 +205,41 @@ describe("buildSandboxEnvVars", () => {
     expect(envVars.SANDBOX_TIMEOUT_SECONDS).toBe("14400");
   });
 
+  it("injects only the Git-scoped capability when SCM proxy mode is enabled", () => {
+    const envVars = buildSandboxEnvVars(
+      {
+        ...baseConfig,
+        scmGitProxyBaseUrl: "https://control-plane.test/git/session/session-123",
+        scmGitCapability: "oig_repo_scoped",
+        userEnvVars: { SCM_GIT_CAPABILITY: "user-override" },
+      },
+      { scmIdentity: scmCloneIdentity("github") }
+    );
+
+    expect(envVars).toEqual(
+      expect.objectContaining({
+        VCS_CLONE_BASE_URL: "https://control-plane.test/git/session/session-123",
+        VCS_HOST: "control-plane.test",
+        VCS_CLONE_USERNAME: "open-inspect-capability",
+        OI_SCM_PROXY_MODE: "1",
+        SCM_GIT_CAPABILITY: "oig_repo_scoped",
+        SANDBOX_AUTH_TOKEN: "auth-token-abc",
+      })
+    );
+  });
+
+  it("rejects SCM proxy mode without a Git-scoped capability", () => {
+    expect(() =>
+      buildSandboxEnvVars(
+        {
+          ...baseConfig,
+          scmGitProxyBaseUrl: "https://control-plane.test/git/session/session-123",
+        },
+        { scmIdentity: scmCloneIdentity("github") }
+      )
+    ).toThrow("repository-scoped capability");
+  });
+
   it("system vars take precedence over user-defined repo secrets", () => {
     const envVars = buildSandboxEnvVars(
       {

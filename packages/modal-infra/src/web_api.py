@@ -291,6 +291,7 @@ async def api_create_sandbox(
             control_plane_url=control_plane_url,
             sandbox_auth_token=request.get("sandbox_auth_token"),
             scm_git_proxy_base_url=request.get("scm_git_proxy_base_url") or None,
+            scm_git_capability=request.get("scm_git_capability") or None,
             user_env_vars=request.get("user_env_vars") or None,
             repo_image_id=repo_image_id,
             repo_image_sha=request.get("repo_image_sha") or None,
@@ -595,6 +596,7 @@ async def api_restore_sandbox(
 
         manager = SandboxManager()
         scm_git_proxy_base_url = request.get("scm_git_proxy_base_url") or None
+        scm_git_capability = request.get("scm_git_capability") or None
         clone_token = (
             resolve_clone_token()
             if repo_owner and repo_name and not scm_git_proxy_base_url
@@ -614,6 +616,7 @@ async def api_restore_sandbox(
             control_plane_url=control_plane_url,
             sandbox_auth_token=sandbox_auth_token,
             scm_git_proxy_base_url=scm_git_proxy_base_url,
+            scm_git_capability=scm_git_capability,
             clone_token=clone_token,
             user_env_vars=user_env_vars,
             timeout_seconds=timeout_seconds,

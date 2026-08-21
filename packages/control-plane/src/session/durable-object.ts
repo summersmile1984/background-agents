@@ -41,10 +41,12 @@ import {
   type ImageBuildLookup,
   type McpServerLookup,
   type SlackAgentNotifyLookup,
+  type SessionGitCapabilityIssuer,
 } from "../sandbox/lifecycle/manager";
 import { McpServerStore } from "../db/mcp-servers";
 import { IntegrationSettingsStore, resolveSlackSettings } from "../db/integration-settings";
 import { ScmSettingsStore } from "../db/scm-settings";
+import { ScmGitCapabilityStore } from "../db/scm-git-capabilities";
 import { SessionIndexStore } from "../db/session-index";
 import { isSandboxReconnectBlockedStatus } from "../sandbox/lifecycle/decisions";
 import { DEFAULT_SANDBOX_TIMEOUT_SECONDS } from "../sandbox/provider";
@@ -1065,10 +1067,25 @@ export class SessionDO extends DurableObject<Env> {
 
     // Create D1-backed lookups if database is available
     let mcpServerLookup: McpServerLookup | undefined;
+    let sessionGitCapabilityIssuer: SessionGitCapabilityIssuer | undefined;
     if (this.db) {
       const mcpStore = new McpServerStore(this.db, this.env.REPO_SECRETS_ENCRYPTION_KEY);
       mcpServerLookup = {
         getDecryptedForSession: (repositories) => mcpStore.getDecryptedForSession(repositories),
+      };
+      const gitCapabilities = new ScmGitCapabilityStore(this.db);
+      sessionGitCapabilityIssuer = {
+        issue: async (input) => {
+          await gitCapabilities.revoke("session_git", input.sessionId);
+          return gitCapabilities.issue({
+            audience: "session_git",
+            subjectId: input.sessionId,
+            connectionId: input.connectionId,
+            repositoryIds: input.repositoryIds,
+            allowedOperation: "write",
+            expiresAt: input.expiresAt,
+          });
+        },
       };
     }
 
@@ -1115,6 +1132,7 @@ export class SessionDO extends DurableObject<Env> {
         timeoutMs: parseInt(this.env.SANDBOX_INACTIVITY_TIMEOUT_MS || "600000", 10),
       },
       mcpServerLookup,
+      sessionGitCapabilityIssuer,
       slackAgentNotifyLookup,
       sandboxDashboardUrlBuilder,
     };

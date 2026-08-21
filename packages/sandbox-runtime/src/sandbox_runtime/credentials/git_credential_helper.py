@@ -4,8 +4,8 @@ Git credential helper backed by the Open-Inspect control plane.
 
 Implements git's `credential` protocol (see gitcredentials(7)) so that every
 git operation inside the sandbox — fetch, push, ls-remote, submodule update —
-fetches a fresh short-lived SCM credential on demand, instead of relying on a
-token captured at sandbox-creation time.
+receives either a repository-scoped smart-HTTP proxy capability or a freshly
+brokered legacy SCM credential.
 
 Protocol summary (action = "get"):
 
@@ -231,14 +231,14 @@ def _get_credentials() -> dict[str, object]:
     that's how image-build sandboxes authenticate their one-shot clone.
     """
     if os.environ.get("OI_SCM_PROXY_MODE") == "1":
-        sandbox_token = os.environ.get("SANDBOX_AUTH_TOKEN", "").strip()
-        if not sandbox_token:
-            raise RuntimeError("SCM proxy mode requires SANDBOX_AUTH_TOKEN")
-        # The token is already the sandbox's short-lived session capability;
-        # the proxy validates it and obtains forge credentials server-side.
+        git_capability = os.environ.get("SCM_GIT_CAPABILITY", "").strip()
+        if not git_capability:
+            raise RuntimeError("SCM proxy mode requires SCM_GIT_CAPABILITY")
+        # This capability authorizes only Git operations for repositories pinned
+        # to the session. The proxy obtains forge credentials server-side.
         return {
-            "username": sandbox_token,
-            "password": sandbox_token,
+            "username": git_capability,
+            "password": git_capability,
             "expires_at_epoch_ms": int((time.time() + BUILD_MODE_TOKEN_TTL_SECONDS) * 1000),
         }
 
@@ -285,11 +285,13 @@ def _emit_response(input_lines: dict[str, str], credentials: dict[str, object]) 
         if key in {"username", "password"}:
             continue
         sys.stdout.write(f"{key}={value}\n")
-    # The private Git proxy uses HTTP Basic's username slot for the sandbox
-    # capability and forwards only the password (the GitHub installation token)
-    # upstream. GitHub ignores the username when a token is used as the password.
     username = credentials["username"]
-    if os.environ.get("VCS_CLONE_BASE_URL", "").strip():
+    if (
+        os.environ.get("VCS_CLONE_BASE_URL", "").strip()
+        and os.environ.get("OI_SCM_PROXY_MODE") != "1"
+    ):
+        # Legacy GitHub proxy: the sandbox capability occupies Basic's username
+        # while the short-lived GitHub installation token remains the password.
         username = os.environ.get("SANDBOX_AUTH_TOKEN", "") or username
     sys.stdout.write(f"username={username}\n")
     sys.stdout.write(f"password={credentials['password']}\n")

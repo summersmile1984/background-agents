@@ -151,6 +151,8 @@ export interface CreateSandboxConfig {
   repositories?: SessionRepositoryInfo[];
   /** Credential-free, session-authorized smart-HTTP proxy base. */
   scmGitProxyBaseUrl?: string;
+  /** Repository-scoped capability used only to authenticate smart-HTTP Git proxy requests. */
+  scmGitCapability?: string;
 }
 
 /** Complete browser-desktop access credential returned by sandbox providers. */
@@ -236,6 +238,8 @@ export interface RestoreConfig {
   /** Multi-repo member list — see CreateSandboxConfig. */
   repositories?: SessionRepositoryInfo[];
   scmGitProxyBaseUrl?: string;
+  /** Repository-scoped capability used only to authenticate smart-HTTP Git proxy requests. */
+  scmGitCapability?: string;
 }
 
 /**

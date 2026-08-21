@@ -17,6 +17,7 @@ import {
   type McpServerLookup,
   type ImageBuildLookup,
   type SlackAgentNotifyLookup,
+  type SessionGitCapabilityIssuer,
 } from "./manager";
 import type { ImageBuildSpawnRow } from "./image-selection";
 import { computeRepositoriesFingerprint } from "../../image-builds/fingerprint";
@@ -502,6 +503,57 @@ describe("SandboxLifecycleManager", () => {
       expect(
         broadcaster.messages.some((m) => (m as { type: string }).type === "sandbox_status")
       ).toBe(true);
+    });
+
+    it("issues and injects a repository-scoped Git capability for pinned sessions", async () => {
+      const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
+      const session = createMockSession({
+        repository_id: "repo_primary",
+        scm_connection_id: "scm_gitea_1",
+      });
+      const repositories: SessionRepositoryInfo[] = [
+        {
+          repositoryKey: "repo_primary",
+          connectionId: "scm_gitea_1",
+          repoOwner: "testowner",
+          repoName: "testrepo",
+          baseBranch: "main",
+        },
+      ];
+      const storage = createMockStorage(session, sandbox, undefined, repositories);
+      const provider = createMockProvider();
+      const issuer: SessionGitCapabilityIssuer = {
+        issue: vi.fn(async () => "oig_session_git"),
+      };
+      const beforeIssue = Date.now();
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        { ...createTestConfig(), sessionGitCapabilityIssuer: issuer }
+      );
+
+      await manager.spawnSandbox();
+
+      expect(issuer.issue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "test-session",
+          connectionId: "scm_gitea_1",
+          repositoryIds: ["repo_primary"],
+          expiresAt: expect.any(Number),
+        })
+      );
+      const expiresAt = vi.mocked(issuer.issue).mock.calls[0][0].expiresAt;
+      expect(expiresAt).toBeGreaterThan(beforeIssue + 60 * 60 * 1000);
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scmGitProxyBaseUrl: "https://test.workers.dev/git/session/test-session",
+          scmGitCapability: "oig_session_git",
+        })
+      );
     });
 
     it.each(["spawn", "restore"] as const)(

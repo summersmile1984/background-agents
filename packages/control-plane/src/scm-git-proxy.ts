@@ -1,6 +1,5 @@
 import { ScmConnectionCredentialStore, ScmConnectionStore } from "./db/scm-connections";
 import { ScmRepositoryStore } from "./db/scm-repositories";
-import { SessionInternalPaths } from "./session/contracts";
 import {
   SourceControlConnectionRegistry,
   ScmConnectionDisabledError,
@@ -61,18 +60,6 @@ function basicAuthorization(username: string, password: string): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return `Basic ${btoa(binary)}`;
-}
-
-async function verifySandboxToken(env: Env, sessionId: string, token: string): Promise<boolean> {
-  const durableObjectId = env.SESSION.idFromName(sessionId);
-  const response = await env.SESSION.get(durableObjectId).fetch(
-    new Request(`http://internal${SessionInternalPaths.verifySandboxToken}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    })
-  );
-  return response.ok;
 }
 
 async function sessionAuthorizesRepository(
@@ -141,24 +128,19 @@ export async function handleScmGitProxy(
   if (!capability) {
     return authenticationRequired();
   }
-  const buildAuthorization = isBuild
-    ? await new ScmGitCapabilityStore(db).verify(capability, {
-        audience: "image_build_git",
-        subjectId,
-        repositoryId,
-        operation,
-      })
-    : null;
-  if (
-    (isBuild && !buildAuthorization) ||
-    (!isBuild && !(await verifySandboxToken(env, subjectId, capability)))
-  ) {
-    return authenticationRequired();
+  const authorization = await new ScmGitCapabilityStore(db).verify(capability, {
+    audience: isBuild ? "image_build_git" : "session_git",
+    subjectId,
+    repositoryId,
+    operation,
+  });
+  if (!authorization) return authenticationRequired();
+  if (!isBuild) {
+    const sessionAuthorization = await sessionAuthorizesRepository(db, subjectId, repositoryId);
+    if (!sessionAuthorization || sessionAuthorization.connectionId !== authorization.connectionId) {
+      return noStore("Repository is not authorized for this session", 403);
+    }
   }
-  const authorization = isBuild
-    ? { connectionId: buildAuthorization!.connectionId }
-    : await sessionAuthorizesRepository(db, subjectId, repositoryId);
-  if (!authorization) return noStore("Repository is not authorized for this session", 403);
 
   const repository = await new ScmRepositoryStore(db).get(repositoryId);
   if (

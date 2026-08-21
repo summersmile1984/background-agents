@@ -135,6 +135,7 @@ async def test_create_sandbox_uses_server_side_scm_proxy_capability(monkeypatch)
             control_plane_url="https://control-plane.example",
             sandbox_auth_token="session-capability",
             scm_git_proxy_base_url=("https://control-plane.example/git/session/session-1"),
+            scm_git_capability="oig_repo_scoped",
         )
     )
 
@@ -142,6 +143,7 @@ async def test_create_sandbox_uses_server_side_scm_proxy_capability(monkeypatch)
     assert env["VCS_CLONE_BASE_URL"].endswith("/git/session/session-1")
     assert env["VCS_HOST"] == "control-plane.example"
     assert env["OI_SCM_PROXY_MODE"] == "1"
+    assert env["SCM_GIT_CAPABILITY"] == "oig_repo_scoped"
     assert "VCS_CLONE_TOKEN" not in env
 
 
@@ -153,6 +155,18 @@ async def test_create_sandbox_rejects_insecure_scm_proxy(monkeypatch):
                 repo_owner=None,
                 repo_name=None,
                 scm_git_proxy_base_url="http://control-plane.example/git/session/session-1",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_requires_git_capability_for_scm_proxy(monkeypatch):
+    with pytest.raises(ValueError, match="requires scm_git_capability"):
+        await SandboxManager().create_sandbox(
+            SandboxConfig(
+                repo_owner=None,
+                repo_name=None,
+                scm_git_proxy_base_url="https://control-plane.example/git/session/session-1",
             )
         )
 
