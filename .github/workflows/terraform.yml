@@ -196,6 +196,7 @@ jobs:
           TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           TF_VAR_cloudflare_custom_domain: ${{ secrets.CLOUDFLARE_CUSTOM_DOMAIN }}
           TF_VAR_cloudflare_control_plane_custom_domain: ${{ secrets.CLOUDFLARE_CONTROL_PLANE_CUSTOM_DOMAIN }}
+          TF_VAR_cloudflare_slack_custom_domain: ${{ secrets.CLOUDFLARE_SLACK_CUSTOM_DOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || '000000000000000000000000' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
           TF_VAR_modal_token_id: ${{ secrets.MODAL_TOKEN_ID }}
@@ -366,6 +367,7 @@ jobs:
           TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
           TF_VAR_cloudflare_custom_domain: ${{ secrets.CLOUDFLARE_CUSTOM_DOMAIN }}
           TF_VAR_cloudflare_control_plane_custom_domain: ${{ secrets.CLOUDFLARE_CONTROL_PLANE_CUSTOM_DOMAIN }}
+          TF_VAR_cloudflare_slack_custom_domain: ${{ secrets.CLOUDFLARE_SLACK_CUSTOM_DOMAIN }}
           TF_VAR_vercel_api_token: "${{ secrets.VERCEL_API_TOKEN || '000000000000000000000000' }}"
           TF_VAR_vercel_team_id: "${{ secrets.VERCEL_TEAM_ID || 'unused' }}"
           TF_VAR_modal_token_id: ${{ secrets.MODAL_TOKEN_ID }}
