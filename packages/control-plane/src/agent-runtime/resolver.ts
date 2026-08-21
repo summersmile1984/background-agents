@@ -641,6 +641,9 @@ export async function resolveRuntimeLaunchDraft(input: {
   const harnesses = buildRuntimeHarnessOptions({
     readiness: readiness.harnesses,
     enabledModels,
+    codexSubscriptionConfigured: Boolean(
+      effectiveSecrets.CODEX_AUTH_JSON || effectiveSecrets.CODEX_ACCESS_TOKEN
+    ),
   });
   const issues: RuntimeSelectionIssue[] = [];
   const layers: RuntimeConfigurationLayer[] = storedConfigurations.flatMap(

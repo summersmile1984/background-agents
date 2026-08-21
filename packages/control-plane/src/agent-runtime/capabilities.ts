@@ -19,7 +19,7 @@ import type {
   RuntimeTransport,
 } from "@open-inspect/shared/types/runtime-launch";
 
-export const RUNTIME_CAPABILITY_CATALOG_VERSION = "2026-08-21.2";
+export const RUNTIME_CAPABILITY_CATALOG_VERSION = "2026-08-21.3";
 export const RUNTIME_RESOLVER_VERSION = "1";
 export const RUNTIME_SETTINGS_SCHEMA_VERSION = "1";
 
@@ -262,6 +262,22 @@ export const RUNTIME_ROUTE_DEFINITIONS: readonly RouteDefinition[] = [
 const CODEX_EFFORTS = new Set<ReasoningEffort>(["none", "low", "medium", "high", "xhigh"]);
 const CLAUDE_EFFORTS = new Set<ReasoningEffort>(["low", "medium", "high", "xhigh", "max"]);
 
+/**
+ * Models advertised by the Codex 0.147 sandbox image when it is authenticated
+ * with a ChatGPT subscription. API-key users retain the general OpenAI model
+ * catalog because availability is account and API-project specific.
+ *
+ * Keep this list aligned with the pinned sandbox Codex CLI. The app-server
+ * rejects unsupported subscription models only after a sandbox has started,
+ * so advertising them here would create a launchable-looking but doomed turn.
+ */
+const CODEX_SUBSCRIPTION_MODEL_IDS = new Set<string>([
+  "openai/gpt-5.5",
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+  "openai/gpt-5.6-luna",
+]);
+
 function providerForModel(model: string): string {
   return model.split("/", 1)[0] ?? "";
 }
@@ -311,10 +327,19 @@ function buildModelOptions(input: {
   routeReady: boolean;
   routeMessage?: string;
   enabledModels: ReadonlySet<string>;
+  codexSubscriptionConfigured: boolean;
 }): RuntimeModelOption[] {
   return MODEL_OPTIONS.flatMap((group) =>
     group.models
-      .filter((model) => routeOwnsModel(input.route, model.id))
+      .filter(
+        (model) =>
+          routeOwnsModel(input.route, model.id) &&
+          !(
+            input.codexSubscriptionConfigured &&
+            input.route.routeId === "codex:openai:subscription" &&
+            !CODEX_SUBSCRIPTION_MODEL_IDS.has(model.id)
+          )
+      )
       .map((model): RuntimeModelOption => {
         const enabled = input.enabledModels.has(model.id);
         return {
@@ -343,6 +368,8 @@ function buildModelOptions(input: {
 export function buildRuntimeHarnessOptions(input: {
   readiness: HarnessReadiness[];
   enabledModels: readonly ValidModel[];
+  /** True when native Codex will load ChatGPT login material instead of API-only auth. */
+  codexSubscriptionConfigured?: boolean;
 }): RuntimeHarnessOption[] {
   const readinessByHarness = new Map(input.readiness.map((entry) => [entry.harness, entry]));
   const enabledModels = new Set<string>(input.enabledModels);
@@ -362,6 +389,7 @@ export function buildRuntimeHarnessOptions(input: {
         routeReady: routeState.ready,
         routeMessage: routeState.message,
         enabledModels,
+        codexSubscriptionConfigured: input.codexSubscriptionConfigured ?? false,
       });
       return {
         routeId: route.routeId,

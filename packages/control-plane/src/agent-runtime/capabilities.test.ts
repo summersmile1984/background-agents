@@ -79,4 +79,19 @@ describe("runtime capability catalog", () => {
       "xhigh",
     ]);
   });
+
+  it("does not advertise API-only models to a ChatGPT-backed Codex sandbox", () => {
+    const options = buildRuntimeHarnessOptions({
+      readiness,
+      enabledModels: ["openai/gpt-5.3-codex", "openai/gpt-5.6-luna"],
+      codexSubscriptionConfigured: true,
+    });
+    const codexModels = options
+      .find((option) => option.harness === "codex")!
+      .routes.find((route) => route.routeId === "codex:openai:subscription")!
+      .models.map((model) => model.model);
+
+    expect(codexModels).not.toContain("openai/gpt-5.3-codex");
+    expect(codexModels).toContain("openai/gpt-5.6-luna");
+  });
 });

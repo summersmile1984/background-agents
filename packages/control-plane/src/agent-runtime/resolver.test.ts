@@ -249,4 +249,24 @@ describe("runtime launch resolver", () => {
     );
     expect(result.options.efforts.map((effort) => effort.value)).not.toContain("max");
   });
+
+  it("rejects a Codex model unavailable to the configured ChatGPT subscription", async () => {
+    state.secrets = { CODEX_AUTH_JSON: "managed-chatgpt-login" };
+    state.enabledModels = ["openai/gpt-5.3-codex", "openai/gpt-5.6-luna"];
+    const result = await resolveRuntimeLaunchDraft({
+      db: {} as never,
+      env,
+      relayReady: true,
+      request: {
+        target: { kind: "repository", repositoryKey: "repo-1" },
+        runtime: { harness: "codex", model: "openai/gpt-5.3-codex" },
+      },
+    });
+
+    expect(result.launchable).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: "MODEL_INCOMPATIBLE", field: "model" })
+    );
+    expect(result.options.models.map((model) => model.model)).toEqual(["openai/gpt-5.6-luna"]);
+  });
 });

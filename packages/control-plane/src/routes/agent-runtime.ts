@@ -197,6 +197,11 @@ async function getReadiness(env: Env, ctx: UserRouteContext): Promise<Response> 
     catalog: buildRuntimeHarnessOptions({
       readiness: readiness.harnesses,
       enabledModels,
+      codexSubscriptionConfigured: credentials.some(
+        (credential) =>
+          credential.configured &&
+          (credential.kind === "codex-auth-json" || credential.kind === "codex-access-token")
+      ),
     }),
     hostRelay,
     canManage,
@@ -235,6 +240,11 @@ async function getCatalog(env: Env, ctx: { db: UserRouteContext["db"] }): Promis
     catalog: buildRuntimeHarnessOptions({
       readiness: readiness.harnesses,
       enabledModels,
+      codexSubscriptionConfigured: credentials.some(
+        (credential) =>
+          credential.configured &&
+          (credential.kind === "codex-auth-json" || credential.kind === "codex-access-token")
+      ),
     }),
   });
 }
