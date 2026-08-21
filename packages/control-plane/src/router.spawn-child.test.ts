@@ -7,6 +7,7 @@ import {
 } from "./router.test-support";
 import { getEffectiveEnabledModels } from "./db/model-preferences";
 import { SessionIndexStore } from "./db/session-index";
+import { SessionLaunchSpecStore } from "./db/session-launch-specs";
 import { SessionInternalPaths } from "./session/contracts";
 
 const integrationSettingsMocks = vi.hoisted(() => ({
@@ -17,6 +18,10 @@ const integrationSettingsMocks = vi.hoisted(() => ({
 
 vi.mock("./db/session-index", () => ({
   SessionIndexStore: vi.fn(),
+}));
+
+vi.mock("./db/session-launch-specs", () => ({
+  SessionLaunchSpecStore: vi.fn(),
 }));
 
 vi.mock("./db/model-preferences", () => ({
@@ -104,6 +109,9 @@ describe("handleSpawnChild prompt enqueue handling", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(SessionLaunchSpecStore).mockImplementation(function () {
+      return { get: vi.fn().mockResolvedValue(null) } as never;
+    });
     vi.mocked(getEffectiveEnabledModels).mockResolvedValue(["anthropic/claude-sonnet-4-6"]);
     integrationSettingsMocks.resolveCodeServerEnabled.mockResolvedValue(false);
     integrationSettingsMocks.resolveVncEnabled.mockResolvedValue(false);

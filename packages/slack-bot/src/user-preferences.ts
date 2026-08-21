@@ -9,6 +9,9 @@ import {
 import { createKvCacheStore } from "@open-inspect/shared/cache-store";
 import type { UserPreferences } from "@open-inspect/shared/types/session-api";
 import type { Env } from "./types";
+import { runtimeConfigurationRecordSchema } from "@open-inspect/shared/types/runtime-launch";
+import { agentHarnessSchema, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import { signedControlPlaneFetch } from "./internal-auth";
 import {
   getValidatedBranch,
   isValidBranchName,
@@ -19,9 +22,68 @@ import { createLogger } from "./logger";
 const log = createLogger("user-preferences");
 
 export interface ResolvedUserPreferences {
+  agentHarness?: AgentHarness | "inherit";
   model: string;
   reasoningEffort: string | undefined;
   branch: string | undefined;
+  /** False only when a legacy KV runtime preference could not be migrated yet. */
+  canonicalRuntimeStored?: boolean;
+}
+
+async function getControlPlaneRuntimePreferences(
+  env: Env,
+  userId: string
+): Promise<{ harness?: AgentHarness; model?: string; effort?: string } | null> {
+  try {
+    const actor = `slack:${userId}`;
+    const response = await signedControlPlaneFetch(env, {
+      method: "GET",
+      url: `https://internal/agent-runtime/configurations/user/${encodeURIComponent(actor)}`,
+      actor,
+    });
+    if (!response.ok) return null;
+    const raw = (await response.json()) as { configuration?: unknown };
+    const parsed = runtimeConfigurationRecordSchema.safeParse(raw.configuration);
+    if (!parsed.success) return null;
+    const model = parsed.data.config.model;
+    const effort = parsed.data.config.effort;
+    const harness = parsed.data.config.harness;
+    return {
+      ...(harness && harness !== "inherit" && agentHarnessSchema.safeParse(harness).success
+        ? { harness: harness as AgentHarness }
+        : {}),
+      ...(model && model !== "inherit" ? { model } : {}),
+      ...(effort && effort !== "inherit" ? { effort } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function saveControlPlaneRuntimePreferences(
+  env: Env,
+  userId: string,
+  preferences: UserPreferences,
+  harness: AgentHarness | "inherit"
+): Promise<boolean> {
+  try {
+    const actor = `slack:${userId}`;
+    const response = await signedControlPlaneFetch(env, {
+      method: "PUT",
+      url: `https://internal/agent-runtime/configurations/user/${encodeURIComponent(actor)}`,
+      actor,
+      body: JSON.stringify({
+        config: {
+          harness,
+          model: preferences.model ?? "inherit",
+          effort: preferences.reasoningEffort ?? "inherit",
+        },
+      }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 type UserPreferencesPatch = Partial<ResolvedUserPreferences>;
@@ -64,6 +126,7 @@ function normalizeResolvedPreferences(
       : getValidatedBranch(preferences.branch);
 
   return {
+    agentHarness: "inherit",
     model,
     reasoningEffort,
     branch,
@@ -184,12 +247,33 @@ export async function getResolvedUserPreferences(
   userId: string,
   options: UserPreferenceResolutionOptions = {}
 ): Promise<ResolvedUserPreferences> {
-  const prefs = await getUserPreferences(env, userId);
-  return resolveUserPreferences(
-    prefs,
+  const [prefs, runtime] = await Promise.all([
+    getUserPreferences(env, userId),
+    getControlPlaneRuntimePreferences(env, userId),
+  ]);
+  const resolved = resolveUserPreferences(
+    runtime
+      ? {
+          userId,
+          updatedAt: prefs?.updatedAt ?? Date.now(),
+          model: runtime.model ?? prefs?.model,
+          reasoningEffort: runtime.effort ?? prefs?.reasoningEffort,
+          branch: prefs?.branch,
+        }
+      : prefs,
     options.defaultModel ?? env.DEFAULT_MODEL,
     options.enabledModels
   );
+  const hasLegacyRuntimePreference = Boolean(prefs?.model || prefs?.reasoningEffort);
+  const canonicalRuntimeStored =
+    Boolean(runtime) || !hasLegacyRuntimePreference
+      ? true
+      : await saveControlPlaneRuntimePreferences(env, userId, prefs!, "inherit");
+  return {
+    ...resolved,
+    agentHarness: runtime?.harness ?? "inherit",
+    canonicalRuntimeStored,
+  };
 }
 
 async function saveUserPreferences(
@@ -244,7 +328,10 @@ export async function updateUserPreferences(
   patchOrUpdater: UserPreferencesPatch | UserPreferencesUpdater,
   options: UserPreferenceResolutionOptions = {}
 ): Promise<boolean> {
-  const current = await getUserPreferences(env, userId);
+  const [current, runtimeCurrent] = await Promise.all([
+    getUserPreferences(env, userId),
+    getControlPlaneRuntimePreferences(env, userId),
+  ]);
   const resolvedCurrent = resolveUserPreferences(
     current,
     options.defaultModel ?? env.DEFAULT_MODEL,
@@ -260,5 +347,32 @@ export async function updateUserPreferences(
     defaultModel: options.defaultModel ?? env.DEFAULT_MODEL,
     enabledModels: options.enabledModels,
   });
-  return merged ? saveUserPreferences(env, userId, merged, options) : false;
+  if (!merged) return false;
+  const savedKv = await saveUserPreferences(env, userId, merged, options);
+  const updatesRuntime =
+    hasPreferenceField(patch, "model") || hasPreferenceField(patch, "reasoningEffort");
+  const savedRuntime = updatesRuntime
+    ? await saveControlPlaneRuntimePreferences(
+        env,
+        userId,
+        merged,
+        runtimeCurrent?.harness ?? "inherit"
+      )
+    : true;
+  return savedKv && savedRuntime;
+}
+
+export async function updateUserHarnessPreference(
+  env: Env,
+  userId: string,
+  harness: AgentHarness | "inherit"
+): Promise<boolean> {
+  const [current, runtimeCurrent] = await Promise.all([
+    getUserPreferences(env, userId),
+    getControlPlaneRuntimePreferences(env, userId),
+  ]);
+  const preferences: UserPreferences = current ?? { userId, updatedAt: Date.now() };
+  if (runtimeCurrent?.model) preferences.model = runtimeCurrent.model;
+  if (runtimeCurrent?.effort) preferences.reasoningEffort = runtimeCurrent.effort;
+  return saveControlPlaneRuntimePreferences(env, userId, preferences, harness);
 }

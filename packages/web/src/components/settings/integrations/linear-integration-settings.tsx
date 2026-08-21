@@ -45,6 +45,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ModelReasoningDefaultsFields } from "./model-reasoning-defaults-fields";
+import { RuntimeConfigurationEditor } from "../runtime-configuration-editor";
 
 const GLOBAL_SETTINGS_KEY = "/api/integration-settings/linear";
 const REPO_SETTINGS_KEY = "/api/integration-settings/linear/repos";
@@ -103,6 +104,13 @@ export function LinearIntegrationSettings() {
           </p>
         )}
       </Section>
+
+      <RuntimeConfigurationEditor
+        scope="integration"
+        scopeId="linear"
+        title="Linear session runtime"
+        description="Canonical Harness, route, model, effort, and typed settings for Linear-created sessions."
+      />
 
       <GlobalSettingsSection
         settings={settings}

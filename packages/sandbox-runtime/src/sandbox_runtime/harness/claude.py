@@ -186,6 +186,9 @@ class ClaudeHarnessDriver:
         self._options_class = ClaudeAgentOptions
 
     def _build_options(self, prompt: HarnessPrompt) -> Any:
+        supported_efforts = {"low", "medium", "high", "xhigh", "max"}
+        if prompt.reasoning_effort is not None and prompt.reasoning_effort not in supported_efforts:
+            raise ValueError(f"Unsupported Claude reasoning effort: {prompt.reasoning_effort}")
         kwargs: dict[str, Any] = {
             "cwd": self._workspace_path,
             "permission_mode": "acceptEdits",
@@ -195,12 +198,17 @@ class ClaudeHarnessDriver:
             "env": self._environment,
             "mcp_servers": claude_mcp_config(self._mcp_servers),
         }
+        system_prompt_append = self._environment.get(
+            "OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND", ""
+        ).strip()
+        if system_prompt_append:
+            kwargs["system_prompt"]["append"] = system_prompt_append
         if self._session_id:
             kwargs["resume"] = self._session_id
         model = self._normalize_model(prompt.model)
         if model:
             kwargs["model"] = model
-        if prompt.reasoning_effort in {"low", "medium", "high", "xhigh", "max"}:
+        if prompt.reasoning_effort in supported_efforts:
             kwargs["effort"] = prompt.reasoning_effort
         return self._options_class(**kwargs)
 

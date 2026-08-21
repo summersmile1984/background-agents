@@ -166,8 +166,9 @@ export class SessionMessageQueue {
     private readonly executionTimeoutMs: number,
     private readonly validateAgentRuntimeSelection?: (
       harness: AgentHarness,
-      model: string
-    ) => Promise<void>
+      model: string,
+      reasoningEffort?: string
+    ) => Promise<boolean>
   ) {}
 
   async handlePromptMessage(
@@ -707,21 +708,35 @@ export class SessionMessageQueue {
       if (isValidModel(data.model)) {
         messageModel = data.model;
       } else {
-        this.log.warn("Invalid message model, ignoring override", { model: data.model });
+        throw new AgentRuntimeSelectionError(
+          "MODEL_INCOMPATIBLE",
+          `Unknown or unsupported model: ${data.model}`
+        );
       }
     }
 
     const effectiveModelForEffort =
       messageModel || this.repository.getSession()?.model || DEFAULT_MODEL;
+    let strictRuntimeSelection = false;
     if (this.validateAgentRuntimeSelection) {
       const harness = this.repository.getSession()?.agent_harness ?? DEFAULT_AGENT_HARNESS;
-      await this.validateAgentRuntimeSelection(harness, effectiveModelForEffort);
+      strictRuntimeSelection = await this.validateAgentRuntimeSelection(
+        harness,
+        effectiveModelForEffort,
+        data.reasoningEffort
+      );
     }
     const messageReasoningEffort = validateReasoningEffort(
       effectiveModelForEffort,
       data.reasoningEffort,
       this.log
     );
+    if (strictRuntimeSelection && data.reasoningEffort && messageReasoningEffort === null) {
+      throw new AgentRuntimeSelectionError(
+        "EFFORT_UNSUPPORTED",
+        `${data.reasoningEffort} is not supported by ${effectiveModelForEffort}`
+      );
+    }
     try {
       this.messageRepository.createMessageWithAttachments(
         {

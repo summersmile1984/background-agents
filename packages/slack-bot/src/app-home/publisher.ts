@@ -4,29 +4,31 @@ import { getUserRepoBranchPreferences } from "../branch-preferences";
 import { getAvailableRepos } from "../classifier/repos";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
-import { getUserPreferences, resolveUserPreferences } from "../user-preferences";
+import { getResolvedUserPreferences } from "../user-preferences";
 import { getAvailableModels, getSlackDefaultModel } from "./models";
 import { buildAppHomeView } from "./view";
+import { getAvailableHarnesses } from "./harnesses";
 
 const log = createLogger("app-home");
 
 export async function publishAppHome(env: Env, userId: string): Promise<void> {
-  const [prefs, availableModels, slackDefaultModel, repos, repoBranchPreferences] =
+  const [availableModels, slackDefaultModel, repos, repoBranchPreferences, availableHarnesses] =
     await Promise.all([
-      getUserPreferences(env, userId),
       getAvailableModels(env),
       getSlackDefaultModel(env),
       getAvailableRepos(env),
       getUserRepoBranchPreferences(env, userId),
+      getAvailableHarnesses(env),
     ]);
-  const current = resolveUserPreferences(
-    prefs,
-    slackDefaultModel ?? env.DEFAULT_MODEL,
-    availableModels.map((model) => model.value)
-  );
+  const current = await getResolvedUserPreferences(env, userId, {
+    defaultModel: slackDefaultModel ?? env.DEFAULT_MODEL,
+    enabledModels: availableModels.map((model) => model.value),
+  });
   const view = buildAppHomeView({
     appName: resolveAppName(env),
     availableModels,
+    availableHarnesses,
+    currentHarness: current.agentHarness,
     currentModel: current.model,
     currentEffort: current.reasoningEffort,
     currentBranch: current.branch,

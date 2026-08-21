@@ -6,6 +6,20 @@ const mocks = vi.hoisted(() => ({
   admin: true,
   setCredential: vi.fn(),
   replaceDeepSeekKey: vi.fn(),
+  resolveDraft: vi.fn(),
+}));
+
+vi.mock("../agent-runtime/resolver", () => ({
+  RuntimeLaunchResolutionError: class extends Error {
+    constructor(
+      readonly code: string,
+      readonly status: number,
+      message: string
+    ) {
+      super(message);
+    }
+  },
+  resolveRuntimeLaunchDraft: (...args: unknown[]) => mocks.resolveDraft(...args),
 }));
 
 vi.mock("../auth/deployment-admin", () => ({
@@ -134,6 +148,7 @@ describe("agent runtime routes", () => {
     mocks.admin = true;
     mocks.setCredential.mockReset();
     mocks.replaceDeepSeekKey.mockReset();
+    mocks.resolveDraft.mockReset();
   });
 
   it("returns credential metadata without secret values", async () => {
@@ -173,5 +188,34 @@ describe("agent runtime routes", () => {
     expect(mocks.replaceDeepSeekKey).toHaveBeenCalledWith("provider-secret");
     expect(text).not.toContain("provider-secret");
     expect(text).toContain("sha256:relay123456");
+  });
+
+  it("resolves a typed target-aware launch draft", async () => {
+    mocks.resolveDraft.mockResolvedValue({
+      resolverVersion: "1",
+      capabilityCatalogVersion: "test",
+      checkedAt: 1,
+      draftDigest: "digest",
+      launchable: true,
+      effective: {},
+      options: { harnesses: [], models: [], efforts: [] },
+      issues: [],
+    });
+
+    const response = await dispatch("POST", "/agent-runtime/resolve-draft", {
+      target: { kind: "repository", repositoryKey: "repo-1", branch: "main" },
+      runtime: { harness: "codex", model: "openai/gpt-5.6-luna" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ launchable: true, draftDigest: "digest" });
+    expect(mocks.resolveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          target: { kind: "repository", repositoryKey: "repo-1", branch: "main" },
+        }),
+        relayReady: true,
+      })
+    );
   });
 });

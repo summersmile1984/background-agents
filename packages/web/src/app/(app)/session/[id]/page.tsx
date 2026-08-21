@@ -60,7 +60,9 @@ import { useSessionSnapshot } from "./session-snapshot-provider";
 import { useSessionRename } from "@/hooks/use-session-rename";
 import { getAgentHarnessOrDefault } from "@open-inspect/shared/types/agent-harness";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
-import { getModelIds, getSessionAgentHarnessModelOptions } from "@/lib/agent-harness-models";
+import { getSessionAgentHarnessModelOptions } from "@/lib/agent-harness-models";
+import { useSessionRuntime } from "@/hooks/use-session-runtime";
+import { toast } from "sonner";
 
 type SessionState = ReturnType<typeof useSessionSocket>["sessionState"];
 
@@ -68,6 +70,7 @@ const TERMINAL_VISIBLE_STORAGE_KEY = "terminal-visible";
 const DEFAULT_SESSION_STATUS = "created" as const;
 
 export default function SessionPage() {
+  const router = useRouter();
   const initialSnapshot = useSessionSnapshot();
   const sessionId = initialSnapshot.session.id;
   const {
@@ -98,6 +101,7 @@ export default function SessionPage() {
     events
   );
   const { suggestions: skillSuggestions } = useSessionSkills(sessionId);
+  const { data: runtimeView } = useSessionRuntime(sessionId);
 
   const fallbackSessionInfo = {
     repoOwner: initialSnapshot.session.repoOwner,
@@ -122,7 +126,57 @@ export default function SessionPage() {
     handleModelChange,
     modelItems,
     loadingEnabledModels,
-  } = useModelSelection(sessionState, agentHarness);
+  } = useModelSelection(sessionState, agentHarness, runtimeView);
+  const executeRuntimeCommand = useCallback(
+    async (slashName: string) => {
+      const command = runtimeView?.commands.find((candidate) => candidate.slashName === slashName);
+      if (!command) return { ok: false, message: `Unknown command: /${slashName}` };
+      if (!command.available) return { ok: false, message: command.unavailableReason };
+      const response = await browserApiFetch(`/api/sessions/${sessionId}/commands`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          commandId: command.id,
+          arguments: {},
+          clientInvocationId: crypto.randomUUID(),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        action?: string;
+        commands?: Array<{ slashName: string; available: boolean }>;
+        runtime?: {
+          harness: string;
+          routeId: string;
+          model: string;
+          effort: string | null;
+          sandboxStatus: string | null;
+        };
+      };
+      if (!response.ok) return { ok: false, message: payload.error ?? "Command failed" };
+      if (payload.action === "start-new-session") router.push("/");
+      else if (payload.action === "open-model-selector") {
+        document.getElementById("session-runtime-model-selector")?.click();
+      } else if (payload.action === "open-effort-selector") {
+        document.querySelector<HTMLButtonElement>('button[aria-label^="Reasoning:"]')?.focus();
+        toast.info("Use the Effort control beside the model selector");
+      } else if (payload.action === "show-status" && payload.runtime) {
+        toast.info(
+          `${payload.runtime.harness} · ${payload.runtime.model} · ${payload.runtime.effort ?? "no effort"} · ${payload.runtime.sandboxStatus ?? "sandbox pending"}`
+        );
+      } else if (payload.action === "show-help") {
+        toast.info(
+          `Available: ${payload.commands
+            ?.filter((candidate) => candidate.available)
+            .map((candidate) => `/${candidate.slashName}`)
+            .join(", ")}`
+        );
+      } else if (command.id === "product.review") toast.success("Review workflow queued");
+      else if (command.id === "product.stop") toast.success("Stop requested");
+      return { ok: true };
+    },
+    [router, runtimeView?.commands, sessionId]
+  );
   const {
     prompt,
     sessionAttachments,
@@ -142,7 +196,8 @@ export default function SessionPage() {
     reasoningEffort,
     loadingEnabledModels,
     sessionState?.status ?? DEFAULT_SESSION_STATUS,
-    ready
+    ready,
+    executeRuntimeCommand
   );
   const [cancellingPromptIds, setCancellingPromptIds] = useState<ReadonlySet<string>>(new Set());
   const cancellingPromptIdsRef = useRef(new Set<string>());
@@ -377,6 +432,7 @@ export default function SessionPage() {
           onStopExecution: stopExecution,
         }}
         skillSuggestions={skillSuggestions}
+        commands={runtimeView?.commands ?? []}
         attachments={{
           items: sessionAttachments.attachments,
           error: sessionAttachments.attachmentError,
@@ -390,6 +446,16 @@ export default function SessionPage() {
           items: modelItems,
           onModelChange: handleModelChange,
           onReasoningEffortChange: setReasoningEffort,
+          liveMutation: runtimeView?.legacy
+            ? { model: true, effort: true }
+            : {
+                model: runtimeView?.liveMutation.model ?? false,
+                effort: runtimeView?.liveMutation.effort ?? false,
+              },
+          effortOptions: runtimeView?.legacy
+            ? undefined
+            : runtimeView?.liveOptions.models.find((model) => model.model === selectedModel)
+                ?.efforts,
         }}
       />
     </div>
@@ -601,16 +667,41 @@ function useSessionListActions(sessionId: string) {
  * Model and reasoning-effort selection derived from session state until the
  * user takes ownership of an explicit draft.
  */
-function useModelSelection(sessionState: SessionState, agentHarness: AgentHarness) {
+function useModelSelection(
+  sessionState: SessionState,
+  agentHarness: AgentHarness,
+  runtimeView: ReturnType<typeof useSessionRuntime>["data"]
+) {
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
 
   const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
-  const harnessModelOptions = useMemo(
-    () =>
-      getSessionAgentHarnessModelOptions(enabledModelOptions, agentHarness, sessionState?.model),
-    [agentHarness, enabledModelOptions, sessionState?.model]
+  const harnessModelOptions = useMemo(() => {
+    if (!runtimeView || runtimeView.legacy) {
+      return getSessionAgentHarnessModelOptions(
+        enabledModelOptions,
+        agentHarness,
+        sessionState?.model
+      );
+    }
+    const byCategory = new Map<string, typeof runtimeView.liveOptions.models>();
+    for (const model of runtimeView.liveOptions.models) {
+      const current = byCategory.get(model.category) ?? [];
+      current.push(model);
+      byCategory.set(model.category, current);
+    }
+    return [...byCategory].map(([category, models]) => ({
+      category,
+      models: models.map((model) => ({
+        id: model.model,
+        name: model.displayName,
+        description: model.description,
+      })),
+    }));
+  }, [agentHarness, enabledModelOptions, runtimeView, sessionState?.model]);
+  const harnessModelIds = useMemo(
+    () => harnessModelOptions.flatMap((group) => group.models.map((model) => model.id)),
+    [harnessModelOptions]
   );
-  const harnessModelIds = useMemo(() => getModelIds(harnessModelOptions), [harnessModelOptions]);
   const { model: selectedModel, reasoningEffort } = resolveModelPreference(
     modelPreferenceDraft ?? {
       model: sessionState?.model ?? DEFAULT_MODEL,

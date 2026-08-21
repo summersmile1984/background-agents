@@ -19,6 +19,11 @@ import { restoreQueuedPrompt } from "@/lib/restore-queued-prompt";
 
 const TYPING_DEBOUNCE_MS = 300;
 
+export interface RuntimeCommandExecutionResult {
+  ok: boolean;
+  message?: string;
+}
+
 /** Prompt state and handlers for submission, keyboard shortcuts, and typing indicators. */
 export function usePromptInput(
   sessionId: string,
@@ -28,7 +33,8 @@ export function usePromptInput(
   reasoningEffort: string | undefined,
   loadingEnabledModels: boolean,
   sessionStatus: SessionStatus,
-  canSubmit: boolean
+  canSubmit: boolean,
+  executeRuntimeCommand?: (slashName: string) => Promise<RuntimeCommandExecutionResult>
 ) {
   const [prompt, setPromptState] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -82,6 +88,18 @@ export function usePromptInput(
     setSubmitError(null);
     try {
       const content = prompt.trim() || DEFAULT_ATTACHMENT_ONLY_MESSAGE;
+      const commandMatch = !hasAttachments ? /^\/([a-z0-9-]+)$/i.exec(content) : null;
+      if (commandMatch && executeRuntimeCommand) {
+        clearTypingTimeout();
+        const result = await executeRuntimeCommand(commandMatch[1].toLowerCase());
+        if (!result.ok) {
+          setSubmitError(result.message ?? "The command could not be executed.");
+          return;
+        }
+        setPrompt("");
+        retryRequestRef.current = null;
+        return;
+      }
       let attachments: SessionAttachmentReference[] | undefined;
       if (hasAttachments) {
         try {

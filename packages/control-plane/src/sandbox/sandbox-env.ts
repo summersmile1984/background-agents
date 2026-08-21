@@ -10,6 +10,7 @@ import {
 } from "./provider";
 import { resolveServicePorts } from "./providers/port-resolution";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 
 /**
  * Shared assembly for the sandbox environment contract.
@@ -46,6 +47,7 @@ export interface SessionConfigPayload {
   model: string;
   agent_harness: AgentHarness;
   agent_session_id?: string | null;
+  launch_spec?: SessionLaunchSpecV1;
   /** Omitted from the serialized payload when undefined. */
   mcp_servers?: McpServerConfig[];
   /** Omitted from the serialized payload when undefined. */
@@ -63,6 +65,7 @@ export interface SessionConfigInput {
   model: string;
   agentHarness?: AgentHarness;
   agentSessionId?: string | null;
+  launchSpec?: SessionLaunchSpecV1 | null;
   mcpServers?: McpServerConfig[];
   branch?: string | null;
   repositories?: SessionRepositoryInfo[];
@@ -88,6 +91,9 @@ export function buildSessionConfig(input: SessionConfigInput): SessionConfigPayl
   };
   if (input.agentSessionId !== undefined) {
     payload.agent_session_id = input.agentSessionId;
+  }
+  if (input.launchSpec) {
+    payload.launch_spec = input.launchSpec;
   }
   if (input.branch !== undefined) {
     payload.branch = input.branch;

@@ -10,6 +10,10 @@ import type {
   HarnessProviderReadiness,
   HarnessReadiness,
 } from "@open-inspect/shared/types/agent-runtime";
+import type {
+  RuntimeConfigFragment,
+  RuntimeHarnessOption,
+} from "@open-inspect/shared/types/runtime-launch";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
@@ -19,9 +23,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   deleteHarnessCredential,
   updateHarnessCredential,
+  updateUserRuntimeConfiguration,
   useAgentRuntimeReadiness,
+  useUserRuntimeConfiguration,
 } from "@/hooks/use-agent-runtime";
 import { browserApiFetch } from "@/lib/browser-api-fetch";
+import { RuntimeConfigurationEditor } from "./runtime-configuration-editor";
 
 const HARNESS_INFO: Record<AgentHarness, { name: string; description: string }> = {
   opencode: {
@@ -281,6 +288,177 @@ function CredentialEditor({
   );
 }
 
+function PersonalRuntimeDefaults({ catalog }: { catalog: RuntimeHarnessOption[] }) {
+  const { data, loading, refresh } = useUserRuntimeConfiguration();
+  const [draft, setDraft] = useState<RuntimeConfigFragment>({});
+  const [initialized, setInitialized] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (loading || initialized) return;
+    setDraft(data?.configuration?.config ?? {});
+    setInitialized(true);
+  }, [data?.configuration?.config, initialized, loading]);
+
+  const harness = draft.harness && draft.harness !== "inherit" ? draft.harness : null;
+  const eligibleHarnesses = catalog.filter((option) => option.ready);
+  const modelOptions = Array.from(
+    new Map(
+      eligibleHarnesses
+        .filter((option) => !harness || option.harness === harness)
+        .flatMap((option) => option.routes.flatMap((route) => route.models))
+        .filter((model) => model.ready)
+        .map((model) => [model.model, model] as const)
+    ).values()
+  );
+  const selectedModel =
+    draft.model && draft.model !== "inherit"
+      ? modelOptions.find((model) => model.model === draft.model)
+      : undefined;
+  const settingsHarness = harness
+    ? catalog.find((option) => option.harness === harness)
+    : undefined;
+
+  async function save() {
+    setSaving(true);
+    try {
+      const response = await updateUserRuntimeConfiguration(draft);
+      const result: unknown = await response.json();
+      if (!response.ok) throw new Error(responseError(result, "Failed to save personal defaults"));
+      await refresh();
+      toast.success("Personal runtime defaults saved.");
+    } catch (saveError) {
+      toast.error(
+        saveError instanceof Error ? saveError.message : "Failed to save personal defaults"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="mt-6 border border-border p-4">
+      <h3 className="text-sm font-semibold text-foreground">My runtime defaults</h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Applied by the control-plane resolver after installation defaults and before repository or
+        environment defaults. Credentials are never stored here.
+      </p>
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div>
+          <Label>Harness</Label>
+          <Combobox
+            value={draft.harness ?? "inherit"}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                harness: value as RuntimeConfigFragment["harness"],
+                routeId: undefined,
+                model: "inherit",
+                effort: "inherit",
+                settings: undefined,
+              }))
+            }
+            items={[
+              { value: "inherit", label: "Installation default" },
+              ...eligibleHarnesses.map((option) => ({
+                value: option.harness,
+                label: option.displayName,
+              })),
+            ]}
+            dropdownWidth="w-full"
+            triggerClassName="mt-1.5 flex w-full items-center justify-between border border-border bg-input px-3 py-2 text-sm"
+          >
+            <span>
+              {harness
+                ? (catalog.find((option) => option.harness === harness)?.displayName ?? harness)
+                : "Installation default"}
+            </span>
+            <span aria-hidden="true">⌄</span>
+          </Combobox>
+        </div>
+        <div>
+          <Label>Model</Label>
+          <Combobox
+            value={draft.model ?? "inherit"}
+            onChange={(value) =>
+              setDraft((current) => ({
+                ...current,
+                model: value,
+                effort: "inherit",
+              }))
+            }
+            items={[
+              { value: "inherit", label: "Inherited model" },
+              ...modelOptions.map((model) => ({ value: model.model, label: model.displayName })),
+            ]}
+            dropdownWidth="w-full"
+            triggerClassName="mt-1.5 flex w-full items-center justify-between border border-border bg-input px-3 py-2 text-sm"
+          >
+            <span>{selectedModel?.displayName ?? "Inherited model"}</span>
+            <span aria-hidden="true">⌄</span>
+          </Combobox>
+        </div>
+        <div>
+          <Label>Effort</Label>
+          <Combobox
+            value={draft.effort ?? "inherit"}
+            disabled={!selectedModel}
+            onChange={(value) => setDraft((current) => ({ ...current, effort: value }))}
+            items={[
+              { value: "inherit", label: "Model default" },
+              ...(selectedModel?.efforts.map((effort) => ({
+                value: effort.value,
+                label: effort.label,
+              })) ?? []),
+            ]}
+            dropdownWidth="w-full"
+            triggerClassName="mt-1.5 flex w-full items-center justify-between border border-border bg-input px-3 py-2 text-sm disabled:opacity-50"
+          >
+            <span>
+              {draft.effort && draft.effort !== "inherit" ? draft.effort : "Model default"}
+            </span>
+            <span aria-hidden="true">⌄</span>
+          </Combobox>
+        </div>
+      </div>
+      {settingsHarness?.settings
+        .filter(
+          (setting) => setting.visibility === "user" && setting.allowedScopes.includes("user")
+        )
+        .map((setting) => (
+          <div key={setting.key} className="mt-4 max-w-2xl">
+            <Label htmlFor={`personal-${setting.key}`}>{setting.label}</Label>
+            {setting.type === "string" ? (
+              <Textarea
+                id={`personal-${setting.key}`}
+                className="mt-1.5"
+                rows={3}
+                value={String(draft.settings?.[setting.key] ?? "")}
+                maxLength={
+                  typeof setting.constraints?.maxLength === "number"
+                    ? setting.constraints.maxLength
+                    : undefined
+                }
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    settings: { ...current.settings, [setting.key]: event.target.value },
+                  }))
+                }
+              />
+            ) : null}
+            <p className="mt-1 text-xs text-muted-foreground">{setting.description}</p>
+          </div>
+        ))}
+      <div className="mt-4">
+        <Button disabled={saving || loading} onClick={() => void save()}>
+          {saving ? "Saving..." : "Save my defaults"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 export function HarnessesSettings() {
   const { data, error, loading, refresh } = useAgentRuntimeReadiness();
   const [enabledHarnesses, setEnabledHarnesses] = useState<Set<AgentHarness>>(new Set());
@@ -410,6 +588,19 @@ export function HarnessesSettings() {
         </div>
       ) : null}
 
+      {data.catalog ? <PersonalRuntimeDefaults catalog={data.catalog} /> : null}
+
+      {data.canManage && data.catalog ? (
+        <div className="mt-6">
+          <RuntimeConfigurationEditor
+            scope="installation"
+            scopeId="global"
+            title="Installation runtime fragment"
+            description="Canonical deployment-wide Harness, model, effort, and typed defaults. Personal, repository, environment, and integration fragments inherit from this layer."
+          />
+        </div>
+      ) : null}
+
       <section className="mt-6 border border-border p-4">
         <h3 className="text-sm font-semibold text-foreground">New session defaults</h3>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -452,6 +643,68 @@ export function HarnessesSettings() {
           />
         ))}
       </div>
+
+      {data.catalog ? (
+        <section className="mt-8 border border-border p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Runtime capability manifest</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Exact routes and typed settings accepted by the deployed sandbox image. Policy
+                settings are shown read-only; session settings appear in the new-session form.
+              </p>
+            </div>
+            <span className="font-mono text-xs text-muted-foreground">
+              {data.capabilityCatalogVersion}
+            </span>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            {data.catalog.map((harness) => (
+              <div key={harness.harness} className="border border-border-muted p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="text-sm font-medium text-foreground">{harness.displayName}</h4>
+                  <span className={`text-xs ${harness.ready ? "text-success" : "text-warning"}`}>
+                    {harness.ready ? "Ready" : "Needs setup"}
+                  </span>
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  {harness.routes.map((route) => (
+                    <div key={route.routeId} className="flex justify-between gap-3">
+                      <code className="min-w-0 truncate">{route.routeId}</code>
+                      <span>
+                        {route.ready
+                          ? `${route.models.filter((model) => model.ready).length} models`
+                          : route.code}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 border-t border-border-muted pt-3">
+                  <p className="text-xs font-medium text-foreground">
+                    Settings schema v{harness.settingsSchemaVersion}
+                  </p>
+                  <div className="mt-2 space-y-2">
+                    {harness.settings.map((setting) => (
+                      <div key={setting.key} className="text-xs">
+                        <div className="flex flex-wrap justify-between gap-2 text-foreground">
+                          <span>{setting.label}</span>
+                          <code>{JSON.stringify(setting.defaultValue)}</code>
+                        </div>
+                        <p className="text-muted-foreground">
+                          {setting.visibility === "read-only"
+                            ? "Platform policy"
+                            : "Session configurable"}{" "}
+                          · {setting.mutability}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-4">
         <Button

@@ -149,8 +149,7 @@ describe("control plane client request payloads", () => {
       repoOwner: "acme",
       repoName: "app",
       branch: "feature/slack-images",
-      model: "openai/gpt-5.4",
-      reasoningEffort: "high",
+      runtime: { harness: "inherit", model: "openai/gpt-5.4", effort: "high" },
       actorDisplayName: "Ada Lovelace",
       actorEmail: "ada@example.com",
     });
@@ -169,7 +168,7 @@ describe("control plane client request payloads", () => {
 
     expect(parseRequestBody(fetch)).toEqual({
       environmentId: "env-1",
-      model: "anthropic/claude-sonnet-4-6",
+      runtime: { harness: "inherit", model: "anthropic/claude-sonnet-4-6" },
     });
   });
 
@@ -193,15 +192,13 @@ describe("control plane client request payloads", () => {
         },
       },
       model: "deepseek/deepseek-chat",
-      agentHarness: "deepseek",
       branch: "main",
     });
 
     expect(parseRequestBody(fetch)).toEqual({
       repositoryKey: "repo-gitea-n9n",
       branch: "main",
-      model: "deepseek/deepseek-chat",
-      agentHarness: "deepseek",
+      runtime: { harness: "inherit", model: "deepseek/deepseek-chat" },
     });
   });
 

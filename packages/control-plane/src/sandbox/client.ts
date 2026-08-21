@@ -12,6 +12,7 @@ import { z } from "zod";
 import { createLogger } from "../logger";
 import type { CorrelationContext } from "../logger";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import { buildSessionConfig, toRepositoryConfigPayload } from "./sandbox-env";
 import type { SessionRepositoryInfo } from "./provider";
 
@@ -164,6 +165,7 @@ export interface CreateSandboxRequest {
   model?: string;
   agentHarness?: AgentHarness;
   agentSessionId?: string | null;
+  launchSpec?: SessionLaunchSpecV1 | null;
   userEnvVars?: Record<string, string>;
   prebuiltImageId?: string | null;
   prebuiltImageSha?: string | null;
@@ -204,6 +206,7 @@ export interface RestoreSandboxRequest {
   model: string;
   agentHarness?: AgentHarness;
   agentSessionId?: string | null;
+  launchSpec?: SessionLaunchSpecV1 | null;
   userEnvVars?: Record<string, string>;
   timeoutSeconds?: number;
   branch?: string | null;
@@ -390,6 +393,7 @@ export class ModalClient {
           model: request.model || "claude-sonnet-4-6",
           agent_harness: request.agentHarness,
           agent_session_id: request.agentSessionId ?? null,
+          launch_spec: request.launchSpec ?? null,
           user_env_vars: request.userEnvVars || null,
           repo_image_id: request.prebuiltImageId || null,
           repo_image_sha: request.prebuiltImageSha || null,

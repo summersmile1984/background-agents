@@ -3,6 +3,10 @@ import { buildSessionRepositories, type SessionRepositoryEntry } from "./reposit
 import type { SqlResult, SqlStorage, TransactionSync } from "./sql-storage";
 import type { SessionRepositoryRow, SessionRow } from "./types";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import {
+  sessionLaunchSpecV1Schema,
+  type SessionLaunchSpecV1,
+} from "@open-inspect/shared/types/runtime-launch";
 
 /** Data for upserting a session. */
 export interface UpsertSessionData {
@@ -60,6 +64,25 @@ export class SessionCoreRepository {
     const result = this.sql.exec(`SELECT * FROM session LIMIT 1`);
     const rows = this.rows<SessionRow>(result);
     return rows[0] ?? null;
+  }
+
+  getLaunchSpec(): SessionLaunchSpecV1 | null {
+    const result = this.sql.exec(`SELECT spec_json FROM session_launch_spec WHERE singleton = 1`);
+    const row = this.rows<{ spec_json: string }>(result)[0];
+    return row ? sessionLaunchSpecV1Schema.parse(JSON.parse(row.spec_json)) : null;
+  }
+
+  replaceLaunchSpec(spec: SessionLaunchSpecV1): void {
+    const parsed = sessionLaunchSpecV1Schema.parse(spec);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO session_launch_spec
+       (singleton, version, draft_digest, spec_json, created_at)
+       VALUES (1, ?, ?, ?, ?)`,
+      parsed.version,
+      parsed.draftDigest,
+      JSON.stringify(parsed),
+      parsed.resolvedAt
+    );
   }
 
   upsertSession(data: UpsertSessionData): void {

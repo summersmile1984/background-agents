@@ -14,6 +14,7 @@ import type { McpServerConfig, SandboxSettings } from "@open-inspect/shared/type
 import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { extractProviderAndModel } from "@open-inspect/shared/models";
 import type { SandboxStatus } from "@open-inspect/shared/types/sessions";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import { sessionHasRepository, type SandboxRow, type SessionRow } from "../../session/types";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -88,6 +89,8 @@ export interface SandboxStorage {
   getSandboxWithCircuitBreaker(): SandboxCircuitBreakerInfo | null;
   /** Get current session */
   getSession(): SessionRow | null;
+  /** Immutable runtime contract; optional for pre-migration storage adapters. */
+  getLaunchSpec?(): SessionLaunchSpecV1 | null;
   /**
    * Get the session's member repositories in position order. Pre-list
    * sessions get a one-entry list synthesized from the scalar columns
@@ -579,6 +582,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const prebuiltImageSha: string | null = selectedImage?.primaryBaseSha ?? null;
 
       const mcpServers = await this.loadMcpServers(repositories);
+      const launchSpec = this.storage.getLaunchSpec?.() ?? null;
 
       const codeServerEnabled = session.code_server_enabled === 1;
       const vncEnabled = session.vnc_enabled === 1;
@@ -603,6 +607,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         model: modelId,
         agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
         agentSessionId: session.agent_session_id,
+        launchSpec,
         userEnvVars,
         prebuiltImageId,
         prebuiltImageSha,
@@ -908,6 +913,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const vncEnabled = session.vnc_enabled === 1;
       const agentSlackNotifyEnabled = await this.resolveAgentSlackNotifyEnabled(session);
       const mcpServers = await this.loadMcpServers(repositories);
+      const launchSpec = this.storage.getLaunchSpec?.() ?? null;
       const sandboxSettings = this.parseSandboxSettings(session);
       const timeoutSeconds = this.resolveSandboxTimeoutSeconds(sandboxSettings);
       const gitCapability = await issueSessionGitCapability(
@@ -929,6 +935,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         model: modelId,
         agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
         agentSessionId: session.agent_session_id,
+        launchSpec,
         userEnvVars,
         timeoutSeconds,
         branch: session.base_branch,

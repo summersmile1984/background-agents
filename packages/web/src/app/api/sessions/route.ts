@@ -50,6 +50,8 @@ export async function POST(request: NextRequest) {
       model: body.model,
       reasoningEffort: body.reasoningEffort,
       agentHarness: body.agentHarness,
+      runtime: body.runtime,
+      runtimeDraftDigest: body.runtimeDraftDigest,
       branch: body.branch,
       title: body.title,
       // The picker's other two target modes (mutually exclusive with the

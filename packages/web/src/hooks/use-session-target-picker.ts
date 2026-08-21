@@ -448,7 +448,7 @@ export function useSessionTargetPicker(): SessionTargetSelection {
       setSelectedBranch,
       branches,
       loadingBranches,
-      repos,
+      repos: visibleRepos,
       loadingRepos,
       sourceConnections,
       selectedSourceConnectionId,

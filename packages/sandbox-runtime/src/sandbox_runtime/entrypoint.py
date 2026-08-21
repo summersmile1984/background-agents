@@ -23,6 +23,7 @@ from .repository_boot import RepositoryBoot
 from .repository_hooks import RepositoryHooks
 from .repository_sync import RepositorySynchronizer
 from .runtime_config import RuntimeConfig
+from .runtime_launch import validate_runtime_launch
 from .supervisor import SandboxSupervisor
 from .tunnel_environment import TunnelEnvironment
 from .types import AgentHarness
@@ -44,6 +45,11 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
         session_id=str(config.session_config.get("session_id", "")),
     )
     warnings = BootWarningSink(log)
+    validate_runtime_launch(
+        config.session_config,
+        os.environ,
+        expected_harness=config.agent_harness,
+    )
     materialize_harness_credentials(os.environ, log, warnings.record, config.agent_harness)
     dev_services = DevServiceManager(
         workspace_path=config.workspace_path,

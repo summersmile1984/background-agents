@@ -22,6 +22,8 @@ import {
 } from "./session-inbox-store";
 import { readStateFromRow, unreadSql, type ViewerReadStateRow } from "./session-read-state";
 import type { SqlDatabase, SqlStatement } from "./sql-database";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
+import { SessionLaunchSpecStore } from "./session-launch-specs";
 
 export type {
   ListSessionInboxOptions,
@@ -105,6 +107,8 @@ export interface SessionEntry {
   skillManifest?: SessionSkillManifestInput;
   /** Parent manifest to copy atomically for an agent-spawned child. */
   skillManifestSourceSessionId?: string;
+  /** Immutable runtime contract to persist atomically with the session row. */
+  launchSpec?: SessionLaunchSpecV1;
 }
 
 interface SessionRow {
@@ -244,6 +248,15 @@ export class SessionIndexStore {
     if (session.skillManifest && session.skillManifestSourceSessionId) {
       throw new Error("Session cannot both resolve and copy a managed skill manifest");
     }
+    if (
+      session.launchSpec &&
+      (session.launchSpec.runtime.harness.value !==
+        (session.agentHarness ?? DEFAULT_AGENT_HARNESS) ||
+        session.launchSpec.runtime.model.value !== session.model ||
+        session.launchSpec.runtime.effort.value !== session.reasoningEffort)
+    ) {
+      throw new Error("Session runtime columns must match its launch spec");
+    }
 
     const sessionStmt = this.db
       .prepare(
@@ -300,7 +313,15 @@ export class SessionIndexStore {
       : session.skillManifestSourceSessionId
         ? this.bindManifestCopy(session.id, session.skillManifestSourceSessionId)
         : [];
-    const results = await this.db.batch([sessionStmt, ...repositoryStmts, ...manifestStmts]);
+    const launchSpecStmts = session.launchSpec
+      ? [new SessionLaunchSpecStore(this.db).bindCreate(session.id, session.launchSpec)]
+      : [];
+    const results = await this.db.batch([
+      sessionStmt,
+      ...repositoryStmts,
+      ...manifestStmts,
+      ...launchSpecStmts,
+    ]);
 
     // INSERT OR IGNORE swallows every constraint violation, which would leave
     // the session invisible to dashboards while the DO proceeds. Session ids

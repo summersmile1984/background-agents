@@ -142,7 +142,7 @@ async function createSession(
   target: SessionTarget,
   params: {
     title: string;
-    model: string;
+    model?: string;
     reasoningEffort?: string;
     actorUserId?: string;
     actorDisplayName?: string;
@@ -154,8 +154,11 @@ async function createSession(
   const body = JSON.stringify({
     ...targetRequestFields(target),
     title: params.title,
-    model: params.model,
-    reasoningEffort: params.reasoningEffort,
+    runtime: {
+      harness: "inherit",
+      model: params.model ?? "inherit",
+      ...(params.reasoningEffort ? { effort: params.reasoningEffort } : {}),
+    },
     actorDisplayName: params.actorDisplayName,
     actorEmail: params.actorEmail,
   });
@@ -581,6 +584,10 @@ async function handleNewSession(
     userReasoningEffort,
     labelModel,
   });
+  const hasExplicitRuntimeOverride = Boolean(
+    (integrationConfig.allowLabelModelOverride && labelModel) ||
+    (integrationConfig.allowUserPreferenceOverride && userModel)
+  );
 
   // ─── Create session ───────────────────────────────────────────────────
 
@@ -600,8 +607,7 @@ async function handleNewSession(
     target,
     {
       title: `${issue.identifier}: ${issue.title}`,
-      model,
-      reasoningEffort,
+      ...(hasExplicitRuntimeOverride ? { model, reasoningEffort } : {}),
       actorUserId: sessionActorUserId,
       actorDisplayName,
       actorEmail,

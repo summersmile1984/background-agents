@@ -764,6 +764,21 @@ The App Home provides a settings interface where users can configure their prefe
    This is required for searchable Slack repository pickers that use external data sources.
 5. Click **Save Changes**
 
+### Configure the `/inspect` Slash Command
+
+1. Go to **Slash Commands** and click **Create New Command**.
+2. Set **Command** to `/inspect`.
+3. Set **Request URL** to:
+   ```
+   https://open-inspect-slack-bot-{deployment_name}.YOUR-SUBDOMAIN.workers.dev/commands
+   ```
+4. Use a short description such as `Inspect or control an Open-Inspect session` and the usage hint
+   `status|stop|review <session-id-or-url>`.
+5. Save the command and reinstall the app if Slack requests it.
+
+Only `/inspect` is registered with Slack. Web composer commands such as `/status` remain internal to
+Open-Inspect Web and do not collide with Slack's command namespace.
+
 ### Invite the Bot to Channels
 
 In Slack, for each channel where you want the bot to respond:

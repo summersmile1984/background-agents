@@ -98,6 +98,7 @@ function ComposerHarness({
         items: [],
         onModelChange: vi.fn(),
         onReasoningEffortChange: vi.fn(),
+        liveMutation: { model: true, effort: true },
       }}
     />
   );

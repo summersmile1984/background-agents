@@ -61,6 +61,11 @@ import type { Env } from "../types";
 import type { SqlDatabase, SqlStatement } from "../db/sql-database";
 import { z } from "zod";
 import { resolveSessionRepositoryKeys } from "../repos/resolve";
+import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
+import type {
+  RuntimeConfigFragment,
+  RuntimeLaunchTarget,
+} from "@open-inspect/shared/types/runtime-launch";
 
 const logger = createLogger("router:automations");
 
@@ -317,6 +322,65 @@ async function resolveStableRepositorySelection(
       repository_id: repository.repositoryKey ?? null,
     })),
   };
+}
+
+async function validateAutomationRuntime(input: {
+  env: Env;
+  ctx: RequestContext;
+  repositories: AutomationRepositoryInsert[];
+  environmentIds: string[];
+  runtime: RuntimeConfigFragment;
+}): Promise<Response | null> {
+  const targets: RuntimeLaunchTarget[] = [
+    ...input.repositories.flatMap((repository): RuntimeLaunchTarget[] =>
+      repository.repository_id
+        ? [
+            {
+              kind: "repository",
+              repositoryKey: repository.repository_id,
+              ...(repository.base_branch ? { branch: repository.base_branch } : {}),
+            },
+          ]
+        : []
+    ),
+    ...input.environmentIds.map(
+      (environmentId): RuntimeLaunchTarget => ({ kind: "environment", environmentId })
+    ),
+  ];
+  if (
+    targets.length === 0 &&
+    input.repositories.length === 0 &&
+    input.environmentIds.length === 0
+  ) {
+    targets.push({ kind: "none" });
+  }
+  for (const target of targets) {
+    try {
+      const resolved = await resolveRuntimeLaunchDraft({
+        db: input.ctx.db,
+        env: input.env,
+        relayReady: false,
+        request: { target, runtime: input.runtime },
+      });
+      if (!resolved.launchable) {
+        const issue = resolved.issues.find((candidate) => candidate.severity === "error");
+        return json(
+          {
+            error: issue?.message ?? "Automation runtime configuration is not launchable",
+            code: issue?.code ?? "ROUTE_NOT_READY",
+            field: issue?.field ?? "harness",
+          },
+          409
+        );
+      }
+    } catch (cause) {
+      if (cause instanceof RuntimeLaunchResolutionError) {
+        return json({ error: cause.message, code: cause.code }, cause.status);
+      }
+      throw cause;
+    }
+  }
+  return null;
 }
 
 /**
@@ -622,6 +686,18 @@ async function handleCreateAutomation(
       ? await resolveStableRepositorySelection(env, requestedRepositoryKeys, ctx)
       : await resolveRepositorySelection(env, requestedRepositories, ctx);
   const newRepositories = resolvedSelection.repositories;
+  const runtimeValidation = await validateAutomationRuntime({
+    env,
+    ctx,
+    repositories: newRepositories,
+    environmentIds: requestedEnvironmentIds,
+    runtime: {
+      ...(body.agentHarness ? { harness: body.agentHarness } : { harness: "inherit" }),
+      model,
+      ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+    },
+  });
+  if (runtimeValidation) return runtimeValidation;
 
   // Compute next run (only for schedule triggers)
   const nextRunAt = isSchedule
@@ -924,6 +1000,25 @@ async function handleUpdateAutomation(
       updateFields.scm_connection_id = resolvedSelection.connectionId;
     }
   }
+
+  const finalRepositories =
+    replacementRepositories ?? (await store.getRepositoriesForAutomation(id));
+  const finalEnvironmentIds =
+    replacementEnvironmentIds ??
+    (await store.getEnvironmentsForAutomation(id)).map((entry) => entry.environment_id);
+  const nextHarness = body.agentHarness !== undefined ? body.agentHarness : existing.agent_harness;
+  const runtimeValidation = await validateAutomationRuntime({
+    env,
+    ctx,
+    repositories: finalRepositories,
+    environmentIds: finalEnvironmentIds,
+    runtime: {
+      harness: nextHarness ?? "inherit",
+      model: nextModel,
+      ...(resolvedReasoningEffort ? { effort: resolvedReasoningEffort } : {}),
+    },
+  });
+  if (runtimeValidation) return runtimeValidation;
 
   // Update event type — only for non-schedule types
   if (body.eventType !== undefined) {

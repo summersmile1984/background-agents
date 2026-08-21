@@ -48,12 +48,12 @@ function unexpired(expiresAt: string | undefined): boolean {
 export interface AgentRuntimeSecretTarget {
   environmentId: string | null;
   /** Repositories in session order (primary first). */
-  repositories?: readonly { repoId: number; repositoryKey?: string | null }[];
+  repositories?: readonly { repoId?: number | null; repositoryKey?: string | null }[];
   /** Scalar repository fallback when repositories is absent. */
   repoId?: number | null;
 }
 
-async function loadEffectiveSecrets(input: {
+export async function loadEffectiveAgentRuntimeSecrets(input: {
   db: SqlDatabase;
   encryptionKey: string;
   target?: AgentRuntimeSecretTarget;
@@ -85,7 +85,9 @@ async function loadEffectiveSecrets(input: {
   for (const repository of [...repositories].reverse()) {
     const repoSecrets = repository.repositoryKey
       ? await repoStore.getDecryptedSecretsByRepositoryId(repository.repositoryKey)
-      : await repoStore.getDecryptedSecrets(repository.repoId);
+      : repository.repoId != null
+        ? await repoStore.getDecryptedSecrets(repository.repoId)
+        : {};
     if (Object.keys(repoSecrets).length > 0) {
       sources.push({
         label: `repo:${repository.repositoryKey ?? repository.repoId}`,
@@ -147,7 +149,7 @@ export async function assertAgentRuntimeSelection(input: {
 
   const secrets =
     input.effectiveSecrets ??
-    (await loadEffectiveSecrets({
+    (await loadEffectiveAgentRuntimeSecrets({
       db: input.db,
       encryptionKey: input.env.REPO_SECRETS_ENCRYPTION_KEY,
       target: input.target,

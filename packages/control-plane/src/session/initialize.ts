@@ -8,6 +8,7 @@ import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import { createLogger } from "../logger";
 import type { SessionSkillManifestInput } from "./skill-resolution";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 
 const logger = createLogger("session-init");
 
@@ -76,6 +77,7 @@ export interface SessionInitInput {
   automationRunId?: string | null;
   managedSkillsManifest?: SessionSkillManifestInput;
   managedSkillsSourceSessionId?: string;
+  launchSpec?: SessionLaunchSpecV1;
 }
 
 /**
@@ -171,6 +173,7 @@ export async function initializeSession(
     updatedAt: now,
     skillManifest: input.managedSkillsManifest,
     skillManifestSourceSessionId: input.managedSkillsSourceSessionId,
+    launchSpec: input.launchSpec,
   });
 
   // Step 2: DO init
@@ -216,6 +219,7 @@ export async function initializeSession(
           codeServerEnabled: input.codeServerEnabled,
           vncEnabled: input.vncEnabled,
           sandboxSettings: input.sandboxSettings,
+          launchSpec: input.launchSpec,
           parentSessionId: input.parentSessionId,
           spawnSource: input.spawnSource,
           spawnDepth: input.spawnDepth,

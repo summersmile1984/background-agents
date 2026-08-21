@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { CommitSigningSettings } from "./commit-signing-settings";
 import { ModelReasoningDefaultsFields } from "./model-reasoning-defaults-fields";
+import { RuntimeConfigurationEditor } from "../runtime-configuration-editor";
 
 const GLOBAL_SETTINGS_KEY = "/api/integration-settings/github";
 const REPO_SETTINGS_KEY = "/api/integration-settings/github/repos";
@@ -110,6 +111,13 @@ export function GitHubIntegrationSettings() {
       </Section>
 
       <CommitSigningSettings />
+
+      <RuntimeConfigurationEditor
+        scope="integration"
+        scopeId="github"
+        title="GitHub session runtime"
+        description="Canonical Harness, route, model, effort, and typed settings for GitHub-triggered sessions."
+      />
 
       <GlobalSettingsSection
         settings={settings}

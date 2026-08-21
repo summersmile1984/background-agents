@@ -80,4 +80,77 @@ describe("Agent runtime API", () => {
     });
     expect(response.status).toBe(403);
   });
+
+  it("stores canonical personal runtime defaults without credentials", async () => {
+    const userId = "11111111111111111111111111111111";
+    const saved = await serviceFetch(
+      `https://test.local/agent-runtime/configurations/user/${userId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          config: {
+            harness: "claude",
+            model: "deepseek/deepseek-v4-flash",
+            settings: { systemPromptAppend: "Keep changes focused." },
+          },
+        }),
+      }
+    );
+    expect(saved.status).toBe(200);
+    const savedText = await saved.text();
+    expect(savedText).toContain('"scope":"user"');
+    expect(savedText).not.toContain("token");
+    expect(savedText).not.toContain("apiKey");
+
+    const row = await env.DB.prepare(
+      "SELECT scope_type, scope_id, config_json FROM runtime_configurations WHERE scope_type = 'user'"
+    ).first<{ scope_type: string; scope_id: string; config_json: string }>();
+    expect(row).toEqual({
+      scope_type: "user",
+      scope_id: userId,
+      config_json: JSON.stringify({
+        harness: "claude",
+        model: "deepseek/deepseek-v4-flash",
+        settings: { systemPromptAppend: "Keep changes focused." },
+      }),
+    });
+  });
+
+  it("allows Slack to update only its own namespaced preference", async () => {
+    const own = await serviceFetch(
+      "https://test.local/agent-runtime/configurations/user/slack%3AU123",
+      {
+        service: "slack-bot",
+        actor: "slack:U123",
+        method: "PUT",
+        body: JSON.stringify({
+          config: { harness: "codex", model: "openai/gpt-5.6-luna", effort: "high" },
+        }),
+      }
+    );
+    expect(own.status).toBe(200);
+
+    const anotherUser = await serviceFetch(
+      "https://test.local/agent-runtime/configurations/user/slack%3AU999",
+      {
+        service: "slack-bot",
+        actor: "slack:U123",
+        method: "PUT",
+        body: JSON.stringify({ config: { harness: "deepseek" } }),
+      }
+    );
+    expect(anotherUser.status).toBe(403);
+  });
+
+  it("exposes the secret-free capability catalog to integrations", async () => {
+    const response = await serviceFetch("https://test.local/agent-runtime/catalog", {
+      service: "slack-bot",
+    });
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("capabilityCatalogVersion");
+    expect(text).toContain("codex:openai:subscription");
+    expect(text).not.toContain("encrypted_value");
+    expect(text).not.toContain("access_token");
+  });
 });

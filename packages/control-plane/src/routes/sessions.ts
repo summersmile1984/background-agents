@@ -12,6 +12,8 @@ import { sessionWsTokenRoutes } from "./session-ws-token";
 import { sessionDiffRoutes } from "./session-diffs";
 import { sessionSkillRoutes } from "./session-skills";
 import { sessionModelRelayAuthRoutes } from "./session-model-relay-auth";
+import { sessionRuntimeRoutes } from "./session-runtime";
+import { sessionCommandRoutes } from "./session-commands";
 
 export const sessionRoutes: Route[] = [
   ...sessionCreateRoutes,
@@ -25,6 +27,8 @@ export const sessionRoutes: Route[] = [
   ...sessionDiffRoutes,
   ...sessionSkillRoutes,
   ...sessionModelRelayAuthRoutes,
+  ...sessionRuntimeRoutes,
+  ...sessionCommandRoutes,
   ...sessionChildSpawnRoutes,
   ...sessionChildRoutes,
 ];

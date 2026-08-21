@@ -638,6 +638,36 @@ function ContextCompactedEvent({ event }: EventRendererProps) {
   );
 }
 
+function CommandInvokedEvent({ event }: EventRendererProps) {
+  if (event.type !== "command_invoked") return null;
+  return (
+    <StatusRow
+      tone={
+        event.status === "rejected"
+          ? "destructive"
+          : event.status === "completed"
+            ? "success"
+            : "muted"
+      }
+      time={formatEventTime(event)}
+    >
+      /{event.slashName} · {event.summary}
+    </StatusRow>
+  );
+}
+
+function CommandResultEvent({ event }: EventRendererProps) {
+  if (event.type !== "command_result") return null;
+  return (
+    <StatusRow
+      tone={event.status === "completed" ? "success" : "warning"}
+      time={formatEventTime(event)}
+    >
+      {event.commandId} · {event.message}
+    </StatusRow>
+  );
+}
+
 function formatEventTime(event: SandboxEvent): string {
   return new Date(event.timestamp * 1000).toLocaleTimeString();
 }
@@ -654,6 +684,8 @@ const eventRenderers: Partial<
   warning: WarningEvent,
   execution_complete: ExecutionCompleteEvent,
   context_compacted: ContextCompactedEvent,
+  command_invoked: CommandInvokedEvent,
+  command_result: CommandResultEvent,
 };
 
 export const EventItem = memo(function EventItem({

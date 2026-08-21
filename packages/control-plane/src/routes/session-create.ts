@@ -1,6 +1,15 @@
 import type { RepositoryRef, RepositoryPair } from "@open-inspect/shared/types/repositories";
 import { getValidModelOrDefault, isValidReasoningEffort } from "@open-inspect/shared/models";
-import type { CreateSessionResponse } from "@open-inspect/shared/types/session-api";
+import type {
+  CreateSessionInput,
+  CreateSessionResponse,
+} from "@open-inspect/shared/types/session-api";
+import type {
+  ResolveRuntimeLaunchDraftResponse,
+  RuntimeLaunchTarget,
+  SessionLaunchSpecV1,
+} from "@open-inspect/shared/types/runtime-launch";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { generateId } from "../auth/crypto";
 import { resolveGitHubCredentialAuthority } from "../source-control/github-credential-authority";
 import { applyIdentityEnforcement, resolveCanonicalUserId } from "../auth/identity-enforcement";
@@ -12,6 +21,7 @@ import {
 import { resolveScmProviderFromEnv } from "../source-control";
 import { EnvironmentStore } from "../db/environments";
 import { ScmConnectionStore } from "../db/scm-connections";
+import { ScmRepositoryStore } from "../db/scm-repositories";
 import { AgentRuntimePreferencesStore } from "../db/agent-runtime-preferences";
 import { UserStore } from "../db/user-store";
 import { createLogger } from "../logger";
@@ -22,6 +32,8 @@ import {
   AgentRuntimeSelectionError,
   assertAgentRuntimeSelection,
 } from "../agent-runtime/selection";
+import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
+import { createSessionLaunchSpec } from "../agent-runtime/launch-spec";
 import { resolveGitHubEnrichmentForRequest } from "../session/identity";
 import { resolveSessionScopedSettings } from "../session/integration-settings-resolution";
 import { resolveManagedSkills, SkillResolutionError } from "../session/skill-resolution";
@@ -46,6 +58,41 @@ const INVALID_SESSION_REQUEST_BODY_ERROR = "Invalid session request body";
 
 // Defense in depth on top of schema validation — matches git ref charsets.
 const BRANCH_NAME_PATTERN = /^[\w.\-/]+$/;
+
+function runtimeTargetFromBody(
+  body: CreateSessionInput,
+  resolvedRepositoryKey: string | null
+): RuntimeLaunchTarget | null {
+  if (body.repositoryKey) {
+    return {
+      kind: "repository",
+      repositoryKey: body.repositoryKey,
+      ...(body.branch ? { branch: body.branch } : {}),
+    };
+  }
+  if (body.repositoryKeys) return { kind: "repository-set", repositoryKeys: body.repositoryKeys };
+  if (body.environmentId) return { kind: "environment", environmentId: body.environmentId };
+  if (resolvedRepositoryKey) {
+    return {
+      kind: "repository",
+      repositoryKey: resolvedRepositoryKey,
+      ...(body.branch ? { branch: body.branch } : {}),
+    };
+  }
+  if (!body.repoOwner && !body.repoName && !body.repositories) return { kind: "none" };
+  return null;
+}
+
+function callerChannel(
+  ctx: RequestContext,
+  provider: SessionLaunchSpecV1["target"]["provider"]
+): SessionLaunchSpecV1["caller"]["channel"] {
+  if (ctx.principal?.kind === "user" || ctx.principal?.kind !== "service") return "web";
+  if (ctx.principal.service === "slack-bot") return "slack";
+  if (ctx.principal.service === "linear-bot") return "linear";
+  if (ctx.principal.service === "github-bot") return provider === "gitea" ? "gitea" : "github";
+  return "web";
+}
 
 async function handleCreateSession(
   request: Request,
@@ -140,6 +187,45 @@ async function handleCreateSession(
 
     repoId = resolved.repoId;
     defaultBranch = resolved.defaultBranch;
+
+    // Upgrade legacy owner/name producers (GitHub bot, Linear, old Slack
+    // messages) to the stable repository identity whenever the deployment
+    // catalog identifies exactly one matching connection. Ambiguity fails
+    // back to the explicitly-marked legacy path instead of guessing between
+    // GitHub and Gitea repositories with the same path.
+    const expectedProvider =
+      ctx.principal?.kind === "service" && ctx.principal.service === "github-bot"
+        ? "github"
+        : resolveScmProviderFromEnv(env.SCM_PROVIDER);
+    const connectionStore = new ScmConnectionStore(ctx.db);
+    const catalog = new ScmRepositoryStore(ctx.db);
+    const candidates = (
+      await Promise.all(
+        (await connectionStore.list())
+          .filter((connection) => connection.provider === expectedProvider)
+          .map((connection) => catalog.getByPath(connection.id, repoOwner!, repoName!))
+      )
+    ).filter(
+      (candidate) =>
+        candidate?.resolutionStatus === "resolved" &&
+        candidate.removedAt == null &&
+        candidate.externalId === String(repoId)
+    );
+    if (candidates.length === 1) {
+      const stable = candidates[0]!;
+      repositoryKey = stable.id;
+      scmConnectionId = stable.connectionId;
+      repositories = [
+        {
+          repositoryKey: stable.id,
+          connectionId: stable.connectionId,
+          repoOwner,
+          repoName,
+          repoId,
+          baseBranch: body.branch || defaultBranch || "main",
+        },
+      ];
+    }
   }
 
   const participantUserId = enforced.participantUserId;
@@ -201,36 +287,107 @@ async function handleCreateSession(
     }
   }
 
-  // Validate model and reasoning effort once for both DO init and D1 index
-  const model = getValidModelOrDefault(body.model);
-  const reasoningEffort =
-    body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
-      ? body.reasoningEffort
-      : null;
-  const agentHarness = await resolveAgentHarness({
-    requested: body.agentHarness,
-    environmentId,
-    environmentStore: new EnvironmentStore(ctx.db),
-    runtimePreferencesStore: new AgentRuntimePreferencesStore(ctx.db),
-    deploymentDefault: env.DEFAULT_AGENT_HARNESS,
-  });
-  try {
-    await assertAgentRuntimeSelection({
-      db: ctx.db,
-      env,
-      harness: agentHarness,
-      model,
-      target: {
-        environmentId,
-        repositories,
-        repoId,
-      },
-    });
-  } catch (cause) {
-    if (cause instanceof AgentRuntimeSelectionError) {
-      return json({ error: cause.message, code: cause.code }, 409);
+  // Stable targets use the same target-aware resolver as the UI. Creation is
+  // authoritative: it rechecks readiness and rejects a stale draft digest
+  // rather than silently changing model, route, effort, or harness.
+  const runtimeTarget = runtimeTargetFromBody(body, repositoryKey);
+  let resolvedRuntimeDraft: ResolveRuntimeLaunchDraftResponse | null = null;
+  let model: string;
+  let reasoningEffort: string | null;
+  let agentHarness: AgentHarness;
+  if (runtimeTarget) {
+    try {
+      resolvedRuntimeDraft = await resolveRuntimeLaunchDraft({
+        db: ctx.db,
+        env,
+        relayReady: false,
+        configurationOwners: [
+          ...(callerChannel(ctx, selectedConnection?.provider ?? null) === "web"
+            ? []
+            : [
+                {
+                  scope: "integration" as const,
+                  id: callerChannel(ctx, selectedConnection?.provider ?? null),
+                },
+              ]),
+          ...(participantUserId
+            ? [{ scope: "user" as const, id: participantUserId }]
+            : resolvedUserId
+              ? [{ scope: "user" as const, id: resolvedUserId }]
+              : []),
+        ],
+        request: {
+          target: runtimeTarget,
+          runtime: body.runtime ?? {
+            ...(body.agentHarness ? { harness: body.agentHarness } : {}),
+            ...(body.model ? { model: body.model } : {}),
+            ...(body.reasoningEffort ? { effort: body.reasoningEffort } : {}),
+          },
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof RuntimeLaunchResolutionError) {
+        return json({ error: cause.message, code: cause.code }, cause.status);
+      }
+      throw cause;
     }
-    throw cause;
+    if (!resolvedRuntimeDraft.launchable) {
+      const issue = resolvedRuntimeDraft.issues.find((candidate) => candidate.severity === "error");
+      return json(
+        {
+          error: issue?.message ?? "Runtime configuration is not launchable",
+          code: issue?.code ?? "ROUTE_NOT_READY",
+        },
+        409
+      );
+    }
+    if (body.runtimeDraftDigest && body.runtimeDraftDigest !== resolvedRuntimeDraft.draftDigest) {
+      return json(
+        {
+          error:
+            "Runtime capabilities changed after this draft was resolved; review the updated selection",
+          code: "CAPABILITY_CHANGED",
+          draft: resolvedRuntimeDraft,
+        },
+        409
+      );
+    }
+    model = resolvedRuntimeDraft.effective.model!.value;
+    reasoningEffort = resolvedRuntimeDraft.effective.effort!.value;
+    agentHarness = resolvedRuntimeDraft.effective.harness!.value;
+  } else {
+    // Compatibility path for legacy owner/name callers. Bot and automation
+    // producers are migrated to stable repository keys in the following phase.
+    model = getValidModelOrDefault(body.model);
+    reasoningEffort =
+      body.reasoningEffort && isValidReasoningEffort(model, body.reasoningEffort)
+        ? body.reasoningEffort
+        : null;
+    agentHarness = await resolveAgentHarness({
+      requested: body.agentHarness,
+      environmentId,
+      environmentStore: new EnvironmentStore(ctx.db),
+      runtimePreferencesStore: new AgentRuntimePreferencesStore(ctx.db),
+      deploymentDefault: env.DEFAULT_AGENT_HARNESS,
+    });
+    try {
+      await assertAgentRuntimeSelection({
+        db: ctx.db,
+        env,
+        harness: agentHarness,
+        model,
+        target: {
+          environmentId,
+          repositories,
+          repoId,
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof AgentRuntimeSelectionError) {
+        return json({ error: cause.message, code: cause.code }, 409);
+      }
+      throw cause;
+    }
   }
 
   // Session-scoped integration settings resolve from the primary member (design
@@ -266,6 +423,21 @@ async function handleCreateSession(
     throw e;
   }
 
+  const launchSpec = resolvedRuntimeDraft
+    ? createSessionLaunchSpec({
+        resolved: resolvedRuntimeDraft,
+        skillsManifestId: managedSkillsManifest.manifestSha256,
+        caller: (() => {
+          const channel = callerChannel(ctx, resolvedRuntimeDraft.effective.target.provider);
+          return {
+            channel,
+            canonicalUserId: resolvedUserId,
+            integrationId: channel === "web" ? null : channel,
+          };
+        })(),
+      })
+    : undefined;
+
   const input: SessionInitInput = {
     sessionId,
     repoOwner,
@@ -295,6 +467,7 @@ async function handleCreateSession(
     sandboxSettings,
     spawnSource,
     managedSkillsManifest,
+    launchSpec,
   };
 
   try {

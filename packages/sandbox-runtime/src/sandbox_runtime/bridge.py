@@ -692,6 +692,27 @@ class AgentBridge:
             await self._handle_push(cmd)
         elif cmd_type == "refresh_diff":
             self.diff_refresh.request(None)
+        elif cmd_type == "start_runtime":
+            runtime = cmd.get("runtime")
+            expected_digest = os.environ.get("OI_RUNTIME_LAUNCH_DIGEST")
+            received_digest = runtime.get("draftDigest") if isinstance(runtime, dict) else None
+            if not expected_digest or received_digest != expected_digest:
+                raise ValueError("start_runtime does not match the validated launch specification")
+            self.log.info("bridge.runtime_confirmed", draft_digest=expected_digest)
+        elif cmd_type == "invoke_command":
+            invocation_id = cmd.get("invocationId")
+            command_id = cmd.get("commandId")
+            if not isinstance(invocation_id, str) or not isinstance(command_id, str):
+                raise ValueError("Invalid invoke_command payload")
+            await self._send_event(
+                {
+                    "type": "command_result",
+                    "invocationId": invocation_id,
+                    "commandId": command_id,
+                    "status": "unavailable",
+                    "message": "The active harness does not advertise this native command",
+                }
+            )
         elif cmd_type == "ack":
             ack_id = cmd.get("ackId")
             if ack_id and self.event_forwarder.acknowledge(ack_id):

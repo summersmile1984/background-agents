@@ -67,6 +67,13 @@ import { resolveAgentHarness } from "../session/agent-harness";
 import { EnvironmentStore } from "../db/environments";
 import { AgentRuntimePreferencesStore } from "../db/agent-runtime-preferences";
 import { assertAgentRuntimeSelection } from "../agent-runtime/selection";
+import { resolveRuntimeLaunchDraft } from "../agent-runtime/resolver";
+import { createSessionLaunchSpec } from "../agent-runtime/launch-spec";
+import type {
+  ResolveRuntimeLaunchDraftResponse,
+  RuntimeLaunchTarget,
+} from "@open-inspect/shared/types/runtime-launch";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 /** Max automations to process per tick (backpressure). */
 const MAX_PER_TICK = 25;
@@ -1396,24 +1403,74 @@ export class SchedulerDO extends DurableObject<Env> {
       { mode: "all" },
       userId
     );
-    const agentHarness = await resolveAgentHarness({
-      requested: automation.agent_harness ?? undefined,
-      environmentId: target.environmentId,
-      environmentStore: new EnvironmentStore(this.db),
-      runtimePreferencesStore: new AgentRuntimePreferencesStore(this.db),
-      deploymentDefault: this.env.DEFAULT_AGENT_HARNESS,
-    });
-    await assertAgentRuntimeSelection({
-      db: this.db,
-      env: this.env,
-      harness: agentHarness,
-      model: automation.model,
-      target: {
+    const runtimeTarget: RuntimeLaunchTarget | null =
+      target.environmentId &&
+      target.repositories?.length &&
+      target.repositories.every((repository) => repository.repositoryKey)
+        ? { kind: "environment", environmentId: target.environmentId }
+        : target.repositoryId
+          ? { kind: "repository", repositoryKey: target.repositoryId }
+          : target.repoOwner
+            ? null
+            : { kind: "none" };
+    let resolvedRuntime: ResolveRuntimeLaunchDraftResponse | null = null;
+    let agentHarness: AgentHarness;
+    let model = automation.model;
+    let reasoningEffort = automation.reasoning_effort;
+    if (runtimeTarget) {
+      resolvedRuntime = await resolveRuntimeLaunchDraft({
+        db: this.db,
+        env: this.env,
+        relayReady: false,
+        request: {
+          target: runtimeTarget,
+          runtime: {
+            ...(automation.agent_harness ? { harness: automation.agent_harness } : {}),
+            model: automation.model,
+            ...(automation.reasoning_effort ? { effort: automation.reasoning_effort } : {}),
+          },
+        },
+      });
+      if (!resolvedRuntime.launchable) {
+        throw new Error(
+          resolvedRuntime.issues.find((issue) => issue.severity === "error")?.message ??
+            "Automation runtime configuration is not launchable"
+        );
+      }
+      agentHarness = resolvedRuntime.effective.harness!.value;
+      model = resolvedRuntime.effective.model!.value;
+      reasoningEffort = resolvedRuntime.effective.effort!.value;
+    } else {
+      agentHarness = await resolveAgentHarness({
+        requested: automation.agent_harness ?? undefined,
         environmentId: target.environmentId,
-        repositories: target.repositories,
-        repoId: target.repoId,
-      },
-    });
+        environmentStore: new EnvironmentStore(this.db),
+        runtimePreferencesStore: new AgentRuntimePreferencesStore(this.db),
+        deploymentDefault: this.env.DEFAULT_AGENT_HARNESS,
+      });
+      await assertAgentRuntimeSelection({
+        db: this.db,
+        env: this.env,
+        harness: agentHarness,
+        model,
+        target: {
+          environmentId: target.environmentId,
+          repositories: target.repositories,
+          repoId: target.repoId,
+        },
+      });
+    }
+    const launchSpec = resolvedRuntime
+      ? createSessionLaunchSpec({
+          resolved: resolvedRuntime,
+          skillsManifestId: managedSkillsManifest.manifestSha256,
+          caller: {
+            channel: "automation",
+            canonicalUserId: userId,
+            integrationId: automation.id,
+          },
+        })
+      : undefined;
 
     await initializeSession(
       this.env,
@@ -1421,8 +1478,8 @@ export class SchedulerDO extends DurableObject<Env> {
         sessionId,
         ...target,
         title: `[Auto] ${automation.name}`,
-        model: automation.model,
-        reasoningEffort: automation.reasoning_effort,
+        model,
+        reasoningEffort,
         agentHarness,
         participantUserId: automation.created_by,
         platformUserId: userId,
@@ -1436,6 +1493,7 @@ export class SchedulerDO extends DurableObject<Env> {
         automationId: automation.id,
         automationRunId: run.id,
         managedSkillsManifest,
+        launchSpec,
       },
       ctx
     );
@@ -1536,7 +1594,10 @@ export class SchedulerDO extends DurableObject<Env> {
     });
 
     if (!promptResponse.ok) {
-      throw new Error(`Prompt enqueue failed with status ${promptResponse.status}`);
+      const detail = (await promptResponse.text()).slice(0, 500);
+      throw new Error(
+        `Prompt enqueue failed with status ${promptResponse.status}${detail ? `: ${detail}` : ""}`
+      );
     }
   }
 }

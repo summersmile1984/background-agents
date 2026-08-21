@@ -14,7 +14,7 @@ import {
   type ServerMessage,
   type SessionSnapshotState,
 } from "@open-inspect/shared/types/server-messages";
-import type { SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
+import { sandboxEventSchema, type SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
 import type { SandboxStatus } from "@open-inspect/shared/types/sessions";
 import type { ClientMessage } from "@open-inspect/shared/types/websocket";
 import type { ScmSettings } from "@open-inspect/shared/types/integrations";
@@ -22,7 +22,12 @@ import { resolveAppName } from "@open-inspect/shared/app-name";
 import { timingSafeEqual } from "@open-inspect/shared/auth";
 import { DEFAULT_MODEL } from "@open-inspect/shared/models";
 import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
-import { assertAgentRuntimeSelection } from "../agent-runtime/selection";
+import { AgentRuntimeSelectionError } from "../agent-runtime/selection";
+import { resolveRuntimeLaunchDraft } from "../agent-runtime/resolver";
+import type {
+  RuntimeLaunchTarget,
+  SessionLaunchSpecV1,
+} from "@open-inspect/shared/types/runtime-launch";
 import { generateId, hashToken, encryptToken, decryptToken } from "../auth/crypto";
 import { buildModalSandboxDashboardUrl } from "../sandbox/client";
 import { resolveSandboxBackendName } from "../sandbox/provider-name";
@@ -161,6 +166,28 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
  */
 const WS_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+function launchTargetFromSpec(spec: SessionLaunchSpecV1): RuntimeLaunchTarget {
+  const target = spec.target;
+  if (target.kind === "none") return { kind: "none" };
+  if (target.kind === "environment" && target.environmentId) {
+    return { kind: "environment", environmentId: target.environmentId };
+  }
+  if (target.kind === "repository-set") {
+    return {
+      kind: "repository-set",
+      repositoryKeys: target.repositories.map((repository) => repository.repositoryKey),
+    };
+  }
+  const primary = target.repositories[0];
+  if (!primary) throw new Error("Pinned runtime target has no primary repository");
+  return {
+    kind: "repository",
+    repositoryKey: primary.repositoryKey,
+    branch: primary.branch,
+    ...(target.environmentId ? { environmentId: target.environmentId } : {}),
+  };
+}
+
 interface SessionSnapshotEnrichment {
   environmentId: string | null;
   environmentName: string | null;
@@ -250,6 +277,15 @@ export class SessionDO extends DurableObject<Env> {
     sandboxAccess: () => this.handleSandboxAccess(),
     prompt: (request, _url, log) => this.messagesHandler.enqueuePrompt(request, log),
     stop: () => this.messagesHandler.stop(),
+    commandEvent: async (request) => {
+      const raw = await request.json();
+      const parsed = sandboxEventSchema.safeParse(raw);
+      if (!parsed.success || parsed.data.type !== "command_invoked") {
+        return Response.json({ error: "Invalid command event" }, { status: 400 });
+      }
+      await this.processSandboxEvent(parsed.data);
+      return Response.json({ status: "recorded" });
+    },
     sandboxEvent: (request) => this.sandboxHandler.sandboxEvent(request),
     createMediaArtifact: (request) => this.sandboxHandler.createMediaArtifact(request),
     recordAttachment: (request) => {
@@ -589,14 +625,58 @@ export class SessionDO extends DurableObject<Env> {
         this.alarmScheduler,
         this.executionTimeoutMs,
         this.db
-          ? async (harness, model) =>
-              assertAgentRuntimeSelection({
+          ? async (harness, model, reasoningEffort) => {
+              const launchSpec = this.sessionCoreRepository.getLaunchSpec();
+              if (!launchSpec) {
+                // Sessions created before LaunchSpec rollout preserve the
+                // historical prompt semantics. New sessions are resolved and
+                // pinned at creation, then validated strictly below.
+                return false;
+              }
+              const pinned = launchSpec.runtime;
+              if (harness !== pinned.harness.value) {
+                throw new AgentRuntimeSelectionError(
+                  "RUNTIME_UNAVAILABLE",
+                  "The session harness is locked by its LaunchSpec"
+                );
+              }
+              if (
+                harness !== "opencode" &&
+                (model !== pinned.model.value ||
+                  (reasoningEffort !== undefined && reasoningEffort !== pinned.effort.value))
+              ) {
+                throw new AgentRuntimeSelectionError(
+                  model !== pinned.model.value ? "MODEL_INCOMPATIBLE" : "EFFORT_UNSUPPORTED",
+                  "This pinned harness does not support live runtime changes"
+                );
+              }
+              const resolved = await resolveRuntimeLaunchDraft({
                 db: this.db!,
                 env: this.env,
-                harness,
-                model,
-                effectiveSecrets: (await this.getUserEnvVars()) ?? {},
-              })
+                relayReady: false,
+                request: {
+                  target: launchTargetFromSpec(launchSpec),
+                  runtime: {
+                    harness,
+                    routeId: pinned.routeId.value,
+                    model,
+                    effort: reasoningEffort ?? pinned.effort.value ?? "inherit",
+                  },
+                },
+              });
+              if (!resolved.launchable) {
+                const issue = resolved.issues.find((candidate) => candidate.severity === "error");
+                throw new AgentRuntimeSelectionError(
+                  issue?.code === "MODEL_INCOMPATIBLE" || issue?.code === "MODEL_DISABLED"
+                    ? "MODEL_INCOMPATIBLE"
+                    : issue?.code === "EFFORT_UNSUPPORTED"
+                      ? "EFFORT_UNSUPPORTED"
+                      : "RUNTIME_UNAVAILABLE",
+                  issue?.message ?? "The requested runtime change is unavailable"
+                );
+              }
+              return true;
+            }
           : undefined
       );
     }
@@ -977,6 +1057,7 @@ export class SessionDO extends DurableObject<Env> {
       getSandbox: () => this.sandboxRepository.getSandbox(),
       getSandboxWithCircuitBreaker: () => this.sandboxRepository.getSandboxWithCircuitBreaker(),
       getSession: () => this.sessionCoreRepository.getSession(),
+      getLaunchSpec: () => this.sessionCoreRepository.getLaunchSpec(),
       getSessionRepositories: () => {
         const pinnedSession = this.sessionCoreRepository.getSession();
         return this.sessionCoreRepository.getSessionRepositories().map((entry) => ({
@@ -1282,6 +1363,20 @@ export class SessionDO extends DurableObject<Env> {
           server,
           sandboxId ?? undefined
         );
+        const launchSpec = this.sessionCoreRepository.getLaunchSpec();
+        if (launchSpec) {
+          try {
+            await this.messenger.sendToSandbox({ type: "start_runtime", runtime: launchSpec });
+          } catch (error) {
+            log.error("runtime.start_handshake_failed", {
+              event: "runtime.start_handshake_failed",
+              draft_digest: launchSpec.draftDigest,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            this.wsManager.close(server, 1011, "Runtime launch handshake failed");
+            return new Response(null, { status: 101, webSocket: client });
+          }
+        }
         // Notify manager that sandbox connected so it can reset the spawning flag
         this.lifecycleManager.onSandboxConnected();
         this.updateSandboxStatus("ready");

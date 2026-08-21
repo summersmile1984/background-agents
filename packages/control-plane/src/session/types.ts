@@ -13,6 +13,7 @@ import type {
 } from "@open-inspect/shared/types/sessions";
 import type { ArtifactType } from "@open-inspect/shared/types/artifacts";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import type { EventType, GitSyncStatus } from "@open-inspect/shared/types/sandbox-events";
 import type { GitPushSpec } from "../source-control";
 import { z } from "zod";
@@ -217,6 +218,18 @@ interface RefreshDiffCommand {
   type: "refresh_diff";
 }
 
+interface StartRuntimeCommand {
+  type: "start_runtime";
+  runtime: SessionLaunchSpecV1;
+}
+
+interface InvokeRuntimeCommand {
+  type: "invoke_command";
+  invocationId: string;
+  commandId: string;
+  arguments: Record<string, unknown>;
+}
+
 export type SandboxCommand =
   | PromptCommand
   | StopCommand
@@ -224,4 +237,6 @@ export type SandboxCommand =
   | ShutdownCommand
   | AckCommand
   | PushCommand
-  | RefreshDiffCommand;
+  | RefreshDiffCommand
+  | StartRuntimeCommand
+  | InvokeRuntimeCommand;

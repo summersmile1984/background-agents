@@ -13,7 +13,10 @@ import {
   type ValidModel,
   VALID_MODELS,
 } from "@open-inspect/shared/models";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import { generateId } from "../auth/crypto";
+import { createSessionLaunchSpec } from "../agent-runtime/launch-spec";
+import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
 import {
   AgentRuntimeSelectionError,
   assertAgentRuntimeSelection,
@@ -21,6 +24,7 @@ import {
 import { DEFAULT_AGENT_HARNESS } from "@open-inspect/shared/types/agent-harness";
 import { getEffectiveEnabledModels } from "../db/model-preferences";
 import { SessionIndexStore } from "../db/session-index";
+import { SessionLaunchSpecStore } from "../db/session-launch-specs";
 import { createLogger } from "../logger";
 import { SessionInternalPaths } from "../session/contracts";
 import type { EnqueuePromptRequest } from "../session/enqueue-prompt-contract";
@@ -151,60 +155,128 @@ async function handleSpawnChild(
     }
   }
 
-  let enabledModels: ValidModel[];
-  try {
-    enabledModels = await getEffectiveEnabledModels(ctx.db);
-  } catch (e) {
-    logger.error("Failed to resolve enabled models for child session", {
-      event: "session.spawn_child_model_preferences_failed",
-      parent_id: parentId,
-      error: e instanceof Error ? e.message : String(e),
-      trace_id: ctx.trace_id,
-      request_id: ctx.request_id,
-    });
-    return error("Model preferences unavailable", 503);
-  }
-  if (body.model !== undefined && !isValidModel(body.model)) {
-    return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
-  }
-  const requestedModel = getValidModelOrDefault(body.model ?? spawnContext.model);
-  if (body.model !== undefined && !enabledModels.includes(requestedModel)) {
-    return error(`Model "${body.model}" is not enabled`, 400);
-  }
-  const model = resolveEnabledModel({ model: requestedModel, enabledModels });
-  const agentHarness = spawnContext.agentHarness ?? DEFAULT_AGENT_HARNESS;
-  try {
-    await assertAgentRuntimeSelection({
-      db: ctx.db,
-      env,
-      harness: agentHarness,
-      model,
-      target: {
-        environmentId: parentEnvironmentId,
-        repoId: spawnContext.repoId,
-      },
-    });
-  } catch (cause) {
-    if (cause instanceof AgentRuntimeSelectionError) {
-      return json({ error: cause.message, code: cause.code }, 409);
+  const parentLaunchSpec = await new SessionLaunchSpecStore(ctx.db).get(parentId);
+  let model: ValidModel;
+  let agentHarness = spawnContext.agentHarness ?? DEFAULT_AGENT_HARNESS;
+  let reasoningEffort: string | null;
+  let launchSpec: SessionLaunchSpecV1 | undefined;
+
+  if (parentLaunchSpec) {
+    const target = spawnContext.repositoryId
+      ? {
+          kind: "repository" as const,
+          repositoryKey: spawnContext.repositoryId,
+          branch: spawnContext.baseBranch ?? "main",
+          ...(parentEnvironmentId ? { environmentId: parentEnvironmentId } : {}),
+        }
+      : ({ kind: "none" } as const);
+    try {
+      const resolved = await resolveRuntimeLaunchDraft({
+        db: ctx.db,
+        env,
+        request: {
+          target,
+          runtime: {
+            harness: parentLaunchSpec.runtime.harness.value,
+            routeId: parentLaunchSpec.runtime.routeId.value,
+            model: body.model ?? parentLaunchSpec.runtime.model.value,
+            effort: body.reasoningEffort ?? parentLaunchSpec.runtime.effort.value ?? "inherit",
+            settings: Object.fromEntries(
+              Object.entries(parentLaunchSpec.runtime.settings).map(([key, value]) => [
+                key,
+                value.value,
+              ])
+            ),
+          },
+        },
+        relayReady: false,
+      });
+      if (!resolved.launchable || !resolved.effective.model || !resolved.effective.harness) {
+        return json(
+          {
+            error: resolved.issues[0]?.message ?? "Child runtime is not launchable",
+            code: resolved.issues[0]?.code ?? "RUNTIME_UNAVAILABLE",
+            issues: resolved.issues,
+          },
+          409
+        );
+      }
+      model = resolved.effective.model.value as ValidModel;
+      agentHarness = resolved.effective.harness.value;
+      reasoningEffort = resolved.effective.effort?.value ?? null;
+      launchSpec = createSessionLaunchSpec({
+        resolved,
+        skillsManifestId: parentLaunchSpec.skillsManifestId,
+        caller: {
+          channel: "child",
+          canonicalUserId: spawnContext.promptAuthor.canonicalUserId ?? null,
+          integrationId: parentId,
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof RuntimeLaunchResolutionError) {
+        return json({ error: cause.message, code: cause.code }, cause.status);
+      }
+      throw cause;
     }
-    throw cause;
+  } else {
+    let enabledModels: ValidModel[];
+    try {
+      enabledModels = await getEffectiveEnabledModels(ctx.db);
+    } catch (e) {
+      logger.error("Failed to resolve enabled models for child session", {
+        event: "session.spawn_child_model_preferences_failed",
+        parent_id: parentId,
+        error: e instanceof Error ? e.message : String(e),
+        trace_id: ctx.trace_id,
+        request_id: ctx.request_id,
+      });
+      return error("Model preferences unavailable", 503);
+    }
+    if (body.model !== undefined && !isValidModel(body.model)) {
+      return error(`Invalid model "${body.model}". Valid models: ${VALID_MODELS.join(", ")}`, 400);
+    }
+    const requestedModel = getValidModelOrDefault(body.model ?? spawnContext.model);
+    if (body.model !== undefined && !enabledModels.includes(requestedModel)) {
+      return error(`Model "${body.model}" is not enabled`, 400);
+    }
+    model = resolveEnabledModel({ model: requestedModel, enabledModels });
+    try {
+      await assertAgentRuntimeSelection({
+        db: ctx.db,
+        env,
+        harness: agentHarness,
+        model,
+        target: {
+          environmentId: parentEnvironmentId,
+          repoId: spawnContext.repoId,
+        },
+      });
+    } catch (cause) {
+      if (cause instanceof AgentRuntimeSelectionError) {
+        return json({ error: cause.message, code: cause.code }, 409);
+      }
+      throw cause;
+    }
+    if (
+      body.reasoningEffort !== undefined &&
+      !isValidReasoningEffort(model, body.reasoningEffort)
+    ) {
+      const validEfforts = getReasoningConfig(model)?.efforts;
+      const suffix = validEfforts?.length
+        ? ` Valid efforts: ${validEfforts.join(", ")}`
+        : " This model does not support reasoning effort overrides.";
+      return error(
+        `Invalid reasoning effort "${body.reasoningEffort}" for model "${model}".${suffix}`,
+        400
+      );
+    }
+    const requestedReasoningEffort = body.reasoningEffort ?? spawnContext.reasoningEffort;
+    reasoningEffort =
+      requestedReasoningEffort && isValidReasoningEffort(model, requestedReasoningEffort)
+        ? requestedReasoningEffort
+        : null;
   }
-  if (body.reasoningEffort !== undefined && !isValidReasoningEffort(model, body.reasoningEffort)) {
-    const validEfforts = getReasoningConfig(model)?.efforts;
-    const suffix = validEfforts?.length
-      ? ` Valid efforts: ${validEfforts.join(", ")}`
-      : " This model does not support reasoning effort overrides.";
-    return error(
-      `Invalid reasoning effort "${body.reasoningEffort}" for model "${model}".${suffix}`,
-      400
-    );
-  }
-  const requestedReasoningEffort = body.reasoningEffort ?? spawnContext.reasoningEffort;
-  const reasoningEffort =
-    requestedReasoningEffort && isValidReasoningEffort(model, requestedReasoningEffort)
-      ? requestedReasoningEffort
-      : null;
 
   const childDepth = parentDepth + 1;
   const childId = generateId();
@@ -278,6 +350,7 @@ async function handleSpawnChild(
     automationId: parentSession?.automationId ?? null,
     automationRunId: parentSession?.automationRunId ?? null,
     managedSkillsSourceSessionId: parentId,
+    launchSpec,
   };
 
   const admissionLease = await sessionStore.acquireChildAdmissionLease(

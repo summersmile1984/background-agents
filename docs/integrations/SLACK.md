@@ -28,25 +28,27 @@ notification controls and safety notes are covered near the end.
 
 ## What Slack Can Do
 
-| Workflow                    | How it works                                                               |
-| --------------------------- | -------------------------------------------------------------------------- |
-| Start from a channel        | Invite the bot, then `@mention` it with a request                          |
-| Start from a DM             | Send the bot a direct message                                              |
-| Continue a session          | Reply in the same Slack thread                                             |
-| Send images to the agent    | Attach PNG, JPEG, WebP, or GIF images to an interactive request            |
-| Forward a message           | Share another Slack message with the bot; text, images, and source travel  |
-| Pick the repository         | Let Open-Inspect infer it, or choose from a dropdown when it is unsure     |
-| Set personal defaults       | Use the Slack app's **Home** tab for model, reasoning effort, and branch   |
-| Follow the result           | Read the completion reply or open the full session with **View Session**   |
-| Review generated media      | Optionally attach charts, screenshots, and small recordings to the thread  |
-| Ask the agent to post Slack | Enable agent notifications, then explicitly ask the agent to post to Slack |
-| Auto-trigger from a channel | Opt-in: watch a channel so matching messages start an automation           |
+| Workflow                    | How it works                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| Start from a channel        | Invite the bot, then `@mention` it with a request                               |
+| Start from a DM             | Send the bot a direct message                                                   |
+| Continue a session          | Reply in the same Slack thread                                                  |
+| Send images to the agent    | Attach PNG, JPEG, WebP, or GIF images to an interactive request                 |
+| Forward a message           | Share another Slack message with the bot; text, images, and source travel       |
+| Pick the repository         | Let Open-Inspect infer it, or choose from a dropdown when it is unsure          |
+| Set personal defaults       | Use the Slack app's **Home** tab for model, reasoning effort, and branch        |
+| Follow the result           | Read the completion reply or open the full session with **View Session**        |
+| Review generated media      | Optionally attach charts, screenshots, and small recordings to the thread       |
+| Ask the agent to post Slack | Enable agent notifications, then explicitly ask the agent to post to Slack      |
+| Auto-trigger from a channel | Opt-in: watch a channel so matching messages start an automation                |
+| Inspect a running session   | Use `/inspect status`, `/inspect stop`, or `/inspect review` with a session URL |
 
-Open-Inspect does not use slash commands today. In channels, it normally responds only to
-`@mentions`, not to every message. The optional
-[channel-message triggers](#channel-message-triggers) feature can additionally start an
-**automation** from non-mention messages that match conditions you configure; it is disabled by
-default and must be enabled by an operator.
+Open-Inspect registers one namespaced slash command, `/inspect`. It does not claim generic commands
+such as `/status`, so Slack commands do not conflict with the Web session composer's `/status` or
+with commands installed by other Slack apps. In channels, it normally responds only to `@mentions`,
+not to every message. The optional [channel-message triggers](#channel-message-triggers) feature can
+additionally start an **automation** from non-mention messages that match conditions you configure;
+it is disabled by default and must be enabled by an operator.
 
 All completion replies are delivered asynchronously through a Cloudflare Queue. Open-Inspect
 attaches generated PNG, JPEG, WebP, or MP4 session artifacts to the completion thread. Delivery is
@@ -59,6 +61,23 @@ reinstall for each workspace.
 Inbound images use a separate path and permission: images that you attach to a prompt require
 `files:read`, while generated media that Open-Inspect posts back requires `files:write`. Adding
 either scope to an existing Slack app requires reinstalling the app for the workspace.
+
+### Slash commands
+
+Slack slash commands do not carry thread context, so session actions take a session ID or a copied
+Open-Inspect session URL explicitly:
+
+```text
+/inspect status https://inspect.example.com/session/abc123
+/inspect stop abc123
+/inspect review abc123
+/inspect help
+```
+
+The Slack worker verifies the request signature, immediately acknowledges the command, then invokes
+the same structured control-plane command used by the Web UI. The result is returned ephemerally to
+the person who invoked it. Repository source is reported from the session LaunchSpec, so GitHub,
+Gitea, and other supported SCM connections follow the same path.
 
 ---
 

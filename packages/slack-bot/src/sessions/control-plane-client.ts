@@ -17,7 +17,7 @@ const log = createLogger("handler");
 interface CreateSessionOptions {
   target: SlackSessionTarget;
   model: string;
-  agentHarness?: AgentHarness;
+  agentHarness?: AgentHarness | "inherit";
   reasoningEffort?: string;
   branch?: string;
   traceId?: string;
@@ -50,7 +50,6 @@ export async function createSession(
     trace_id: traceId,
     target_id: targetId(target),
     model,
-    agent_harness: agentHarness,
     reasoning_effort: reasoningEffort,
     branch,
     slack_user_id: slackUserId,
@@ -59,9 +58,11 @@ export async function createSession(
     const url = "https://internal/sessions";
     const body = JSON.stringify({
       ...buildSessionTargetRequestFields(target, branch),
-      model,
-      agentHarness,
-      reasoningEffort,
+      runtime: {
+        harness: agentHarness ?? "inherit",
+        model,
+        ...(reasoningEffort ? { effort: reasoningEffort } : {}),
+      },
       actorDisplayName,
       actorEmail,
     });

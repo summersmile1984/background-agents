@@ -149,6 +149,11 @@ class CodexHarnessDriver:
         model = self._normalize_model(prompt.model)
         if model:
             params["model"] = model
+        if (
+            prompt.reasoning_effort is not None
+            and prompt.reasoning_effort not in _REASONING_EFFORTS
+        ):
+            raise ValueError(f"Unsupported Codex reasoning effort: {prompt.reasoning_effort}")
         if prompt.reasoning_effort in _REASONING_EFFORTS:
             params["effort"] = prompt.reasoning_effort
 

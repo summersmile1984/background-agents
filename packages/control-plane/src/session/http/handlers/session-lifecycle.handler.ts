@@ -23,6 +23,7 @@ import {
   agentHarnessSchema,
   DEFAULT_AGENT_HARNESS,
 } from "@open-inspect/shared/types/agent-harness";
+import { sessionLaunchSpecV1Schema } from "@open-inspect/shared/types/runtime-launch";
 
 const TERMINAL_STATUSES = new Set<SessionStatus>(["completed", "archived", "cancelled", "failed"]);
 
@@ -143,6 +144,7 @@ const initRequestSchema = z.object({
    * SandboxSettings later, so the shape is validated at the use site instead.
    */
   sandboxSettings: z.unknown().optional(),
+  launchSpec: sessionLaunchSpecV1Schema.optional(),
 });
 
 type InitRequest = z.infer<typeof initRequestSchema>;
@@ -262,6 +264,18 @@ export function createSessionLifecycleHandler(
         );
       }
 
+      if (
+        body.launchSpec &&
+        (body.launchSpec.runtime.harness.value !== (body.agentHarness ?? DEFAULT_AGENT_HARNESS) ||
+          body.launchSpec.runtime.model.value !== model ||
+          body.launchSpec.runtime.effort.value !== reasoningEffort)
+      ) {
+        return Response.json(
+          { error: "Session runtime fields must match the launch specification" },
+          { status: 400 }
+        );
+      }
+
       deps.sessionCoreRepository.upsertSession({
         id: sessionId,
         sessionName,
@@ -288,6 +302,9 @@ export function createSessionLifecycleHandler(
         createdAt: now,
         updatedAt: now,
       });
+      if (body.launchSpec) {
+        deps.sessionCoreRepository.replaceLaunchSpec(body.launchSpec);
+      }
 
       // Legacy scalar producers (spawn paths not yet list-aware) still get a
       // member row so spawn/read paths have one source of truth.

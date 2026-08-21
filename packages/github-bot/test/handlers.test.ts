@@ -385,7 +385,7 @@ describe("handlePullRequestOpened", () => {
     expect(log.debug).toHaveBeenCalledWith("handler.auto_review_disabled", expect.anything());
   });
 
-  it("uses config.model instead of env.DEFAULT_MODEL", async () => {
+  it("delegates the configured model to the control-plane runtime resolver", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       model: "anthropic/claude-opus-4-6",
@@ -397,10 +397,14 @@ describe("handlePullRequestOpened", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const sessionBody = sessionCreateBody(cpFetch);
-    expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
+    expect(sessionBody.runtime).toEqual({
+      harness: "inherit",
+      model: "inherit",
+      effort: "inherit",
+    });
   });
 
-  it("passes reasoningEffort from config to session creation", async () => {
+  it("delegates configured effort to the control-plane runtime resolver", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       model: "anthropic/claude-opus-4-6",
@@ -413,7 +417,11 @@ describe("handlePullRequestOpened", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const sessionBody = sessionCreateBody(cpFetch);
-    expect(sessionBody.reasoningEffort).toBe("high");
+    expect(sessionBody.runtime).toEqual({
+      harness: "inherit",
+      model: "inherit",
+      effort: "inherit",
+    });
   });
 });
 
@@ -743,7 +751,7 @@ describe("integration config", () => {
     expect(getGitHubConfig).toHaveBeenCalledWith(env, "acme/widgets", log);
   });
 
-  it("uses config.model in session creation", async () => {
+  it("keeps webhook runtime selection inherited", async () => {
     vi.mocked(getGitHubConfig).mockResolvedValue({
       ...defaultConfig,
       model: "anthropic/claude-opus-4-6",
@@ -756,8 +764,11 @@ describe("integration config", () => {
 
     const cpFetch = getControlPlaneFetch(env);
     const sessionBody = sessionCreateBody(cpFetch);
-    expect(sessionBody.model).toBe("anthropic/claude-opus-4-6");
-    expect(sessionBody.reasoningEffort).toBe("low");
+    expect(sessionBody.runtime).toEqual({
+      harness: "inherit",
+      model: "inherit",
+      effort: "inherit",
+    });
   });
 
   it("fail-closed config skips webhook (empty enabledRepos)", async () => {

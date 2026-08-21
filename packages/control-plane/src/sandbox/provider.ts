@@ -10,6 +10,7 @@ import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
 import type { CorrelationContext } from "../logger";
 import type { McpServerConfig } from "@open-inspect/shared/types/integrations";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 
 /** Default sandbox lifetime in seconds (2 hours). */
 export const DEFAULT_SANDBOX_TIMEOUT_SECONDS = 7200;
@@ -108,6 +109,8 @@ export interface CreateSandboxConfig {
   agentHarness?: AgentHarness;
   /** Native runtime session/thread ID for resumption. */
   agentSessionId?: string | null;
+  /** Immutable resolved runtime contract; absent only on legacy sessions. */
+  launchSpec?: SessionLaunchSpecV1 | null;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;
   /** OpenCode session ID for resumption */
@@ -217,6 +220,7 @@ export interface RestoreConfig {
   model: string;
   agentHarness?: AgentHarness;
   agentSessionId?: string | null;
+  launchSpec?: SessionLaunchSpecV1 | null;
   /** User-provided environment variables (repo secrets) */
   userEnvVars?: Record<string, string>;
   /** Sandbox lifetime in seconds. Defaults to DEFAULT_SANDBOX_TIMEOUT_SECONDS. */

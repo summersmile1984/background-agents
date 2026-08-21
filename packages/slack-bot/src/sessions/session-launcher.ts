@@ -16,7 +16,6 @@ import { createSession } from "./control-plane-client";
 import { getSlackSettings } from "../slack-settings";
 import { deliverPrompt } from "./prompt-delivery";
 import { buildThreadSession, storeThreadSession } from "./thread-session-store";
-import { inferSlackAgentHarness } from "./agent-harness";
 
 export interface StartSessionOptions {
   target: SlackSessionTarget;
@@ -79,7 +78,6 @@ export async function startSessionAndSendPrompt(
     enabledModels: availableModels.map((modelOption) => modelOption.value),
   });
   const model = userPrefs.model;
-  const agentHarness = inferSlackAgentHarness(model);
   const reasoningEffort = userPrefs.reasoningEffort;
   const preferenceRepo = branchPreferenceRepo(target);
   let branch: string | undefined;
@@ -90,9 +88,18 @@ export async function startSessionAndSendPrompt(
 
   const session = await createSession(env, {
     target,
-    model,
-    agentHarness,
-    reasoningEffort,
+    // Canonical user/integration/target fragments are resolved by the control
+    // plane. Only fall back to explicit legacy values when a KV migration
+    // could not be persisted during this request.
+    ...(userPrefs.canonicalRuntimeStored !== true
+      ? {
+          model,
+          ...(userPrefs.agentHarness && userPrefs.agentHarness !== "inherit"
+            ? { agentHarness: userPrefs.agentHarness }
+            : {}),
+          reasoningEffort,
+        }
+      : { model: "inherit" }),
     branch,
     traceId,
     slackUserId: actor.userId,

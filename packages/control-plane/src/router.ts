@@ -36,6 +36,7 @@ import { scmSettingsRoutes } from "./routes/scm-settings";
 import { scmConnectionRoutes } from "./routes/scm-connections";
 import { modelPreferencesRoutes } from "./routes/model-preferences";
 import { agentRuntimeRoutes } from "./routes/agent-runtime";
+import { runtimeConfigurationRoutes } from "./routes/runtime-configurations";
 import { reposRoutes } from "./routes/repos";
 import { secretsRoutes } from "./routes/secrets";
 import { environmentRoutes } from "./routes/environments";
@@ -306,6 +307,7 @@ export const routes: Route[] = [
 
   // Agent harness defaults, credentials, and readiness
   ...agentRuntimeRoutes,
+  ...runtimeConfigurationRoutes,
 
   // Integration settings
   ...integrationSettingsRoutes,

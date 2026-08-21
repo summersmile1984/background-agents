@@ -35,6 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { RuntimeConfigurationEditor } from "./runtime-configuration-editor";
 
 const DEFAULT_ALWAYS_USE_DRAFT_MODE = false;
 const DEFAULT_PULL_REQUEST_LABEL = "";
@@ -142,6 +143,8 @@ export function ScmSettingsPage() {
 
       <GlobalSettingsSection settings={settings} />
 
+      <RepositoryRuntimeDefaults availableRepos={availableRepos} />
+
       <Section
         title="Repository Overrides"
         description="Override pull and merge request defaults for specific repositories."
@@ -154,6 +157,52 @@ export function ScmSettingsPage() {
         />
       </Section>
     </div>
+  );
+}
+
+function RepositoryRuntimeDefaults({ availableRepos }: { availableRepos: EnrichedRepository[] }) {
+  const stableRepos = availableRepos.filter(
+    (repo): repo is EnrichedRepository & { repositoryKey: string } => Boolean(repo.repositoryKey)
+  );
+  const [repositoryKey, setRepositoryKey] = useState(stableRepos[0]?.repositoryKey ?? "");
+  const selected = stableRepos.find((repo) => repo.repositoryKey === repositoryKey);
+
+  return (
+    <Section
+      title="Repository runtime defaults"
+      description="Set target-specific Harness defaults by stable repository identity. SCM source and credentials remain independent from the coding Harness."
+    >
+      {stableRepos.length ? (
+        <>
+          <Select value={repositoryKey} onValueChange={setRepositoryKey}>
+            <SelectTrigger className="mb-4 w-full" aria-label="Select runtime-default repository">
+              <SelectValue placeholder="Select a repository..." />
+            </SelectTrigger>
+            <SelectContent>
+              {stableRepos.map((repo) => (
+                <SelectItem key={repo.repositoryKey} value={repo.repositoryKey}>
+                  {repo.connection?.displayName ? `${repo.connection.displayName} · ` : ""}
+                  {repo.fullName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selected ? (
+            <RuntimeConfigurationEditor
+              key={selected.repositoryKey}
+              scope="repository"
+              scopeId={selected.repositoryKey}
+              title={`${selected.fullName} runtime defaults`}
+              description="Applied after installation and personal defaults, and before an environment or session override."
+            />
+          ) : null}
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          No migrated repositories are available. Refresh Source Control after repository discovery.
+        </p>
+      )}
+    </Section>
   );
 }
 

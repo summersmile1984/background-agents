@@ -160,6 +160,8 @@ class SessionConfig(BaseModel):
     opencode_session_id: str | None = None
     agent_harness: AgentHarness = AgentHarness.OPENCODE
     agent_session_id: str | None = None
+    # Secret-free, versioned runtime contract resolved by the control plane.
+    launch_spec: dict[str, Any] | None = None
     provider: str = "anthropic"
     model: str = "claude-sonnet-4-6"
     mcp_servers: list[McpServerConfig] | None = None

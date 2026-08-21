@@ -81,6 +81,17 @@ export default defineConfig({
     }),
   ],
   test: {
+    // Bundle cron-parser instead of asking the Workers fallback service to
+    // require its relative CommonJS files. The fallback encodes workspace
+    // paths containing spaces and cannot resolve those nested requires.
+    deps: {
+      optimizer: {
+        ssr: {
+          enabled: true,
+          include: ["cron-parser"],
+        },
+      },
+    },
     include: ["test/integration/**/*.test.ts"],
     setupFiles: ["test/integration/apply-migrations.ts"],
     onUnhandledError(error) {

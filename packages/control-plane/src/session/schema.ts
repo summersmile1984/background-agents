@@ -42,6 +42,14 @@ const SESSION_DIFF_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_diff (
   updated_at INTEGER NOT NULL
 );`;
 
+const SESSION_LAUNCH_SPEC_TABLE_SQL = `CREATE TABLE IF NOT EXISTS session_launch_spec (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL CHECK (version = 1),
+  draft_digest TEXT NOT NULL,
+  spec_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);`;
+
 export const SCHEMA_SQL = `
 -- Core session state
 CREATE TABLE IF NOT EXISTS session (
@@ -186,6 +194,9 @@ ${SESSION_REPOSITORIES_TABLE_SQL};
 
 -- Latest durable checkout diff bundle. Source patches live only in this bounded row.
 ${SESSION_DIFF_TABLE_SQL}
+
+-- Immutable runtime contract mirrored from D1 for session-local execution.
+${SESSION_LAUNCH_SPEC_TABLE_SQL}
 
 -- WebSocket client mapping for hibernation recovery
 CREATE TABLE IF NOT EXISTS ws_client_mapping (
@@ -586,6 +597,11 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
       runMigration(sql, `ALTER TABLE session_repositories ADD COLUMN scm_connection_id TEXT`);
       runMigration(sql, `ALTER TABLE session_repositories ADD COLUMN repository_id TEXT`);
     },
+  },
+  {
+    id: 45,
+    description: "Add immutable runtime launch specification",
+    run: SESSION_LAUNCH_SPEC_TABLE_SQL,
   },
 ];
 

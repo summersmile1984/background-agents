@@ -6,6 +6,7 @@ export const MAX_REPO_SUGGESTION_OPTIONS = 100;
 export const MAX_RENDERED_REPO_OVERRIDES = 50;
 
 export const SELECT_MODEL_ACTION_ID = "select_model";
+export const SELECT_HARNESS_ACTION_ID = "select_harness";
 export const SELECT_REASONING_EFFORT_ACTION_ID = "select_reasoning_effort";
 export const OPEN_BRANCH_MODAL_ACTION_ID = "open_branch_modal";
 export const CLEAR_BRANCH_PREFERENCE_ACTION_ID = "clear_branch_preference";

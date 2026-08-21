@@ -122,7 +122,11 @@ it("creates a canonical SHA-256 web prompt fingerprint", async () => {
 });
 
 function buildQueue(
-  validateAgentRuntimeSelection?: (harness: AgentHarness, model: string) => Promise<void>
+  validateAgentRuntimeSelection?: (
+    harness: AgentHarness,
+    model: string,
+    reasoningEffort?: string
+  ) => Promise<boolean>
 ) {
   const log = {
     debug: vi.fn(),
@@ -374,7 +378,7 @@ describe("SessionMessageQueue", () => {
       model: "openai/gpt-5.3-codex",
     });
 
-    expect(validate).toHaveBeenCalledWith("opencode", "openai/gpt-5.3-codex");
+    expect(validate).toHaveBeenCalledWith("opencode", "openai/gpt-5.3-codex", undefined);
     expect(h.repository.createMessageWithAttachments).not.toHaveBeenCalled();
     expect(h.wsManager.send).toHaveBeenCalledWith(
       expect.anything(),
@@ -382,6 +386,45 @@ describe("SessionMessageQueue", () => {
         type: "error",
         code: "CREDENTIAL_MISSING",
         clientRequestId: "request-not-ready",
+      })
+    );
+  });
+
+  it("preserves legacy effort coercion when the session has no LaunchSpec", async () => {
+    const validate = vi.fn(async () => false);
+    const h = buildQueue(validate);
+
+    await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), {
+      content: "hello",
+      model: "xai/grok-build-0.1",
+      reasoningEffort: "high",
+    });
+
+    expect(validate).toHaveBeenCalledWith("opencode", "xai/grok-build-0.1", "high");
+    expect(h.repository.createMessageWithAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ reasoningEffort: null }),
+      []
+    );
+  });
+
+  it("rejects an unsupported effort for a LaunchSpec-pinned session", async () => {
+    const validate = vi.fn(async () => true);
+    const h = buildQueue(validate);
+
+    await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), {
+      clientRequestId: "strict-effort",
+      content: "hello",
+      model: "xai/grok-build-0.1",
+      reasoningEffort: "high",
+    });
+
+    expect(h.repository.createMessageWithAttachments).not.toHaveBeenCalled();
+    expect(h.wsManager.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "error",
+        code: "EFFORT_UNSUPPORTED",
+        clientRequestId: "strict-effort",
       })
     );
   });

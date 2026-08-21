@@ -40,6 +40,33 @@ const mockStore = {
 
 /** Shared D1 batch spy — createEnv wires it as env.DB.batch. */
 const mockBatch = vi.fn();
+const mockResolveRuntimeLaunchDraft = vi.hoisted(() =>
+  vi.fn(
+    async ({ request }: { request: { target: unknown; runtime?: Record<string, unknown> } }) => ({
+      resolverVersion: "1",
+      capabilityCatalogVersion: "test",
+      checkedAt: 1,
+      draftDigest: "a".repeat(64),
+      launchable: true,
+      effective: {
+        target: request.target,
+        harness: { value: request.runtime?.harness ?? "opencode" },
+        routeId: { value: "test-route" },
+        model: { value: request.runtime?.model ?? "openai/gpt-5.4" },
+        effort: { value: request.runtime?.effort ?? null },
+        nativeEffort: request.runtime?.effort ?? null,
+        settings: {},
+      },
+      options: { harnesses: [], models: [], efforts: [], commands: [] },
+      issues: [],
+    })
+  )
+);
+
+vi.mock("../agent-runtime/resolver", () => ({
+  RuntimeLaunchResolutionError: class extends Error {},
+  resolveRuntimeLaunchDraft: mockResolveRuntimeLaunchDraft,
+}));
 
 vi.mock("../db/automation-store", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -843,6 +870,38 @@ describe("automation route handlers", () => {
       expect(mockBatch).toHaveBeenCalledWith(
         expect.arrayContaining([{ sql: "update-automation" }])
       );
+    });
+
+    it("rejects a runtime update that the shared resolver cannot launch", async () => {
+      mockStore.getById.mockResolvedValue(sampleRow);
+      mockResolveRuntimeLaunchDraft.mockResolvedValueOnce({
+        resolverVersion: "1",
+        capabilityCatalogVersion: "test",
+        checkedAt: 1,
+        draftDigest: "a".repeat(64),
+        launchable: false,
+        effective: { target: { kind: "none" }, settings: {} },
+        options: { harnesses: [], models: [], efforts: [], commands: [] },
+        issues: [
+          {
+            code: "CREDENTIAL_MISSING",
+            field: "model",
+            severity: "error",
+            message: "The selected runtime credential is unavailable",
+          },
+        ],
+      } as never);
+
+      const response = await callRoute("PUT", "/automations/auto-1", {
+        body: { model: "openai/gpt-5.6-luna", agentHarness: "codex" },
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        code: "CREDENTIAL_MISSING",
+        field: "model",
+      });
+      expect(mockStore.bindAutomationUpdate).not.toHaveBeenCalled();
     });
 
     it.each([{ triggerConfig: {} }, { triggerConfig: { conditions: null } }])(

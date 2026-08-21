@@ -17,6 +17,10 @@ import { MAX_WEB_PROMPT_CHARS } from "@open-inspect/shared/types/websocket";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { SessionAgentHarness } from "@/components/agent-harness-selector";
+import type {
+  RuntimeCommandOption,
+  RuntimeEffortOption,
+} from "@open-inspect/shared/types/runtime-launch";
 
 type SessionPromptComposerProps = {
   session: {
@@ -41,6 +45,7 @@ type SessionPromptComposerProps = {
     onStopExecution: () => void;
   };
   skillSuggestions: PromptSkillSuggestionSource;
+  commands?: readonly RuntimeCommandOption[];
   attachments: {
     items: PendingAttachment[];
     error: string | null;
@@ -54,6 +59,8 @@ type SessionPromptComposerProps = {
     items: ComboboxGroup[];
     onModelChange: (model: string) => void;
     onReasoningEffortChange: (value: string | undefined) => void;
+    liveMutation: { model: boolean; effort: boolean };
+    effortOptions?: RuntimeEffortOption[];
   };
 };
 
@@ -61,6 +68,7 @@ export function SessionPromptComposer({
   session,
   prompt,
   skillSuggestions,
+  commands = [],
   attachments,
   model,
 }: SessionPromptComposerProps) {
@@ -131,6 +139,7 @@ export function SessionPromptComposer({
               ref={prompt.inputRef}
               value={prompt.value}
               suggestions={skillSuggestions}
+              commands={commands}
               onValueChange={prompt.onValueChange}
               onKeyDown={prompt.onKeyDown}
               maxLength={MAX_WEB_PROMPT_CHARS}
@@ -204,12 +213,13 @@ export function SessionPromptComposer({
             {/* Left side - Model selector + Reasoning pills */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
               <Combobox
+                id="session-runtime-model-selector"
                 value={model.selectedModel}
                 onChange={model.onModelChange}
                 items={model.items}
                 direction="up"
                 dropdownWidth="w-56"
-                disabled={prompt.draftLocked || !sessionPromptable}
+                disabled={prompt.draftLocked || !sessionPromptable || !model.liveMutation.model}
                 triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
               >
                 <ModelIcon className="w-3.5 h-3.5" />
@@ -223,7 +233,8 @@ export function SessionPromptComposer({
                 selectedModel={model.selectedModel}
                 reasoningEffort={model.reasoningEffort}
                 onSelect={model.onReasoningEffortChange}
-                disabled={prompt.draftLocked || !sessionPromptable}
+                disabled={prompt.draftLocked || !sessionPromptable || !model.liveMutation.effort}
+                options={model.effortOptions}
               />
 
               <SessionAgentHarness value={session.agentHarness} />

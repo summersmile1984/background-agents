@@ -1,4 +1,5 @@
 import { isValidModel, isValidReasoningEffort } from "@open-inspect/shared/models";
+import { agentHarnessSchema } from "@open-inspect/shared/types/agent-harness";
 import {
   BRANCH_INPUT_BLOCK_ID,
   BRANCH_MODAL_CALLBACK_ID,
@@ -19,6 +20,7 @@ import {
   MAX_REPO_SUGGESTION_OPTIONS,
   OPEN_BRANCH_MODAL_ACTION_ID,
   SELECT_MODEL_ACTION_ID,
+  SELECT_HARNESS_ACTION_ID,
   SELECT_REASONING_EFFORT_ACTION_ID,
 } from "./constants";
 import { decodeRepoBranchModalMetadata } from "./metadata";
@@ -35,6 +37,7 @@ import { buildRepoBranchSelectOptions } from "./view";
 import {
   getResolvedUserPreferences,
   updateUserPreferences,
+  updateUserHarnessPreference,
   type UserPreferenceResolutionOptions,
 } from "../user-preferences";
 import { getAvailableModels, getSlackDefaultModel } from "./models";
@@ -65,6 +68,7 @@ export interface AppHomeInteractionRouteResult {
 }
 
 const APP_HOME_BLOCK_ACTIONS: Record<string, AppHomeBlockActionHandler> = {
+  [SELECT_HARNESS_ACTION_ID]: { handle: handleSelectHarness },
   [SELECT_MODEL_ACTION_ID]: { handle: handleSelectModel },
   [SELECT_REASONING_EFFORT_ACTION_ID]: { handle: handleSelectReasoningEffort },
   [OPEN_BRANCH_MODAL_ACTION_ID]: { runInline: true, handle: handleOpenBranchModal },
@@ -72,6 +76,19 @@ const APP_HOME_BLOCK_ACTIONS: Record<string, AppHomeBlockActionHandler> = {
   [CLEAR_REPO_BRANCH_ACTION_ID]: { handle: handleClearRepoBranch },
   [CLEAR_BRANCH_PREFERENCE_ACTION_ID]: { handle: handleClearBranchPreference },
 };
+
+async function handleSelectHarness({
+  action,
+  env,
+  userId,
+}: AppHomeBlockActionContext): Promise<void> {
+  const value = action.selected_option?.value;
+  if (!userId || !value) return;
+  const parsed = value === "inherit" ? value : agentHarnessSchema.safeParse(value);
+  if (parsed !== "inherit" && !parsed.success) return;
+  await updateUserHarnessPreference(env, userId, parsed === "inherit" ? "inherit" : parsed.data);
+  await publishAppHome(env, userId);
+}
 
 async function getRepoBranchSuggestionOptions(
   env: Env,

@@ -6,20 +6,60 @@ import {
   MAX_RENDERED_REPO_OVERRIDES,
   OPEN_BRANCH_MODAL_ACTION_ID,
   SELECT_MODEL_ACTION_ID,
+  SELECT_HARNESS_ACTION_ID,
   SELECT_REASONING_EFFORT_ACTION_ID,
 } from "./constants";
 import type { AppHomeBlock, AppHomeView, ModelOption } from "./slack-types";
 import type { SlackSelectOption } from "../slack-blocks";
 import { plainTextOption } from "../slack-options";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { SlackHarnessOption } from "./harnesses";
 
 export interface AppHomeViewState {
   appName: string;
   availableModels: ModelOption[];
+  availableHarnesses?: SlackHarnessOption[];
+  currentHarness?: AgentHarness | "inherit";
   currentModel: string;
   currentEffort: string | undefined;
   currentBranch: string | undefined;
   repos: RepoConfig[];
   repoBranchPreferences: Map<string, string>;
+}
+
+function buildHarnessBlocks(
+  currentHarness: AgentHarness | "inherit",
+  availableHarnesses: SlackHarnessOption[]
+): AppHomeBlock[] {
+  const options = [
+    { text: plainTextOption("Installation default"), value: "inherit" },
+    ...availableHarnesses.map((harness) => ({
+      text: plainTextOption(harness.label),
+      value: harness.value,
+    })),
+  ];
+  const initialOption = options.find((option) => option.value === currentHarness) ?? options[0];
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: "*Harness*\nChoose the coding-agent runtime. Model compatibility is resolved centrally:",
+      },
+    },
+    {
+      type: "actions",
+      block_id: "harness_selection",
+      elements: [
+        {
+          type: "static_select",
+          action_id: SELECT_HARNESS_ACTION_ID,
+          initial_option: initialOption,
+          options,
+        },
+      ],
+    },
+  ];
 }
 
 type ConfiguredRepoOverride = {
@@ -298,6 +338,8 @@ function buildSummaryBlock(
 export function buildAppHomeView({
   appName,
   availableModels,
+  availableHarnesses = [],
+  currentHarness = "inherit",
   currentModel,
   currentEffort,
   currentBranch,
@@ -327,6 +369,7 @@ export function buildAppHomeView({
         },
       },
       { type: "divider" },
+      ...buildHarnessBlocks(currentHarness, availableHarnesses),
       ...buildModelBlocks(currentModelInfo, modelOptions),
       ...buildReasoningBlocks(currentModel, effectiveEffort),
       ...buildGlobalBranchBlocks(currentBranch),

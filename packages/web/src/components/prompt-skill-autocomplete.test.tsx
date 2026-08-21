@@ -15,6 +15,23 @@ const skills = [
   { skillId: "release", name: "release-notes", description: "Draft release notes" },
 ];
 
+const commands = [
+  {
+    id: "product.status",
+    slashName: "status",
+    title: "Runtime status",
+    description: "Show runtime status",
+    group: "session" as const,
+    owner: "product" as const,
+    harnesses: "all" as const,
+    contexts: ["idle-session" as const],
+    execution: "control-plane" as const,
+    arguments: [],
+    mutates: [],
+    available: true,
+  },
+];
+
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
@@ -26,11 +43,13 @@ function Harness({
   loadState = "ready",
   availableSkills = skills,
   maxLength,
+  availableCommands = commands,
 }: {
   onFallbackKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   loadState?: "ready" | "loading" | "error";
   availableSkills?: typeof skills;
   maxLength?: number;
+  availableCommands?: typeof commands;
 }) {
   const [value, setValue] = useState("");
   const suggestions =
@@ -42,6 +61,7 @@ function Harness({
       <PromptSkillTextarea
         value={value}
         suggestions={suggestions}
+        commands={availableCommands}
         onValueChange={setValue}
         onKeyDown={onFallbackKeyDown}
         maxLength={maxLength}
@@ -76,10 +96,10 @@ describe("PromptSkillTextarea", () => {
     render(<Harness />);
     const input = screen.getByRole("textbox", { name: "Prompt" });
 
-    await user.type(input, "/rev");
+    await user.type(input, "$rev");
     await user.keyboard("{Escape}");
 
-    expect(input).toHaveValue("/rev");
+    expect(input).toHaveValue("$rev");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
 
     await user.type(input, "i");
@@ -104,7 +124,7 @@ describe("PromptSkillTextarea", () => {
     const { rerender } = render(<Harness loadState="loading" availableSkills={[]} />);
     const input = screen.getByRole("textbox", { name: "Prompt" });
 
-    await user.type(input, "/");
+    await user.type(input, "$");
     expect(screen.getByRole("listbox", { name: "Managed skills" })).toHaveAttribute(
       "aria-busy",
       "true"
@@ -138,13 +158,13 @@ describe("PromptSkillTextarea", () => {
     render(<Harness />);
     const input = screen.getByRole("textbox", { name: "Prompt" });
 
-    await user.type(input, "/review");
+    await user.type(input, "$review");
     await user.pointer({
       target: screen.getByRole("option", { name: /review-pr/i }),
       keys: "[MouseLeft]",
     });
 
-    expect(input).toHaveValue("/review-pr ");
+    expect(input).toHaveValue("$review-pr ");
     expect(input).toHaveFocus();
   });
 
@@ -153,10 +173,10 @@ describe("PromptSkillTextarea", () => {
     render(<Harness />);
     const input = screen.getByRole("textbox", { name: "Prompt" });
 
-    await user.type(input, "/rev");
+    await user.type(input, "$rev");
     await user.keyboard("{Tab}");
 
-    expect(input).toHaveValue("/review-pr ");
+    expect(input).toHaveValue("$review-pr ");
     expect(input).toHaveFocus();
   });
 
@@ -176,5 +196,17 @@ describe("PromptSkillTextarea", () => {
 
     fireEvent.compositionEnd(input, { target: { selectionStart: 3, selectionEnd: 3 } });
     expect(await screen.findByRole("option", { name: /review-pr/i })).toBeInTheDocument();
+  });
+
+  it("uses slash for structured runtime commands instead of managed skills", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Prompt" });
+
+    await user.type(input, "/sta");
+    expect(screen.getByRole("listbox", { name: "Runtime commands" })).toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "Managed skills" })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(input).toHaveValue("/status");
   });
 });

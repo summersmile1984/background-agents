@@ -35,7 +35,7 @@ output "slack_bot_worker_name" {
 }
 
 output "slack_bot_url" {
-  description = "Slack bot public URL (use /events and /interactions in Slack App settings)"
+  description = "Slack bot public URL (use /events, /interactions, and /commands in Slack App settings)"
   value       = var.enable_slack_bot ? local.slack_bot_url : null
 }
 

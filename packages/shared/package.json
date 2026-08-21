@@ -66,6 +66,14 @@
       "import": "./dist/types/agent-runtime.js",
       "types": "./dist/types/agent-runtime.d.ts"
     },
+    "./types/runtime-launch": {
+      "import": "./dist/types/runtime-launch.js",
+      "types": "./dist/types/runtime-launch.d.ts"
+    },
+    "./runtime-commands": {
+      "import": "./dist/runtime-commands.js",
+      "types": "./dist/runtime-commands.d.ts"
+    },
     "./types/environments": {
       "import": "./dist/types/environments.js",
       "types": "./dist/types/environments.d.ts"

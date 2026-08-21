@@ -4,7 +4,7 @@ import { useAuthSession } from "@/lib/auth-session";
 import { browserApiFetch } from "@/lib/browser-api-fetch";
 import { useRouter } from "next/navigation";
 import { mutate } from "swr";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { CollapsedSidebarControls, useSidebarContext } from "@/components/sidebar-layout";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -19,6 +19,7 @@ import {
   DEFAULT_MODEL,
   getDefaultReasoningEffort,
   type ModelCategory,
+  type ValidModel,
 } from "@open-inspect/shared/models";
 import { resolveModelPreference, type ModelPreference } from "@/lib/model-selection";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
@@ -52,9 +53,66 @@ import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { AgentHarnessSelector, getAgentHarnessLabel } from "@/components/agent-harness-selector";
 import { getAgentHarnessModelOptions, getModelIds } from "@/lib/agent-harness-models";
 import type { Repo } from "@/hooks/use-repos";
+import type {
+  RuntimeEffortOption,
+  RuntimeHarnessOption,
+  RuntimeLaunchTarget,
+  RuntimeModelOption,
+  ResolvedRuntimeValue,
+  RuntimeCommandOption,
+} from "@open-inspect/shared/types/runtime-launch";
+import { useRuntimeLaunchDraft } from "@/hooks/use-runtime-launch-draft";
+import { repoSelectionValue } from "@/lib/repository-selection";
+import { RuntimeSettingsPopover } from "@/components/runtime-settings-popover";
+import { toast } from "sonner";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
 const LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY = "open-inspect-last-selected-reasoning-effort";
+
+function runtimeModelCategories(models: RuntimeModelOption[]): ModelCategory[] {
+  const groups = new Map<string, ModelCategory["models"]>();
+  for (const model of models) {
+    const entries = groups.get(model.category) ?? [];
+    entries.push({
+      id: model.model as ValidModel,
+      name: model.displayName,
+      description: model.description,
+    });
+    groups.set(model.category, entries);
+  }
+  return [...groups].map(([category, entries]) => ({ category, models: entries }));
+}
+
+function runtimeTargetForPicker(picker: SessionTargetSelection): RuntimeLaunchTarget | null {
+  const target = picker.sessionTarget;
+  if (!target) return null;
+  if (target.kind === "none") return { kind: "none" };
+  if (target.kind === "environment") {
+    return { kind: "environment", environmentId: target.environmentId };
+  }
+  if (target.kind === "repo") {
+    const repository = picker.repos.find(
+      (repo) =>
+        repoSelectionValue(repo) === target.repoFullName || repo.fullName === target.repoFullName
+    );
+    return repository?.repositoryKey
+      ? {
+          kind: "repository",
+          repositoryKey: repository.repositoryKey,
+          ...(picker.selectedBranch ? { branch: picker.selectedBranch } : {}),
+        }
+      : null;
+  }
+  const repositoryKeys = target.repoFullNames.flatMap((value) => {
+    const repository = picker.repos.find(
+      (repo) => repoSelectionValue(repo) === value || repo.fullName.toLowerCase() === value
+    );
+    return repository?.repositoryKey ? [repository.repositoryKey] : [];
+  });
+  return repositoryKeys.length === target.repoFullNames.length
+    ? { kind: "repository-set", repositoryKeys }
+    : null;
+}
 
 function skillPreviewTarget(
   fields: SessionTargetRequestFields | null,
@@ -105,6 +163,7 @@ export default function Home() {
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [prompt, setPrompt] = useState("");
   const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(null);
+  const [runtimeSettings, setRuntimeSettings] = useState<Record<string, unknown>>({});
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
   const skillSelectionKey =
     skillSelection.mode === "profile" ? `profile:${skillSelection.profileId}` : skillSelection.mode;
@@ -112,6 +171,7 @@ export default function Home() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+  const pendingSessionIdRef = useRef<string | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
   const sessionCreationErrorRef = useRef<string | null>(null);
@@ -126,6 +186,7 @@ export default function Home() {
     branch: string;
     skills: string;
     agentHarness: AgentHarness | null;
+    runtimeSettings: string;
   } | null>(null);
   const hasHydratedModelPreferencesRef = useRef(false);
   const { enabledModelOptions, loading: loadingEnabledModels } = useEnabledModels();
@@ -165,19 +226,63 @@ export default function Home() {
     modelPreferenceDraft ?? storedPreference,
     loadingEnabledModels ? undefined : harnessModelIds
   );
+  const runtimeTarget = useMemo(() => runtimeTargetForPicker(picker), [picker]);
+  const runtimeDraftRequest = useMemo(
+    () =>
+      runtimeTarget
+        ? {
+            target: runtimeTarget,
+            runtime: {
+              harness: agentHarness ?? ("inherit" as const),
+              model: selectedModel,
+              effort: reasoningEffort ?? ("inherit" as const),
+              ...(Object.keys(runtimeSettings).length ? { settings: runtimeSettings } : {}),
+            },
+          }
+        : null,
+    [runtimeTarget, agentHarness, selectedModel, reasoningEffort, runtimeSettings]
+  );
+  const runtimeDraft = useRuntimeLaunchDraft(runtimeDraftRequest);
+  const resolvedModelOptions = runtimeDraft.data
+    ? runtimeModelCategories(runtimeDraft.data.options.models)
+    : harnessModelOptions;
+  const runtimeEffortOptions = runtimeDraft.data?.options.efforts;
+  const runtimeLaunchable =
+    isLaunchable &&
+    (!runtimeTarget ||
+      (runtimeDraft.data
+        ? runtimeDraft.data.launchable
+        : !runtimeDraft.loading && !runtimeDraft.error));
+  const displayedEffectiveAgentHarness =
+    runtimeDraft.data?.effective.harness?.value ?? effectiveAgentHarness;
+  const selectedRuntimeHarnessOption = runtimeDraft.data?.options.harnesses.find(
+    (option) => option.harness === displayedEffectiveAgentHarness
+  );
+  const runtimeSettingsKey = JSON.stringify(runtimeSettings);
+
+  useEffect(() => {
+    setRuntimeSettings({});
+  }, [displayedEffectiveAgentHarness]);
 
   // Skills are pinned while the session warms, so any identity input change
   // must discard that session rather than submit a prompt with stale skills.
   useEffect(() => {
+    const staleSessionId = pendingSessionIdRef.current;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
+    pendingSessionIdRef.current = null;
     setPendingSessionId(null);
     setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     sessionCreationErrorRef.current = null;
     pendingConfigRef.current = null;
+    if (staleSessionId) {
+      void browserApiFetch(`/api/sessions/${staleSessionId}/expire-draft`, {
+        method: "POST",
+      }).catch(() => undefined);
+    }
   }, [
     sessionTarget,
     selectedModel,
@@ -185,10 +290,18 @@ export default function Home() {
     selectedBranch,
     skillSelectionKey,
     agentHarness,
+    runtimeDraft.data?.draftDigest,
+    runtimeSettingsKey,
   ]);
 
   const createSessionForWarming = useCallback(async () => {
     if (loadingEnabledModels) return null;
+    if (runtimeTarget && runtimeDraft.data && !runtimeDraft.data.launchable) {
+      const issue = runtimeDraft.data?.issues.find((candidate) => candidate.severity === "error");
+      sessionCreationErrorRef.current = issue?.message ?? "Runtime configuration is not ready";
+      return null;
+    }
+    if (runtimeTarget && runtimeDraft.loading) return null;
     if (pendingSessionId) return pendingSessionId;
     if (sessionCreationPromise.current) return sessionCreationPromise.current;
     const targetRequestFields = buildRequestFields();
@@ -203,6 +316,7 @@ export default function Home() {
       branch: sessionTarget?.kind === "repo" ? selectedBranch : "",
       skills: skillSelectionKey,
       agentHarness,
+      runtimeSettings: runtimeSettingsKey,
     };
     pendingConfigRef.current = currentConfig;
 
@@ -219,6 +333,12 @@ export default function Home() {
             model: selectedModel,
             reasoningEffort,
             ...(agentHarness ? { agentHarness } : {}),
+            ...(runtimeDraft.data
+              ? {
+                  runtime: runtimeDraftRequest?.runtime,
+                  runtimeDraftDigest: runtimeDraft.data.draftDigest,
+                }
+              : {}),
             skillSelection,
           }),
           signal: abortController.signal,
@@ -232,8 +352,10 @@ export default function Home() {
             pendingConfigRef.current?.reasoningEffort === currentConfig.reasoningEffort &&
             pendingConfigRef.current?.branch === currentConfig.branch &&
             pendingConfigRef.current?.skills === currentConfig.skills &&
-            pendingConfigRef.current?.agentHarness === currentConfig.agentHarness
+            pendingConfigRef.current?.agentHarness === currentConfig.agentHarness &&
+            pendingConfigRef.current?.runtimeSettings === currentConfig.runtimeSettings
           ) {
+            pendingSessionIdRef.current = data.sessionId;
             setPendingSessionId(data.sessionId);
             return data.sessionId as string;
           }
@@ -294,6 +416,11 @@ export default function Home() {
     agentHarness,
     pendingSessionId,
     loadingEnabledModels,
+    runtimeTarget,
+    runtimeDraftRequest,
+    runtimeDraft.data,
+    runtimeDraft.loading,
+    runtimeSettingsKey,
   ]);
 
   const saveModelPreferenceDraft = useCallback((preference: ModelPreference) => {
@@ -305,6 +432,21 @@ export default function Home() {
       localStorage.removeItem(LAST_SELECTED_REASONING_EFFORT_STORAGE_KEY);
     }
   }, []);
+
+  useEffect(() => {
+    const resolved = runtimeDraft.data;
+    if (!resolved || resolved.options.models.length === 0) return;
+    const currentModel = resolved.options.models.find((model) => model.model === selectedModel);
+    const nextModel = currentModel ?? resolved.options.models[0];
+    const allowedEfforts = new Set(nextModel.efforts.map((effort) => effort.value));
+    const nextEffort =
+      reasoningEffort && allowedEfforts.has(reasoningEffort)
+        ? reasoningEffort
+        : (nextModel.efforts.find((effort) => effort.isDefault)?.value ?? undefined);
+    if (nextModel.model !== selectedModel || nextEffort !== reasoningEffort) {
+      saveModelPreferenceDraft({ model: nextModel.model, reasoningEffort: nextEffort });
+    }
+  }, [runtimeDraft.data, selectedModel, reasoningEffort, saveModelPreferenceDraft]);
 
   const handleModelChange = useCallback(
     (model: string) => {
@@ -329,7 +471,7 @@ export default function Home() {
       !pendingSessionId &&
       !isCreatingSession &&
       !loadingEnabledModels &&
-      isLaunchable
+      runtimeLaunchable
     ) {
       createSessionForWarming();
     }
@@ -337,7 +479,7 @@ export default function Home() {
 
   const handleAddFiles = (files: Iterable<File>) => {
     sessionAttachments.addFiles(files);
-    if (!pendingSessionId && !isCreatingSession && isLaunchable) {
+    if (!pendingSessionId && !isCreatingSession && runtimeLaunchable) {
       createSessionForWarming();
     }
   };
@@ -347,11 +489,55 @@ export default function Home() {
     if (submitInFlightRef.current || sessionAttachments.isUploading || loadingEnabledModels) return;
     const hasAttachments = sessionAttachments.attachments.length > 0;
     if (!prompt.trim() && !hasAttachments) return;
-    if (!isLaunchable) {
+    const commandMatch = !hasAttachments ? /^\/([a-z0-9-]+)$/i.exec(prompt.trim()) : null;
+    if (commandMatch) {
+      const slashName = commandMatch[1].toLowerCase();
+      const command = runtimeDraft.data?.options.commands.find(
+        (candidate) => candidate.slashName === slashName
+      );
+      if (!command || !command.available) {
+        setError(command?.unavailableReason ?? `Unknown command: /${slashName}`);
+        return;
+      }
+      const staleDraftSessionId = pendingSessionId;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      sessionCreationPromise.current = null;
+      pendingConfigRef.current = null;
+      pendingSessionIdRef.current = null;
+      setPendingSessionId(null);
+      setIsCreatingSession(false);
+      if (staleDraftSessionId) {
+        void browserApiFetch(`/api/sessions/${staleDraftSessionId}/expire-draft`, {
+          method: "POST",
+        }).catch(() => undefined);
+      }
+      if (command.id === "product.model") {
+        document.getElementById("draft-runtime-model-selector")?.click();
+      } else if (command.id === "product.effort") {
+        document.querySelector<HTMLButtonElement>('button[aria-label^="Reasoning:"]')?.focus();
+        toast.info("Use the Effort control beside the model selector");
+      } else if (command.id === "product.help") {
+        toast.info(
+          `Available: ${runtimeDraft.data?.options.commands
+            .filter((candidate) => candidate.available)
+            .map((candidate) => `/${candidate.slashName}`)
+            .join(", ")}`
+        );
+      } else if (command.id === "product.new") {
+        setAgentHarness(null);
+        setRuntimeSettings({});
+      }
+      setPrompt("");
+      return;
+    }
+    if (!runtimeLaunchable) {
+      const runtimeIssue = runtimeDraft.data?.issues.find((issue) => issue.severity === "error");
       setError(
-        sessionTarget?.kind === "repos"
-          ? "Select at least one repository"
-          : "Please select a repository or environment"
+        runtimeIssue?.message ??
+          (sessionTarget?.kind === "repos"
+            ? "Select at least one repository"
+            : "Please select a repository or environment")
       );
       return;
     }
@@ -430,7 +616,16 @@ export default function Home() {
       isCreatingSession={isCreatingSession}
       error={error}
       handleSubmit={handleSubmit}
-      modelOptions={harnessModelOptions}
+      modelOptions={resolvedModelOptions}
+      runtimeEffortOptions={runtimeEffortOptions}
+      runtimeHarnessOptions={runtimeDraft.data?.options.harnesses}
+      runtimeCommands={runtimeDraft.data?.options.commands}
+      runtimeLaunchable={runtimeLaunchable}
+      runtimeResolving={runtimeDraft.loading || runtimeDraft.validating}
+      runtimeHarnessOption={selectedRuntimeHarnessOption}
+      runtimeEffectiveSettings={runtimeDraft.data?.effective.settings}
+      runtimeSettings={runtimeSettings}
+      setRuntimeSettings={setRuntimeSettings}
       skillSelection={skillSelection}
       setSkillSelection={setSkillSelection}
       skillPreviewTarget={currentSkillPreviewTarget}
@@ -438,7 +633,7 @@ export default function Home() {
       skillPreviewLoading={skillPreviewLoading}
       skillSuggestions={skillSuggestions}
       agentHarness={agentHarness}
-      effectiveAgentHarness={effectiveAgentHarness}
+      effectiveAgentHarness={displayedEffectiveAgentHarness}
       setAgentHarness={setAgentHarness}
     />
   );
@@ -459,6 +654,15 @@ function HomeContent({
   error,
   handleSubmit,
   modelOptions,
+  runtimeEffortOptions,
+  runtimeHarnessOptions,
+  runtimeCommands,
+  runtimeLaunchable,
+  runtimeResolving,
+  runtimeHarnessOption,
+  runtimeEffectiveSettings,
+  runtimeSettings,
+  setRuntimeSettings,
   skillSelection,
   setSkillSelection,
   skillPreviewTarget,
@@ -489,6 +693,15 @@ function HomeContent({
   error: string;
   handleSubmit: (e: React.FormEvent) => void;
   modelOptions: ModelCategory[];
+  runtimeEffortOptions?: RuntimeEffortOption[];
+  runtimeHarnessOptions?: RuntimeHarnessOption[];
+  runtimeCommands?: RuntimeCommandOption[];
+  runtimeLaunchable: boolean;
+  runtimeResolving: boolean;
+  runtimeHarnessOption?: RuntimeHarnessOption;
+  runtimeEffectiveSettings?: Record<string, ResolvedRuntimeValue<unknown>>;
+  runtimeSettings: Record<string, unknown>;
+  setRuntimeSettings: (value: Record<string, unknown>) => void;
   skillSelection: SessionSkillSelection;
   setSkillSelection: (value: SessionSkillSelection) => void;
   skillPreviewTarget: Omit<SkillResolutionPreviewInput, "selection"> | null;
@@ -511,7 +724,7 @@ function HomeContent({
     handleDragOver,
     handleDragLeave,
   } = useAttachmentDropZone({ locked: attachmentsLocked, onAdd: attachments.onAdd });
-  const { sessionTarget, selectedRepo, repos, loadingRepos, isLaunchable } = picker;
+  const { sessionTarget, selectedRepo, repos, loadingRepos } = picker;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
@@ -579,6 +792,7 @@ function HomeContent({
                     ref={inputRef}
                     value={prompt}
                     suggestions={skillSuggestions}
+                    commands={runtimeCommands}
                     onValueChange={handlePromptChange}
                     onKeyDown={handleKeyDown}
                     maxLength={MAX_WEB_PROMPT_CHARS}
@@ -610,7 +824,8 @@ function HomeContent({
                       disabled={
                         (!prompt.trim() && attachments.items.length === 0) ||
                         attachmentsLocked ||
-                        !isLaunchable
+                        !runtimeLaunchable ||
+                        runtimeResolving
                       }
                       className="p-2 text-secondary-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition"
                       title={`Send (${SHORTCUT_LABELS.SEND_PROMPT})`}
@@ -631,8 +846,26 @@ function HomeContent({
                   <div className="flex flex-wrap items-center gap-2 sm:gap-4 min-w-0">
                     <SessionTargetPicker {...picker.pickerProps} disabled={creating} />
 
+                    <AgentHarnessSelector
+                      value={agentHarness}
+                      onChange={setAgentHarness}
+                      inheritLabel={`Target default (${getAgentHarnessLabel(effectiveAgentHarness)})`}
+                      showPrefix
+                      disabled={creating || runtimeResolving}
+                      runtimeOptions={runtimeHarnessOptions}
+                    />
+
+                    <RuntimeSettingsPopover
+                      harness={runtimeHarnessOption}
+                      effective={runtimeEffectiveSettings}
+                      values={runtimeSettings}
+                      onChange={setRuntimeSettings}
+                      disabled={creating || runtimeResolving}
+                    />
+
                     {/* Model selector */}
                     <Combobox
+                      id="draft-runtime-model-selector"
                       value={selectedModel}
                       onChange={(value) => setSelectedModel(value)}
                       items={
@@ -647,7 +880,7 @@ function HomeContent({
                       }
                       direction="up"
                       dropdownWidth="w-56"
-                      disabled={creating}
+                      disabled={creating || runtimeResolving || modelOptions.length === 0}
                       triggerClassName="flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed transition"
                     >
                       <ModelIcon className="w-3.5 h-3.5" />
@@ -661,7 +894,8 @@ function HomeContent({
                       selectedModel={selectedModel}
                       reasoningEffort={reasoningEffort}
                       onSelect={setReasoningEffort}
-                      disabled={creating}
+                      disabled={creating || runtimeResolving}
+                      options={runtimeEffortOptions}
                     />
 
                     <SessionSkillSelector
@@ -670,14 +904,6 @@ function HomeContent({
                       target={skillPreviewTarget}
                       preview={skillPreview}
                       previewLoading={skillPreviewLoading}
-                      disabled={creating}
-                    />
-
-                    <AgentHarnessSelector
-                      value={agentHarness}
-                      onChange={setAgentHarness}
-                      inheritLabel={`Target default (${getAgentHarnessLabel(effectiveAgentHarness)})`}
-                      showPrefix
                       disabled={creating}
                     />
                   </div>

@@ -117,7 +117,12 @@ async def test_codex_driver_translates_app_server_notifications():
     events = [
         event
         async for event in driver.stream_prompt(
-            HarnessPrompt(message_id="message-1", content="hello", model="openai/gpt-5.6")
+            HarnessPrompt(
+                message_id="message-1",
+                content="hello",
+                model="openai/gpt-5.6",
+                reasoning_effort="xhigh",
+            )
         )
     ]
 
@@ -132,6 +137,7 @@ async def test_codex_driver_translates_app_server_notifications():
     assert events[-1]["type"] == "step_finish"
     turn_request = next(params for method, params in rpc.requests if method == "turn/start")
     assert turn_request["model"] == "gpt-5.6"
+    assert turn_request["effort"] == "xhigh"
     thread_request = next(params for method, params in rpc.requests if method == "thread/start")
     assert thread_request["config"]["mcp_servers"]["open_inspect"]["args"] == [
         "-m",
@@ -319,6 +325,35 @@ def test_claude_driver_uses_anthropic_relay_with_sandbox_token():
         )
     )
     assert options.kwargs["include_partial_messages"] is False
+
+
+def test_claude_driver_forwards_validated_system_prompt_setting():
+    driver = ClaudeHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment={
+            "CLAUDE_CODE_OAUTH_TOKEN": "setup-token",
+            "OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND": "Follow repository conventions.",
+        },
+        query_function=fake_claude_query,
+        options_class=Options,
+    )
+
+    options = driver._build_options(
+        HarnessPrompt(
+            message_id="message-1",
+            content="hello",
+            model="anthropic/claude-sonnet-5",
+            reasoning_effort="high",
+        )
+    )
+
+    assert options.kwargs["system_prompt"] == {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": "Follow repository conventions.",
+    }
+    assert options.kwargs["effort"] == "high"
 
 
 class FakeCodeWhaleRpc:

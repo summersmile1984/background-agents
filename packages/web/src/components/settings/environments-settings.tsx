@@ -20,6 +20,7 @@ import { EnvironmentIntegrationSettings } from "./environment-integration-settin
 import { EnvironmentSecretsImport } from "./environment-secrets-import";
 import { ImageBuildStatus } from "./image-build-status";
 import { SecretsEditor } from "@/components/secrets-editor";
+import { RuntimeConfigurationEditor } from "./runtime-configuration-editor";
 
 type View =
   | { mode: "list" }
@@ -250,6 +251,13 @@ export function EnvironmentsSettings() {
           </div>
         ) : (
           <div>
+            <RuntimeConfigurationEditor
+              scope="environment"
+              scopeId={environment.id}
+              title="Environment runtime defaults"
+              description="Override repository, personal, and installation runtime defaults for sessions launched from this environment."
+            />
+            <div className="mt-4" />
             <EnvironmentIntegrationSettings
               environmentId={environment.id}
               repositories={environment.repositories}

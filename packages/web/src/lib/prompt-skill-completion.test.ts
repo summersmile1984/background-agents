@@ -13,9 +13,8 @@ const skills: PromptSkillSuggestion[] = [
 
 describe("prompt skill completion", () => {
   it.each([
-    ["/", 1, "/", ""],
     ["use $rev", 8, "$", "rev"],
-    ["first\n/RELEASE", 14, "/", "release"],
+    ["first\n$RELEASE", 14, "$", "release"],
   ] as const)("finds an active token in %j", (value, caret, trigger, query) => {
     expect(findActiveSkillCompletion(value, caret, caret)).toMatchObject({ trigger, query });
   });
@@ -56,10 +55,10 @@ describe("prompt skill completion", () => {
   });
 
   it("preserves punctuation and surrounding text for an internal token", () => {
-    const value = "Use /rev, then explain";
+    const value = "Use $rev, then explain";
     const completion = findActiveSkillCompletion(value, 8, 8)!;
     expect(applySkillCompletion(value, completion, "review-pr")).toEqual({
-      value: "Use /review-pr, then explain",
+      value: "Use $review-pr, then explain",
       caret: 14,
     });
   });

@@ -52,6 +52,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { RuntimeConfigurationEditor } from "../runtime-configuration-editor";
 
 const GLOBAL_SETTINGS_KEY = "/api/integration-settings/slack";
 const REPO_SETTINGS_KEY = "/api/integration-settings/slack/repos";
@@ -152,6 +153,13 @@ export function SlackIntegrationSettings() {
           the bot from the channel.
         </p>
       </Section>
+
+      <RuntimeConfigurationEditor
+        scope="integration"
+        scopeId="slack"
+        title="Slack session runtime"
+        description="Canonical Harness, route, model, effort, and typed settings for Slack-created sessions. Personal defaults may refine inherited fields."
+      />
 
       <GlobalSettingsSection settings={settings} />
 

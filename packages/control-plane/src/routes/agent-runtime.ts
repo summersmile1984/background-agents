@@ -3,13 +3,19 @@ import {
   harnessCredentialKindSchema,
   type HarnessCredentialKind,
 } from "@open-inspect/shared/types/agent-runtime";
+import { resolveRuntimeLaunchDraftRequestSchema } from "@open-inspect/shared/types/runtime-launch";
 import { agentHarnessSchema, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { buildAgentRuntimeReadiness } from "../agent-runtime/readiness";
+import {
+  buildRuntimeHarnessOptions,
+  RUNTIME_CAPABILITY_CATALOG_VERSION,
+} from "../agent-runtime/capabilities";
 import {
   ModelRelayAdminClient,
   ModelRelayAdminError,
   unavailableHostRelayStatus,
 } from "../agent-runtime/model-relay-admin-client";
+import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
 import { isDeploymentAdmin } from "../auth/deployment-admin";
 import {
   AgentRuntimePreferencesStore,
@@ -20,10 +26,12 @@ import {
   HarnessCredentialValidationError,
 } from "../db/harness-credentials";
 import { GlobalSecretsStore } from "../db/global-secrets";
+import { getEffectiveEnabledModels } from "../db/model-preferences";
 import { SecretsValidationError } from "../db/secrets-validation";
 import type { Env } from "../types";
 import {
   SCM_AGNOSTIC_HUMAN_USER_ROUTE,
+  SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE,
   defineRoutes,
   error,
   json,
@@ -162,28 +170,72 @@ async function getReadiness(env: Env, ctx: UserRouteContext): Promise<Response> 
   const credentialsStore = new HarnessCredentialStore(ctx.db, key);
   const globalSecretsStore = new GlobalSecretsStore(ctx.db, key);
   const adminClient = relayAdminClient(env);
-  const [preferences, credentials, secrets, canManage, hostRelay] = await Promise.all([
-    preferencesStore.getEffective(env.DEFAULT_AGENT_HARNESS),
-    credentialsStore.listMetadata(),
-    globalSecretsStore.getDecryptedSecrets(),
-    isDeploymentAdmin(ctx.db, env, ctx.principal.userId),
-    adminClient ? adminClient.status() : unavailableHostRelayStatus(),
-  ]);
+  const [preferences, credentials, secrets, canManage, hostRelay, enabledModels] =
+    await Promise.all([
+      preferencesStore.getEffective(env.DEFAULT_AGENT_HARNESS),
+      credentialsStore.listMetadata(),
+      globalSecretsStore.getDecryptedSecrets(),
+      isDeploymentAdmin(ctx.db, env, ctx.principal.userId),
+      adminClient ? adminClient.status() : unavailableHostRelayStatus(),
+      getEffectiveEnabledModels(ctx.db),
+    ]);
   const relayUrl =
     env.MODEL_RELAY_PUBLIC_URL || secrets.DEEPSEEK_RELAY_BASE_URL || secrets.CODEX_OPENAI_BASE_URL;
+  const readiness = buildAgentRuntimeReadiness({
+    preferences,
+    credentials,
+    relayReady: adminClient
+      ? hostRelay.connected && hostRelay.deepseek.configured
+      : Boolean(relayUrl),
+    openAiApiKeyConfigured: Boolean(secrets.OPENAI_API_KEY),
+    anthropicApiKeyConfigured: Boolean(secrets.ANTHROPIC_API_KEY),
+    runtimeHarnesses: runtimeHarnesses(env),
+  });
   return json({
-    ...buildAgentRuntimeReadiness({
-      preferences,
-      credentials,
-      relayReady: adminClient
-        ? hostRelay.connected && hostRelay.deepseek.configured
-        : Boolean(relayUrl),
-      openAiApiKeyConfigured: Boolean(secrets.OPENAI_API_KEY),
-      anthropicApiKeyConfigured: Boolean(secrets.ANTHROPIC_API_KEY),
-      runtimeHarnesses: runtimeHarnesses(env),
+    ...readiness,
+    capabilityCatalogVersion: RUNTIME_CAPABILITY_CATALOG_VERSION,
+    catalog: buildRuntimeHarnessOptions({
+      readiness: readiness.harnesses,
+      enabledModels,
     }),
     hostRelay,
     canManage,
+  });
+}
+
+async function getCatalog(env: Env, ctx: { db: UserRouteContext["db"] }): Promise<Response> {
+  const preferencesStore = new AgentRuntimePreferencesStore(ctx.db);
+  const key = env.REPO_SECRETS_ENCRYPTION_KEY;
+  const adminClient = relayAdminClient(env);
+  const [preferences, credentials, secrets, hostRelay, enabledModels] = await Promise.all([
+    preferencesStore.getEffective(env.DEFAULT_AGENT_HARNESS),
+    key ? new HarnessCredentialStore(ctx.db, key).listMetadata() : Promise.resolve([]),
+    key
+      ? new GlobalSecretsStore(ctx.db, key).getDecryptedSecrets()
+      : Promise.resolve<Record<string, string>>({}),
+    adminClient ? adminClient.status() : unavailableHostRelayStatus(),
+    getEffectiveEnabledModels(ctx.db),
+  ]);
+  const readiness = buildAgentRuntimeReadiness({
+    preferences,
+    credentials,
+    relayReady:
+      (hostRelay.connected && hostRelay.deepseek.configured) ||
+      Boolean(
+        env.MODEL_RELAY_PUBLIC_URL ||
+        secrets.DEEPSEEK_RELAY_BASE_URL ||
+        secrets.CODEX_OPENAI_BASE_URL
+      ),
+    openAiApiKeyConfigured: Boolean(secrets.OPENAI_API_KEY),
+    anthropicApiKeyConfigured: Boolean(env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY),
+    runtimeHarnesses: runtimeHarnesses(env),
+  });
+  return json({
+    capabilityCatalogVersion: RUNTIME_CAPABILITY_CATALOG_VERSION,
+    catalog: buildRuntimeHarnessOptions({
+      readiness: readiness.harnesses,
+      enabledModels,
+    }),
   });
 }
 
@@ -194,6 +246,37 @@ async function getHostRelay(env: Env, ctx: UserRouteContext): Promise<Response> 
     isDeploymentAdmin(ctx.db, env, ctx.principal.userId),
   ]);
   return json({ ...status, canManage });
+}
+
+async function resolveLaunchDraft(
+  request: Request,
+  env: Env,
+  ctx: UserRouteContext
+): Promise<Response> {
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+  const parsed = resolveRuntimeLaunchDraftRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return error(parsed.error.issues[0]?.message ?? "Invalid runtime launch draft", 400);
+  }
+  const client = relayAdminClient(env);
+  const hostRelay = client ? await client.status() : unavailableHostRelayStatus();
+  try {
+    return json(
+      await resolveRuntimeLaunchDraft({
+        db: ctx.db,
+        env,
+        request: parsed.data,
+        relayReady: hostRelay.connected && hostRelay.deepseek.configured,
+        configurationOwners: [{ scope: "user", id: ctx.principal.userId }],
+      })
+    );
+  } catch (cause) {
+    if (cause instanceof RuntimeLaunchResolutionError) {
+      return json({ error: cause.message, code: cause.code }, cause.status);
+    }
+    throw cause;
+  }
 }
 
 function requireRelayAdminClient(env: Env): ModelRelayAdminClient | Response {
@@ -259,55 +342,69 @@ async function testDeepSeekHost(env: Env, ctx: UserRouteContext): Promise<Respon
   }
 }
 
-export const agentRuntimeRoutes: Route[] = defineRoutes(SCM_AGNOSTIC_HUMAN_USER_ROUTE, [
-  {
-    method: "GET",
-    pattern: parsePattern("/agent-runtime/preferences"),
-    handler: async (_request, env, _match, ctx) => getPreferences(env, ctx),
-  },
-  {
-    method: "PUT",
-    pattern: parsePattern("/agent-runtime/preferences"),
-    handler: async (request, env, _match, ctx) => setPreferences(request, env, ctx),
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/agent-runtime/credentials"),
-    handler: async (_request, env, _match, ctx) => listCredentials(env, ctx),
-  },
-  {
-    method: "PUT",
-    pattern: parsePattern("/agent-runtime/credentials/:kind"),
-    handler: async (request, env, match, ctx) => setCredential(request, env, match, ctx),
-  },
-  {
-    method: "DELETE",
-    pattern: parsePattern("/agent-runtime/credentials/:kind"),
-    handler: async (_request, env, match, ctx) => deleteCredential(env, match, ctx),
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/agent-runtime/readiness"),
-    handler: async (_request, env, _match, ctx) => getReadiness(env, ctx),
-  },
-  {
-    method: "GET",
-    pattern: parsePattern("/agent-runtime/host-relay"),
-    handler: async (_request, env, _match, ctx) => getHostRelay(env, ctx),
-  },
-  {
-    method: "PUT",
-    pattern: parsePattern("/agent-runtime/host-relay/deepseek-key"),
-    handler: async (request, env, _match, ctx) => setDeepSeekHostKey(request, env, ctx),
-  },
-  {
-    method: "DELETE",
-    pattern: parsePattern("/agent-runtime/host-relay/deepseek-key"),
-    handler: async (_request, env, _match, ctx) => deleteDeepSeekHostKey(env, ctx),
-  },
-  {
-    method: "POST",
-    pattern: parsePattern("/agent-runtime/host-relay/deepseek-test"),
-    handler: async (_request, env, _match, ctx) => testDeepSeekHost(env, ctx),
-  },
-]);
+export const agentRuntimeRoutes: Route[] = [
+  ...defineRoutes(SCM_AGNOSTIC_HUMAN_USER_ROUTE, [
+    {
+      method: "GET",
+      pattern: parsePattern("/agent-runtime/preferences"),
+      handler: async (_request, env, _match, ctx) => getPreferences(env, ctx),
+    },
+    {
+      method: "PUT",
+      pattern: parsePattern("/agent-runtime/preferences"),
+      handler: async (request, env, _match, ctx) => setPreferences(request, env, ctx),
+    },
+    {
+      method: "GET",
+      pattern: parsePattern("/agent-runtime/credentials"),
+      handler: async (_request, env, _match, ctx) => listCredentials(env, ctx),
+    },
+    {
+      method: "PUT",
+      pattern: parsePattern("/agent-runtime/credentials/:kind"),
+      handler: async (request, env, match, ctx) => setCredential(request, env, match, ctx),
+    },
+    {
+      method: "DELETE",
+      pattern: parsePattern("/agent-runtime/credentials/:kind"),
+      handler: async (_request, env, match, ctx) => deleteCredential(env, match, ctx),
+    },
+    {
+      method: "GET",
+      pattern: parsePattern("/agent-runtime/readiness"),
+      handler: async (_request, env, _match, ctx) => getReadiness(env, ctx),
+    },
+    {
+      method: "POST",
+      pattern: parsePattern("/agent-runtime/resolve-draft"),
+      handler: async (request, env, _match, ctx) => resolveLaunchDraft(request, env, ctx),
+    },
+    {
+      method: "GET",
+      pattern: parsePattern("/agent-runtime/host-relay"),
+      handler: async (_request, env, _match, ctx) => getHostRelay(env, ctx),
+    },
+    {
+      method: "PUT",
+      pattern: parsePattern("/agent-runtime/host-relay/deepseek-key"),
+      handler: async (request, env, _match, ctx) => setDeepSeekHostKey(request, env, ctx),
+    },
+    {
+      method: "DELETE",
+      pattern: parsePattern("/agent-runtime/host-relay/deepseek-key"),
+      handler: async (_request, env, _match, ctx) => deleteDeepSeekHostKey(env, ctx),
+    },
+    {
+      method: "POST",
+      pattern: parsePattern("/agent-runtime/host-relay/deepseek-test"),
+      handler: async (_request, env, _match, ctx) => testDeepSeekHost(env, ctx),
+    },
+  ]),
+  ...defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
+    {
+      method: "GET",
+      pattern: parsePattern("/agent-runtime/catalog"),
+      handler: async (_request, env, _match, ctx) => getCatalog(env, ctx),
+    },
+  ]),
+];

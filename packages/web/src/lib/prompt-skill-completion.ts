@@ -7,7 +7,7 @@ export type PromptSkillSuggestionSource =
   | { status: "ready"; skills: readonly PromptSkillSuggestion[] };
 
 export type ActiveSkillCompletion = {
-  trigger: "/" | "$";
+  trigger: "$";
   query: string;
   start: number;
   end: number;
@@ -32,7 +32,7 @@ export function findActiveSkillCompletion(
 
   const triggerIndex = queryStart - 1;
   const trigger = value[triggerIndex];
-  if (trigger !== "/" && trigger !== "$") return null;
+  if (trigger !== "$") return null;
   if (triggerIndex > 0 && !/\s/.test(value[triggerIndex - 1])) return null;
 
   let tokenEnd = selectionStart;

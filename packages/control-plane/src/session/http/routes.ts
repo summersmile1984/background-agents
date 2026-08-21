@@ -26,6 +26,7 @@ export interface SessionInternalRouteHandlers {
   sandboxAccess: SessionInternalRouteHandler;
   prompt: SessionInternalRouteHandler;
   stop: SessionInternalRouteHandler;
+  commandEvent: SessionInternalRouteHandler;
   sandboxEvent: SessionInternalRouteHandler;
   createMediaArtifact: SessionInternalRouteHandler;
   recordAttachment: SessionInternalRouteHandler;
@@ -78,6 +79,7 @@ export function createSessionInternalRoutes(
     },
     { method: "POST", path: SessionInternalPaths.prompt, handler: handlers.prompt },
     { method: "POST", path: SessionInternalPaths.stop, handler: handlers.stop },
+    { method: "POST", path: SessionInternalPaths.commandEvent, handler: handlers.commandEvent },
     { method: "POST", path: SessionInternalPaths.sandboxEvent, handler: handlers.sandboxEvent },
     {
       method: "POST",

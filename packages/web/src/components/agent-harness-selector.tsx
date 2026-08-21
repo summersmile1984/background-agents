@@ -1,6 +1,7 @@
 "use client";
 
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { RuntimeHarnessOption } from "@open-inspect/shared/types/runtime-launch";
 import { Combobox } from "@/components/ui/combobox";
 import { useAgentRuntimeReadiness } from "@/hooks/use-agent-runtime";
 
@@ -44,6 +45,7 @@ export function AgentHarnessSelector({
   allowInherit = true,
   showPrefix = false,
   disabled = false,
+  runtimeOptions,
 }: {
   value: AgentHarness | null | undefined;
   onChange: (value: AgentHarness | null) => void;
@@ -51,6 +53,8 @@ export function AgentHarnessSelector({
   allowInherit?: boolean;
   showPrefix?: boolean;
   disabled?: boolean;
+  /** Target-aware options from the control-plane runtime resolver. */
+  runtimeOptions?: RuntimeHarnessOption[];
 }) {
   const { data } = useAgentRuntimeReadiness();
   const resolvedInheritLabel =
@@ -59,6 +63,9 @@ export function AgentHarnessSelector({
       ? `Deployment default (${getAgentHarnessLabel(data.preferences.defaultAgentHarness)})`
       : "Deployment default");
   const availability = new Map(data?.harnesses.map((harness) => [harness.harness, harness]) ?? []);
+  const targetAvailability = new Map(
+    runtimeOptions?.map((option) => [option.harness, option]) ?? []
+  );
   return (
     <Combobox
       value={value ?? INHERIT_VALUE}
@@ -76,14 +83,19 @@ export function AgentHarnessSelector({
             ]
           : []),
         ...HARNESS_OPTIONS.map((option) => {
+          const targetOption = targetAvailability.get(option.value);
           const readiness = availability.get(option.value);
-          const available =
-            !readiness ||
-            (readiness.enabled &&
-              readiness.runtimeAvailable &&
-              readiness.routes.some((route) => route.ready));
+          const available = targetOption
+            ? targetOption.ready
+            : !readiness ||
+              (readiness.enabled &&
+                readiness.runtimeAvailable &&
+                readiness.routes.some((route) => route.ready));
           const partiallyReady =
-            available && readiness && readiness.routes.some((route) => !route.ready);
+            available &&
+            (targetOption
+              ? targetOption.routes.some((route) => !route.ready)
+              : readiness?.routes.some((route) => !route.ready));
           return {
             ...option,
             disabled: !available,
@@ -91,7 +103,7 @@ export function AgentHarnessSelector({
               ? partiallyReady
                 ? `${option.description} · Some providers need setup`
                 : option.description
-              : `${option.description} · Needs setup in Settings → Harnesses`,
+              : `${option.description} · ${targetOption?.disabledReason ?? "Needs setup in Settings → Harnesses"}`,
           };
         }),
       ]}

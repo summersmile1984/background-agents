@@ -12,6 +12,7 @@ import {
   type SessionStatus,
 } from "./sessions";
 import { agentHarnessSchema } from "./agent-harness";
+import { runtimeConfigFragmentSchema } from "./runtime-launch";
 
 export interface UserPreferences {
   userId: string;
@@ -227,6 +228,13 @@ const createSessionRequestBaseSchema = z.object({
   reasoningEffort: z.string().optional(),
   /** Coding-agent runtime. Omitted requests retain the deployment/environment default. */
   agentHarness: agentHarnessSchema.optional(),
+  /** Preferred grouped runtime selection; flat fields remain for legacy callers. */
+  runtime: runtimeConfigFragmentSchema.optional(),
+  /** Digest returned by resolve-draft. Creation fails if the resolution changed. */
+  runtimeDraftDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   branch: z.string().optional(),
   /**
    * Ordered repository list ([0] = primary). Mutually exclusive with the

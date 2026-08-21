@@ -45,13 +45,14 @@ async function createSession(
   const body: Record<string, unknown> = {
     ...params.target,
     title: params.title,
-    model: params.model,
+    runtime: {
+      harness: "inherit",
+      model: "inherit",
+      effort: "inherit",
+    },
     scmLogin: params.scmLogin,
     scmAvatarUrl: params.scmAvatarUrl,
   };
-  if (params.reasoningEffort) {
-    body.reasoningEffort = params.reasoningEffort;
-  }
   const url = "https://internal/sessions";
   const bodyText = JSON.stringify(body);
   const response = await signedControlPlaneFetch(env, {
