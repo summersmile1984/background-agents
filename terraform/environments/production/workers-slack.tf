@@ -37,8 +37,10 @@ module "slack_bot_worker" {
   source = "../../modules/cloudflare-worker"
 
   account_id       = var.cloudflare_account_id
+  zone_id          = local.slack_custom_domain_enabled ? local.control_plane_zone_id : null
   worker_name      = "open-inspect-slack-bot-${local.name_suffix}"
   worker_subdomain = var.cloudflare_worker_subdomain
+  custom_domain    = local.slack_custom_domain_enabled ? local.slack_custom_domain : null
   script_path      = local.slack_bot_script_path
 
   kv_namespaces = [

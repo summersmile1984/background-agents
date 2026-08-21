@@ -37,6 +37,18 @@ locals {
   control_plane_url = "https://${local.control_plane_host}"
   ws_url            = "wss://${local.control_plane_host}"
 
+  slack_custom_domain = var.cloudflare_slack_custom_domain == null ? "" : trimspace(var.cloudflare_slack_custom_domain)
+  slack_custom_domain_enabled = (
+    var.enable_slack_bot &&
+    local.slack_custom_domain != "" &&
+    local.control_plane_zone_id != ""
+  )
+  slack_bot_host = (local.slack_custom_domain_enabled
+    ? local.slack_custom_domain
+    : "open-inspect-slack-bot-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
+  )
+  slack_bot_url = "https://${local.slack_bot_host}"
+
   # Must match the deployed Worker's `name` and the custom-domain `service` binding.
   web_worker_name = "open-inspect-web-${local.name_suffix}"
 

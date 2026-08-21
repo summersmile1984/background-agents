@@ -34,6 +34,11 @@ output "slack_bot_worker_name" {
   value       = var.enable_slack_bot ? module.slack_bot_worker[0].worker_name : null
 }
 
+output "slack_bot_url" {
+  description = "Slack bot public URL (use /events and /interactions in Slack App settings)"
+  value       = var.enable_slack_bot ? local.slack_bot_url : null
+}
+
 output "linear_kv_id" {
   description = "Linear KV namespace ID"
   value       = var.enable_linear_bot ? module.linear_kv[0].namespace_id : null

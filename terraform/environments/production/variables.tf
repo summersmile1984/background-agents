@@ -49,6 +49,21 @@ variable "cloudflare_control_plane_custom_domain" {
   }
 }
 
+variable "cloudflare_slack_custom_domain" {
+  description = "Custom domain (hostname) to attach to the Slack bot Worker (optional). Requires enable_slack_bot and cloudflare_zone_id. e.g. 'slack.example.com'"
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.cloudflare_slack_custom_domain == null ||
+      trimspace(var.cloudflare_slack_custom_domain) == "" ||
+      can(regex("(?i)^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.cloudflare_slack_custom_domain))
+    )
+    error_message = "cloudflare_slack_custom_domain must be a bare hostname such as 'slack.example.com' — no scheme, port, path, trailing dot, or whitespace."
+  }
+}
+
 variable "cloudflare_worker_subdomain" {
   description = "Cloudflare Workers account subdomain (e.g. 'myaccount' — .workers.dev is appended automatically)"
   type        = string

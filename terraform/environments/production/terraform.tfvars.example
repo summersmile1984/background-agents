@@ -203,6 +203,9 @@ google_client_secret = ""
 
 enable_slack_bot = false
 
+# Recommended when workers.dev is unavailable from Slack or your network.
+# cloudflare_slack_custom_domain = "slack.example.com"
+
 slack_bot_token = ""       # e.g., "xoxb-..."
 slack_signing_secret = ""
 
