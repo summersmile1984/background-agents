@@ -10,12 +10,14 @@ import { createLogger } from "../logger";
 import { buildSessionTargetRequestFields, targetId, type SlackSessionTarget } from "../targets";
 import type { CallbackContext } from "@open-inspect/shared/types/session-api";
 import { OUTBOUND_REQUEST_TIMEOUT_MS } from "../request-options";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 
 const log = createLogger("handler");
 
 interface CreateSessionOptions {
   target: SlackSessionTarget;
   model: string;
+  agentHarness?: AgentHarness;
   reasoningEffort?: string;
   branch?: string;
   traceId?: string;
@@ -35,6 +37,7 @@ export async function createSession(
   const {
     target,
     model,
+    agentHarness,
     reasoningEffort,
     branch,
     traceId,
@@ -47,6 +50,7 @@ export async function createSession(
     trace_id: traceId,
     target_id: targetId(target),
     model,
+    agent_harness: agentHarness,
     reasoning_effort: reasoningEffort,
     branch,
     slack_user_id: slackUserId,
@@ -56,6 +60,7 @@ export async function createSession(
     const body = JSON.stringify({
       ...buildSessionTargetRequestFields(target, branch),
       model,
+      agentHarness,
       reasoningEffort,
       actorDisplayName,
       actorEmail,

@@ -34,7 +34,7 @@ const REPOS_CACHE_KEY = "repos:list:v2";
 const CONNECTION_REPOS_CACHE_PREFIX = "repos:list:v4";
 const REPOS_CACHE_FRESH_MS = 5 * 60 * 1000; // Serve without revalidation for 5 minutes
 const REPOS_CACHE_KV_TTL_SECONDS = 3600; // Keep stale data in KV for 1 hour
-const CONNECTION_CATALOG_RESPONSE_TIMEOUT_MS = 10_000;
+const CONNECTION_CATALOG_RESPONSE_TIMEOUT_MS = 16_000;
 
 /**
  * Cached repos list structure stored in KV.

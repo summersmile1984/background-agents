@@ -193,6 +193,7 @@ describe("control plane client request payloads", () => {
         },
       },
       model: "deepseek/deepseek-chat",
+      agentHarness: "deepseek",
       branch: "main",
     });
 
@@ -200,6 +201,7 @@ describe("control plane client request payloads", () => {
       repositoryKey: "repo-gitea-n9n",
       branch: "main",
       model: "deepseek/deepseek-chat",
+      agentHarness: "deepseek",
     });
   });
 

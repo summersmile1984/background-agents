@@ -16,6 +16,7 @@ import { createSession } from "./control-plane-client";
 import { getSlackSettings } from "../slack-settings";
 import { deliverPrompt } from "./prompt-delivery";
 import { buildThreadSession, storeThreadSession } from "./thread-session-store";
+import { inferSlackAgentHarness } from "./agent-harness";
 
 export interface StartSessionOptions {
   target: SlackSessionTarget;
@@ -78,6 +79,7 @@ export async function startSessionAndSendPrompt(
     enabledModels: availableModels.map((modelOption) => modelOption.value),
   });
   const model = userPrefs.model;
+  const agentHarness = inferSlackAgentHarness(model);
   const reasoningEffort = userPrefs.reasoningEffort;
   const preferenceRepo = branchPreferenceRepo(target);
   let branch: string | undefined;
@@ -89,6 +91,7 @@ export async function startSessionAndSendPrompt(
   const session = await createSession(env, {
     target,
     model,
+    agentHarness,
     reasoningEffort,
     branch,
     traceId,

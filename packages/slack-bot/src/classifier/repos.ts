@@ -49,7 +49,7 @@ const FALLBACK_REPOS: RepoConfig[] = [];
  * a far better outcome than dropping the request. A warm fetch takes well under
  * a second, so this only trips when something is genuinely wrong.
  */
-export const REPOS_FETCH_TIMEOUT_MS = 12_000;
+export const REPOS_FETCH_TIMEOUT_MS = 20_000;
 
 /**
  * Local in-memory cache for repos.

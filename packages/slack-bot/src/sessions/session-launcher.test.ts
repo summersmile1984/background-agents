@@ -160,6 +160,7 @@ describe("startSessionAndSendPrompt", () => {
     expect(createSession).toHaveBeenCalledWith(env, {
       target: repositoryTarget,
       model: "openai/gpt-5.4",
+      agentHarness: "codex",
       reasoningEffort: "high",
       branch: "repo-override-branch",
       traceId: "trace-1",
