@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { verifyFeishuPayload } from "../feishu/crypto";
 import { feishuEventEnvelopeSchema, isUrlVerification } from "../events/payload";
-import { cardActionResponse, handleFeishuCardAction } from "../interactions/card-actions";
+import {
+  cardActionResponse,
+  handleFeishuCardAction,
+  parseFeishuCardAction,
+} from "../interactions/card-actions";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 
@@ -32,6 +36,31 @@ cardActionRoutes.post("/card-actions", async (c) => {
     return c.json({ challenge: verificationPayload.data.challenge });
   }
 
-  const result = await handleFeishuCardAction(verified.payload, c.env, traceId);
-  return c.json(cardActionResponse(result));
+  if (!parseFeishuCardAction(verified.payload)) {
+    return c.json(cardActionResponse({ ok: false, content: "请求无效，请重新发起。" }));
+  }
+
+  // The card callback has a short response deadline. Loading the catalog and
+  // replying with the next card can take several seconds, so acknowledge the
+  // interaction first and keep that work alive with the Worker execution
+  // context. The background operation posts the repository card to the same
+  // Feishu thread when it finishes.
+  c.executionCtx.waitUntil(
+    handleFeishuCardAction(verified.payload, c.env, traceId)
+      .then((result) => {
+        log[result.ok ? "info" : "warn"]("card_action.completed", {
+          trace_id: traceId,
+          outcome: result.ok ? "ok" : "error",
+          result: result.content ?? "processed",
+        });
+      })
+      .catch((error) => {
+        log.error("card_action.completed", {
+          trace_id: traceId,
+          outcome: "error",
+          error: error instanceof Error ? error : new Error(String(error)),
+        });
+      })
+  );
+  return c.json(cardActionResponse({ ok: true, content: "正在处理，请稍候。" }));
 });
