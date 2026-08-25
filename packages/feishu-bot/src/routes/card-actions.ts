@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { verifyFeishuPayload } from "../feishu/crypto";
+import { feishuEventEnvelopeSchema, isUrlVerification } from "../events/payload";
 import { cardActionResponse, handleFeishuCardAction } from "../interactions/card-actions";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
@@ -23,6 +24,14 @@ cardActionRoutes.post("/card-actions", async (c) => {
     log.warn("card_action.rejected", { trace_id: traceId, reason: verified.reason });
     return c.json(cardActionResponse({ ok: false, content: "验证失败，请重新操作。" }), 401);
   }
+
+  // Feishu validates every server callback URL with the same URL-verification
+  // handshake used for event subscriptions before it will persist the URL.
+  const verificationPayload = feishuEventEnvelopeSchema.safeParse(verified.payload);
+  if (verificationPayload.success && isUrlVerification(verificationPayload.data)) {
+    return c.json({ challenge: verificationPayload.data.challenge });
+  }
+
   const result = await handleFeishuCardAction(verified.payload, c.env, traceId);
   return c.json(cardActionResponse(result));
 });
