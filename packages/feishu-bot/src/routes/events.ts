@@ -56,6 +56,15 @@ eventRoutes.post("/events", async (c) => {
       });
     }
   }
-  c.executionCtx.waitUntil(handleFeishuEvent(parsed.data, c.env, traceId));
+  c.executionCtx.waitUntil(
+    handleFeishuEvent(parsed.data, c.env, traceId).catch((error) => {
+      log.error("event.dispatch", {
+        trace_id: traceId,
+        event_id: eventId,
+        outcome: "error",
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    })
+  );
   return c.json({ ok: true });
 });

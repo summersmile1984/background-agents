@@ -4,6 +4,7 @@ import type { Env } from "../types";
 
 const THREAD_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PENDING_TTL_SECONDS = 60 * 60;
+const SESSION_INDEX_LIMIT = 30;
 
 export interface FeishuConversationCoordinates {
   tenantKey: string;
@@ -20,6 +21,13 @@ export interface FeishuThreadSession {
   actorId: string;
   createdAt: number;
   lastMessageId?: string;
+}
+
+export interface FeishuConversationSessionSummary {
+  sessionId: string;
+  targetLabel: string;
+  model: string;
+  createdAt: number;
 }
 
 export interface FeishuPendingRequest extends FeishuConversationCoordinates {
@@ -48,12 +56,29 @@ const pendingRequestSchema: z.ZodType<FeishuPendingRequest> = z.object({
   createdAt: z.number().finite().nonnegative(),
 });
 
+const conversationSessionSummarySchema: z.ZodType<FeishuConversationSessionSummary> = z.object({
+  sessionId: z.string().min(1),
+  targetLabel: z.string().min(1),
+  model: z.string().min(1),
+  createdAt: z.number().finite().nonnegative(),
+});
+
+const conversationSessionIndexSchema = z.array(conversationSessionSummarySchema);
+
 function threadKey(coordinates: FeishuConversationCoordinates): string {
   return `thread:${coordinates.tenantKey}:${coordinates.chatId}:${coordinates.rootMessageId}`;
 }
 
 function pendingKey(pendingId: string): string {
   return `pending:${pendingId}`;
+}
+
+function sessionIndexKey(
+  input: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId"> & {
+    actorId: string;
+  }
+): string {
+  return `session-index:${input.tenantKey}:${input.chatId}:${input.actorId}`;
 }
 
 export async function lookupThreadSession(
@@ -70,9 +95,33 @@ export async function storeThreadSession(
   coordinates: FeishuConversationCoordinates,
   session: FeishuThreadSession
 ): Promise<void> {
-  await createKvCacheStore(env.FEISHU_KV).put(threadKey(coordinates), JSON.stringify(session), {
+  const store = createKvCacheStore(env.FEISHU_KV);
+  await store.put(threadKey(coordinates), JSON.stringify(session), {
     expirationTtl: THREAD_TTL_SECONDS,
   });
+  const key = sessionIndexKey({ ...coordinates, actorId: session.actorId });
+  const previous = conversationSessionIndexSchema.safeParse(await store.get(key, "json"));
+  const index = previous.success ? previous.data : [];
+  const summary: FeishuConversationSessionSummary = {
+    sessionId: session.sessionId,
+    targetLabel: session.targetLabel,
+    model: session.model,
+    createdAt: session.createdAt,
+  };
+  const next = [summary, ...index.filter((item) => item.sessionId !== summary.sessionId)].slice(
+    0,
+    SESSION_INDEX_LIMIT
+  );
+  await store.put(key, JSON.stringify(next), { expirationTtl: THREAD_TTL_SECONDS });
+}
+
+export async function listConversationSessions(
+  env: Pick<Env, "FEISHU_KV">,
+  input: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId"> & { actorId: string }
+): Promise<FeishuConversationSessionSummary[]> {
+  const value = await createKvCacheStore(env.FEISHU_KV).get(sessionIndexKey(input), "json");
+  const parsed = conversationSessionIndexSchema.safeParse(value);
+  return parsed.success ? parsed.data : [];
 }
 
 export async function clearThreadSession(
