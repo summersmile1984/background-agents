@@ -23,13 +23,42 @@ describe("Feishu repository cards", () => {
     const card = buildConnectionPickerCard({
       pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
       connections: [
-        { id: "github", label: "GitHub", provider: "github", repositoryCount: 24 },
-        { id: "gitea", label: "Gitea", provider: "gitea", repositoryCount: 64 },
+        {
+          id: "github",
+          label: "GitHub",
+          provider: "github",
+          repositoryCount: 24,
+          catalogStatus: "available",
+        },
+        {
+          id: "gitea",
+          label: "Gitea",
+          provider: "gitea",
+          repositoryCount: 64,
+          catalogStatus: "available",
+        },
       ],
     });
 
     expect(JSON.stringify(card)).toContain("select_connection");
     expect(JSON.stringify(card)).toContain("Gitea · gitea (64 个仓库)");
+  });
+
+  it("marks a slow connection as refreshing instead of hiding it", () => {
+    const card = buildConnectionPickerCard({
+      pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+      connections: [
+        {
+          id: "gitea",
+          label: "Gitea",
+          provider: "gitea",
+          repositoryCount: 0,
+          catalogStatus: "refreshing",
+        },
+      ],
+    });
+
+    expect(JSON.stringify(card)).toContain("Gitea · gitea（目录刷新中）");
   });
 
   it("paginates a single SCM connection without dropping repositories", () => {
@@ -38,7 +67,13 @@ describe("Feishu repository cards", () => {
     );
     const card = buildRepositoryPickerCard({
       pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
-      connection: { id: "gitea-main", label: "Gitea", provider: "gitea", repositoryCount: 51 },
+      connection: {
+        id: "gitea-main",
+        label: "Gitea",
+        provider: "gitea",
+        repositoryCount: 51,
+        catalogStatus: "available",
+      },
       repositories,
       page: 1,
     });

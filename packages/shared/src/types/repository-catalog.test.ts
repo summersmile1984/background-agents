@@ -24,11 +24,36 @@ describe("controlPlaneReposResponseSchema", () => {
           },
         },
       ],
+      connections: [
+        {
+          id: "scm_gitea_primary",
+          provider: "gitea",
+          displayName: "Gitea",
+          baseUrl: "https://gitea.example.com",
+        },
+      ],
       cached: false,
+      cachedAt: "2026-07-27T00:00:00.000Z",
+      connectionErrors: [{ connectionId: "scm_gitea_primary", code: "SCM_CATALOG_UNAVAILABLE" }],
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.connectionErrors).toHaveLength(1);
+    expect(result.data.connections[0]?.provider).toBe("gitea");
+  });
+
+  it("accepts older responses that do not include connection catalog state", () => {
+    const result = controlPlaneReposResponseSchema.safeParse({
+      repos: [],
+      cached: true,
       cachedAt: "2026-07-27T00:00:00.000Z",
     });
 
     expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.connections).toEqual([]);
+    expect(result.data.connectionErrors).toEqual([]);
   });
 
   it("rejects malformed repo entries", () => {

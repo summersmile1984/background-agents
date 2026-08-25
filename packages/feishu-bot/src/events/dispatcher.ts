@@ -13,7 +13,7 @@ import { createSession, sendPrompt } from "../sessions/control-plane-client";
 import {
   findRepositoryTarget,
   inferRepositoryTarget,
-  listRepositoryConnections,
+  listRepositoryCatalog,
   listRepositoryTargets,
 } from "../targets";
 import type { Env } from "../types";
@@ -141,7 +141,8 @@ export async function handleFeishuEvent(
   }
   if (await deliverFollowUp({ env, coordinates, actor, content, traceId })) return;
 
-  const targets = await listRepositoryTargets(env, traceId);
+  const catalog = await listRepositoryCatalog(env, traceId);
+  const { targets } = catalog;
   const inferred = inferRepositoryTarget(targets, content);
   if (!inferred) {
     if (targets.length === 0) {
@@ -156,7 +157,7 @@ export async function handleFeishuEvent(
     await replyFeishuCard(
       env,
       coordinates.rootMessageId,
-      buildConnectionPickerCard({ pendingId, connections: listRepositoryConnections(targets) })
+      buildConnectionPickerCard({ pendingId, connections: catalog.connections })
     );
     return;
   }

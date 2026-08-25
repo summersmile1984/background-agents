@@ -75,10 +75,26 @@ export type RepoConfig = z.infer<typeof repoConfigSchema>;
 
 export type ControlPlaneRepo = EnrichedRepository;
 
+const repositoryCatalogConnectionSchema = sourceControlConnectionSummarySchema.pick({
+  id: true,
+  provider: true,
+  displayName: true,
+  baseUrl: true,
+});
+
+const repositoryCatalogConnectionErrorSchema = z.object({
+  connectionId: z.string().min(1),
+  code: z.string().min(1),
+});
+
 export const controlPlaneReposResponseSchema = z.object({
   repos: z.array(enrichedRepositorySchema),
+  /** All enabled connections, including a connection whose catalog is refreshing. */
+  connections: z.array(repositoryCatalogConnectionSchema).default([]),
   cached: z.boolean(),
   cachedAt: z.string(),
+  /** Connections omitted from `repos` because their catalog could not be served in time. */
+  connectionErrors: z.array(repositoryCatalogConnectionErrorSchema).default([]),
 });
 
 export type ControlPlaneReposResponse = z.infer<typeof controlPlaneReposResponseSchema>;
