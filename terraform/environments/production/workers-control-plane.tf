@@ -240,6 +240,9 @@ module "control_plane_worker" {
     null_resource.control_plane_build,
     module.session_index_kv,
     null_resource.d1_migrations,
+    # On its first deployment, the Feishu Worker must have a live version before
+    # Cloudflare accepts CONTROL_PLANE's FEISHU_BOT service binding.
+    module.feishu_bot_worker,
     module.linear_bot_worker,
     module.daytona_infra,
     module.vercel_sandbox_infra,
