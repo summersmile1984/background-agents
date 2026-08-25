@@ -9,6 +9,7 @@
 
 import { computeHmacHex } from "@open-inspect/shared/auth";
 import {
+  feishuCallbackContextSchema,
   linearCompletionCallbackPayloadSchema,
   linearToolCallCallbackPayloadSchema,
 } from "@open-inspect/shared/types/session-api";
@@ -35,8 +36,10 @@ export interface CallbackServiceEnv {
   // holds every bot's key as verifier and signs callbacks with the
   // destination's own.
   SERVICE_AUTH_SECRET_SLACK_BOT?: string;
+  SERVICE_AUTH_SECRET_FEISHU_BOT?: string;
   SERVICE_AUTH_SECRET_LINEAR_BOT?: string;
   SLACK_BOT?: FetchClient;
+  FEISHU_BOT?: FetchClient;
   LINEAR_BOT?: FetchClient;
   SCHEDULER_CALLBACK?: FetchClient;
 }
@@ -106,18 +109,30 @@ export class CallbackNotificationService {
   /**
    * Where a non-automation callback goes and which key signs it — one
    * decision, so destination and signing key cannot diverge (the CP signs
-   * with the DESTINATION bot's secret). Automation callbacks
-   * are routed to the SchedulerDO before this is consulted. Non-linear
-   * sources default to the slack bot for backward compatibility (web
-   * sources, etc.).
+   * with the DESTINATION bot's secret). Automation callbacks are routed to
+   * the SchedulerDO before this is consulted. Only a bot-owned source may
+   * receive a callback; never default an unknown source to Slack.
    */
   private resolveCallbackRoute(source: string | null): {
     binding: FetchClient | undefined;
     secret: string | undefined;
   } {
-    const destination: CallbackDestination = source === "linear" ? "linear-bot" : "slack-bot";
+    const destination: CallbackDestination | null =
+      source === "slack"
+        ? "slack-bot"
+        : source === "feishu"
+          ? "feishu-bot"
+          : source === "linear"
+            ? "linear-bot"
+            : null;
+    if (!destination) return { binding: undefined, secret: undefined };
     return {
-      binding: destination === "linear-bot" ? this.env.LINEAR_BOT : this.env.SLACK_BOT,
+      binding:
+        destination === "linear-bot"
+          ? this.env.LINEAR_BOT
+          : destination === "feishu-bot"
+            ? this.env.FEISHU_BOT
+            : this.env.SLACK_BOT,
       secret: callbackSigningSecret(this.env, destination),
     };
   }
@@ -218,7 +233,12 @@ export class CallbackNotificationService {
         source === "linear"
           ? linearCompletionCallbackPayloadSchema.safeParse(callbackData)
           : undefined;
-      if (parsedCallback && !parsedCallback.success) {
+      const parsedFeishuContext =
+        source === "feishu" ? feishuCallbackContextSchema.safeParse(rawContext) : undefined;
+      if (
+        (parsedCallback && !parsedCallback.success) ||
+        (parsedFeishuContext && !parsedFeishuContext.success)
+      ) {
         result.rejectReason = "invalid_payload";
         return;
       }
@@ -372,10 +392,9 @@ export class CallbackNotificationService {
     }
     const source = message.source ?? null;
 
-    // Automation runs have no tool-call progress consumer: the SchedulerDO
-    // only implements /internal/run-complete — every /callbacks/tool_call
-    // forward 404s. Skip rather than spam best-effort calls.
-    if (source === "automation") {
+    // Automation runs have no tool-call progress consumer, and Feishu uses
+    // bounded lifecycle card updates rather than tool-by-tool chat spam.
+    if (source === "automation" || source === "feishu") {
       this.log.debug("callback.tool_call", {
         message_id: messageId,
         source,

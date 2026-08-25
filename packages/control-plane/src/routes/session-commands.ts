@@ -39,6 +39,7 @@ function actor(ctx: SessionRouteContext): { authorId: string; canonicalUserId?: 
 function commandSource(ctx: SessionRouteContext): MessageSource {
   if (ctx.principal?.kind !== "service") return "web";
   if (ctx.principal.service === "slack-bot") return "slack";
+  if (ctx.principal.service === "feishu-bot") return "feishu";
   if (ctx.principal.service === "github-bot") return "github";
   if (ctx.principal.service === "linear-bot") return "linear";
   return "web";

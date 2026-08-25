@@ -10,7 +10,7 @@
 import type { ServiceName } from "@open-inspect/shared/service-auth";
 
 /** Actor namespaces bots may assert (`slack:U123` etc.). */
-const ACTOR_NAMESPACES = ["slack", "github", "linear"] as const;
+const ACTOR_NAMESPACES = ["slack", "feishu", "github", "linear"] as const;
 export type ActorNamespace = (typeof ACTOR_NAMESPACES)[number];
 
 export function isActorNamespace(value: string): value is ActorNamespace {
@@ -18,7 +18,7 @@ export function isActorNamespace(value: string): value is ActorNamespace {
 }
 
 export interface ResolvedIdentity {
-  provider: "github" | "google" | "slack" | "linear";
+  provider: "github" | "google" | "slack" | "feishu" | "linear";
   providerUserId: string;
   /** Canonical D1 `users.id`. Always set for user principals; null for actors the CP has never seen. */
   canonicalUserId: string | null;
@@ -48,6 +48,7 @@ export type Principal =
 export const ASSERTION_RIGHTS: Record<ServiceName, ActorNamespace | null> = {
   web: null,
   "slack-bot": "slack",
+  "feishu-bot": "feishu",
   "github-bot": "github",
   "linear-bot": "linear",
   "control-plane": null,

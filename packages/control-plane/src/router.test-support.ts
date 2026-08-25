@@ -17,6 +17,7 @@ export const TEST_BACKGROUND_TASK_CONTEXT: BackgroundJobDispatcher = {
 export const TEST_SERVICE_SECRETS = {
   SERVICE_AUTH_SECRET_WEB: "test-service-secret-web",
   SERVICE_AUTH_SECRET_SLACK_BOT: "test-service-secret-slack-bot",
+  SERVICE_AUTH_SECRET_FEISHU_BOT: "test-service-secret-feishu-bot",
   SERVICE_AUTH_SECRET_GITHUB_BOT: "test-service-secret-github-bot",
   SERVICE_AUTH_SECRET_LINEAR_BOT: "test-service-secret-linear-bot",
 } as const;

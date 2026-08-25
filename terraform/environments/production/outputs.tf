@@ -7,6 +7,11 @@ output "slack_kv_id" {
   value       = var.enable_slack_bot ? module.slack_kv[0].namespace_id : null
 }
 
+output "feishu_kv_id" {
+  description = "Feishu KV namespace ID"
+  value       = var.enable_feishu_bot ? module.feishu_kv[0].namespace_id : null
+}
+
 output "github_kv_id" {
   description = "GitHub KV namespace ID"
   value       = var.enable_github_bot ? module.github_kv[0].namespace_id : null
@@ -37,6 +42,16 @@ output "slack_bot_worker_name" {
 output "slack_bot_url" {
   description = "Slack bot public URL (use /events, /interactions, and /commands in Slack App settings)"
   value       = var.enable_slack_bot ? local.slack_bot_url : null
+}
+
+output "feishu_bot_worker_name" {
+  description = "Feishu bot worker name"
+  value       = var.enable_feishu_bot ? module.feishu_bot_worker[0].worker_name : null
+}
+
+output "feishu_bot_url" {
+  description = "Feishu bot public URL (configure /events and /card-actions in Feishu Open Platform)"
+  value       = var.enable_feishu_bot ? local.feishu_bot_url : null
 }
 
 output "linear_kv_id" {

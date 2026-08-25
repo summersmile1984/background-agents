@@ -14,6 +14,7 @@ export interface Env {
 
   // Service bindings
   SLACK_BOT?: Fetcher; // Optional - only if slack-bot is deployed
+  FEISHU_BOT?: Fetcher; // Optional - only if feishu-bot is deployed
   LINEAR_BOT?: Fetcher; // Optional - only if linear-bot is deployed
 
   // Durable Objects
@@ -49,6 +50,7 @@ export interface Env {
   // authenticate.
   SERVICE_AUTH_SECRET_WEB?: string;
   SERVICE_AUTH_SECRET_SLACK_BOT?: string;
+  SERVICE_AUTH_SECRET_FEISHU_BOT?: string;
   SERVICE_AUTH_SECRET_GITHUB_BOT?: string;
   SERVICE_AUTH_SECRET_LINEAR_BOT?: string;
   SLACK_BOT_TOKEN?: string; // Slack bot token for agent-initiated chat.postMessage calls

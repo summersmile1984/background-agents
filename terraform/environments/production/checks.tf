@@ -43,6 +43,15 @@ resource "terraform_data" "cloudflare_slack_custom_domain_gate" {
   }
 }
 
+resource "terraform_data" "cloudflare_feishu_custom_domain_gate" {
+  lifecycle {
+    precondition {
+      condition     = local.feishu_custom_domain == "" || local.feishu_custom_domain_enabled
+      error_message = "cloudflare_feishu_custom_domain is set but would be silently ignored: it requires enable_feishu_bot = true and a non-empty cloudflare_zone_id."
+    }
+  }
+}
+
 # Fail the plan when no access control is configured. Uses terraform_data with a
 # precondition so this is a hard error, not an advisory check-block warning.
 resource "terraform_data" "access_control_gate" {

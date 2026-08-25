@@ -16,6 +16,7 @@ import { TEST_BACKGROUND_TASK_CONTEXT } from "../router.test-support";
 const SECRETS = {
   SERVICE_AUTH_SECRET_WEB: "web-secret",
   SERVICE_AUTH_SECRET_SLACK_BOT: "slack-secret",
+  SERVICE_AUTH_SECRET_FEISHU_BOT: "feishu-secret",
   SERVICE_AUTH_SECRET_GITHUB_BOT: "github-secret",
   SERVICE_AUTH_SECRET_LINEAR_BOT: "linear-secret",
 };
@@ -23,6 +24,7 @@ const SECRETS = {
 const SERVICE_SECRET: Record<ServiceName, string> = {
   web: SECRETS.SERVICE_AUTH_SECRET_WEB,
   "slack-bot": SECRETS.SERVICE_AUTH_SECRET_SLACK_BOT,
+  "feishu-bot": SECRETS.SERVICE_AUTH_SECRET_FEISHU_BOT,
   "github-bot": SECRETS.SERVICE_AUTH_SECRET_GITHUB_BOT,
   "linear-bot": SECRETS.SERVICE_AUTH_SECRET_LINEAR_BOT,
   "control-plane": "outbound-only-secret",
@@ -165,6 +167,26 @@ describe("authenticate — service credentials", () => {
     });
   });
 
+  it("accepts a tenant-namespaced Feishu actor only from feishu-bot", async () => {
+    const request = await signedRequest({
+      service: "feishu-bot",
+      body: "{}",
+      actor: "feishu:tenant-1:ou_123",
+    });
+    const result = await authenticate(request, createEnv(), createCtx(null));
+
+    expect(isAuthError(result)).toBe(false);
+    if (isAuthError(result)) return;
+    expect(result.principal).toMatchObject({
+      service: "feishu-bot",
+      actor: {
+        provider: "feishu",
+        providerUserId: "tenant-1:ou_123",
+        participantUserId: "feishu:tenant-1:ou_123",
+      },
+    });
+  });
+
   it("rejects an unknown service name without fallback", async () => {
     const request = await signedRequest({
       service: "linear-bot",
@@ -289,6 +311,7 @@ describe("authenticate — service credentials", () => {
     const cases: Array<{ service: ServiceName; actor: string }> = [
       { service: "web", actor: "slack:U1" },
       { service: "slack-bot", actor: "github:1" },
+      { service: "feishu-bot", actor: "slack:U1" },
       { service: "github-bot", actor: "linear:usr_1" },
       { service: "linear-bot", actor: "slack:U1" },
       { service: "slack-bot", actor: "malformed" },

@@ -16,6 +16,11 @@ resource "random_password" "service_auth_secret_slack_bot" {
   special = false
 }
 
+resource "random_password" "service_auth_secret_feishu_bot" {
+  length  = 64
+  special = false
+}
+
 resource "random_password" "service_auth_secret_github_bot" {
   length  = 64
   special = false

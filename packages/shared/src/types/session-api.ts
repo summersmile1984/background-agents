@@ -45,6 +45,26 @@ export const slackCallbackContextSchema = z.object({
 
 export type SlackCallbackContext = z.infer<typeof slackCallbackContextSchema>;
 
+/**
+ * Conversation coordinates for a Feishu-originated session.  `rootMessageId`
+ * is the topic's first message when Feishu provides a root id, otherwise the
+ * triggering message id.  It is deliberately opaque: callers must never
+ * derive a target repository or user identity from a chat coordinate.
+ */
+export const feishuCallbackContextSchema = z.object({
+  source: z.literal("feishu"),
+  tenantKey: nonEmptyStringSchema,
+  chatId: nonEmptyStringSchema,
+  rootMessageId: nonEmptyStringSchema,
+  /** A card sent by Open-Inspect itself, eligible for a later status update. */
+  workingMessageId: nonEmptyStringSchema.optional(),
+  targetLabel: nonEmptyStringSchema,
+  model: nonEmptyStringSchema,
+  reasoningEffort: nonEmptyStringSchema.optional(),
+});
+
+export type FeishuCallbackContext = z.infer<typeof feishuCallbackContextSchema>;
+
 const linearCallbackContextBaseSchema = z.strictObject({
   source: z.literal("linear"),
   issueId: nonEmptyStringSchema,
@@ -126,6 +146,7 @@ export type AutomationCallbackContext = z.infer<typeof automationCallbackContext
 
 export const callbackContextSchema = z.union([
   slackCallbackContextSchema,
+  feishuCallbackContextSchema,
   linearCallbackContextSchema,
   automationCallbackContextSchema,
 ]);
