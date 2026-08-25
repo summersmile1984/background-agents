@@ -7,18 +7,29 @@ export interface FeishuRepositoryTarget {
   fullName: string;
   displayName: string;
   provider: string;
+  connectionId: string;
+  connectionLabel: string;
   defaultBranch: string;
+}
+
+export interface FeishuRepositoryConnection {
+  id: string;
+  label: string;
+  provider: string;
+  repositoryCount: number;
 }
 
 function toTarget(
   repo: z.infer<typeof controlPlaneReposResponseSchema>["repos"][number]
 ): FeishuRepositoryTarget | null {
-  if (!repo.repositoryKey) return null;
+  if (!repo.repositoryKey || !repo.connectionId) return null;
   return {
     repositoryKey: repo.repositoryKey,
     fullName: `${repo.owner}/${repo.name}`,
     displayName: repo.name,
     provider: repo.provider ?? "source control",
+    connectionId: repo.connectionId,
+    connectionLabel: repo.connection?.displayName ?? repo.provider ?? "Source control",
     defaultBranch: repo.defaultBranch,
   };
 }
@@ -46,6 +57,38 @@ export function findRepositoryTarget(
   repositoryKey: string
 ): FeishuRepositoryTarget | null {
   return targets.find((target) => target.repositoryKey === repositoryKey) ?? null;
+}
+
+export function listRepositoryConnections(
+  targets: FeishuRepositoryTarget[]
+): FeishuRepositoryConnection[] {
+  const grouped = new Map<string, FeishuRepositoryConnection>();
+  for (const target of targets) {
+    const existing = grouped.get(target.connectionId);
+    if (existing) {
+      existing.repositoryCount += 1;
+      continue;
+    }
+    grouped.set(target.connectionId, {
+      id: target.connectionId,
+      label: target.connectionLabel,
+      provider: target.provider,
+      repositoryCount: 1,
+    });
+  }
+  return [...grouped.values()].sort(
+    (left, right) =>
+      left.label.localeCompare(right.label, "zh-CN") || left.id.localeCompare(right.id)
+  );
+}
+
+export function findRepositoryConnection(
+  targets: FeishuRepositoryTarget[],
+  connectionId: string
+): FeishuRepositoryConnection | null {
+  return (
+    listRepositoryConnections(targets).find((connection) => connection.id === connectionId) ?? null
+  );
 }
 
 /**

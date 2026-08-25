@@ -1,15 +1,33 @@
 import { z } from "zod";
+import { buildRepositoryPickerCard, REPOSITORIES_PER_PAGE } from "../cards";
 import {
   claimCardActionOnce,
   deletePendingRequest,
   getPendingRequest,
 } from "../conversation/store";
-import { sendFeishuText } from "../feishu/client";
+import { replyFeishuCard, sendFeishuText } from "../feishu/client";
 import { startNewSession } from "../events/dispatcher";
 import { createLogger } from "../logger";
+import { findRepositoryConnection, findRepositoryTarget, listRepositoryTargets } from "../targets";
 import type { Env } from "../types";
 
 const log = createLogger("card-actions");
+
+const cardActionValueSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("select_connection"), pendingId: z.string().uuid() }),
+  z.object({
+    action: z.literal("select_target"),
+    pendingId: z.string().uuid(),
+    connectionId: z.string().min(1),
+    page: z.number().int().nonnegative(),
+  }),
+  z.object({
+    action: z.literal("repository_page"),
+    pendingId: z.string().uuid(),
+    connectionId: z.string().min(1),
+    page: z.number().int().nonnegative(),
+  }),
+]);
 
 const cardActionSchema = z.object({
   header: z
@@ -23,9 +41,7 @@ const cardActionSchema = z.object({
   operator: z.object({ open_id: z.string().min(1).optional() }).optional(),
   action: z
     .object({
-      value: z
-        .object({ action: z.literal("select_target"), pendingId: z.string().uuid() })
-        .optional(),
+      value: cardActionValueSchema.optional(),
       option: z.string().min(1).optional(),
     })
     .optional(),
@@ -53,7 +69,7 @@ export async function handleFeishuCardAction(
   const chatId = parsed.data?.context?.open_chat_id ?? parsed.data?.open_chat_id;
   const openId = parsed.data?.operator?.open_id;
   const actionId = parsed.data?.header?.event_id;
-  if (!parsed.success || !value || !targetKey || !tenantKey || !chatId || !openId || !actionId) {
+  if (!parsed.success || !value || !tenantKey || !chatId || !openId || !actionId) {
     return { ok: false, content: "请求无效，请重新发起。" };
   }
   if (!(await claimCardActionOnce(env, actionId))) return { ok: true, content: "该操作已处理。" };
@@ -68,6 +84,33 @@ export async function handleFeishuCardAction(
     return { ok: false, content: "该选择已过期或无权操作，请重新发起请求。" };
   }
   try {
+    const targets = await listRepositoryTargets(env, traceId);
+    if (value.action === "select_connection" || value.action === "repository_page") {
+      const connectionId = value.action === "select_connection" ? targetKey : value.connectionId;
+      if (!connectionId) return { ok: false, content: "代码源无效，请重新发起请求。" };
+      const connection = findRepositoryConnection(targets, connectionId);
+      if (!connection) return { ok: false, content: "代码源已不可用，请重新发起请求。" };
+      const repositories = targets.filter((target) => target.connectionId === connection.id);
+      const page = value.action === "repository_page" ? value.page : 0;
+      const pageCount = Math.max(1, Math.ceil(repositories.length / REPOSITORIES_PER_PAGE));
+      if (page >= pageCount) return { ok: false, content: "该页已不存在，请重新选择代码源。" };
+      await replyFeishuCard(
+        env,
+        pending.rootMessageId,
+        buildRepositoryPickerCard({
+          pendingId: value.pendingId,
+          connection,
+          repositories,
+          page,
+        })
+      );
+      return { ok: true, content: "请选择仓库。" };
+    }
+    if (!targetKey) return { ok: false, content: "仓库无效，请重新选择。" };
+    const selected = findRepositoryTarget(targets, targetKey);
+    if (!selected || selected.connectionId !== value.connectionId) {
+      return { ok: false, content: "仓库已不可用，请重新选择。" };
+    }
     await startNewSession({
       env,
       coordinates: {
@@ -77,8 +120,9 @@ export async function handleFeishuCardAction(
       },
       actor,
       content: pending.content,
-      targetKey,
+      targetKey: selected.repositoryKey,
       traceId,
+      targets,
     });
     await deletePendingRequest(env, value.pendingId);
     return { ok: true, content: "已开始创建会话。" };

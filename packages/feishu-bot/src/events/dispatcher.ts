@@ -1,15 +1,21 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
-import { buildRepositoryPickerCard, buildWorkingCard } from "../cards";
+import { buildConnectionPickerCard, buildSessionListCard, buildWorkingCard } from "../cards";
 import {
+  listConversationSessions,
   lookupThreadSession,
   storePendingRequest,
   storeThreadSession,
   type FeishuConversationCoordinates,
 } from "../conversation/store";
-import { sendFeishuCard, sendFeishuText } from "../feishu/client";
+import { replyFeishuCard, sendFeishuCard, sendFeishuText } from "../feishu/client";
 import { createLogger } from "../logger";
 import { createSession, sendPrompt } from "../sessions/control-plane-client";
-import { findRepositoryTarget, inferRepositoryTarget, listRepositoryTargets } from "../targets";
+import {
+  findRepositoryTarget,
+  inferRepositoryTarget,
+  listRepositoryConnections,
+  listRepositoryTargets,
+} from "../targets";
 import type { Env } from "../types";
 import { parseFeishuText, type FeishuEventEnvelope } from "./payload";
 
@@ -34,6 +40,12 @@ function isGroupMentionForBot(event: FeishuEventEnvelope, botOpenId: string | un
   if (!botOpenId) return false;
   return Boolean(
     event.event?.message?.mentions?.some((mention) => mention.id?.open_id === botOpenId)
+  );
+}
+
+function isSessionListRequest(content: string): boolean {
+  return ["会话", "会话列表", "我的会话", "sessions", "my sessions"].includes(
+    content.trim().toLowerCase()
   );
 }
 
@@ -118,6 +130,15 @@ export async function handleFeishuEvent(
     return;
   }
   const actor = actorId(coordinates.tenantKey, openId);
+  if (!message.root_id && isSessionListRequest(content)) {
+    const sessions = await listConversationSessions(env, { ...coordinates, actorId: actor });
+    await sendFeishuCard(
+      env,
+      coordinates.chatId,
+      buildSessionListCard({ sessions, webAppUrl: env.WEB_APP_URL })
+    );
+    return;
+  }
   if (await deliverFollowUp({ env, coordinates, actor, content, traceId })) return;
 
   const targets = await listRepositoryTargets(env, traceId);
@@ -132,10 +153,10 @@ export async function handleFeishuEvent(
       return;
     }
     const pendingId = await storePendingRequest(env, { ...coordinates, actorId: actor, content });
-    await sendFeishuCard(
+    await replyFeishuCard(
       env,
-      coordinates.chatId,
-      buildRepositoryPickerCard({ pendingId, repositories: targets })
+      coordinates.rootMessageId,
+      buildConnectionPickerCard({ pendingId, connections: listRepositoryConnections(targets) })
     );
     return;
   }
@@ -177,9 +198,9 @@ export async function startNewSession(input: {
     await sendFeishuText(input.env, input.coordinates.chatId, "无法创建会话，请稍后重试。");
     return;
   }
-  const workingMessageId = await sendFeishuCard(
+  const workingMessageId = await replyFeishuCard(
     input.env,
-    input.coordinates.chatId,
+    input.coordinates.rootMessageId,
     buildWorkingCard({
       targetLabel: target.fullName,
       model,
