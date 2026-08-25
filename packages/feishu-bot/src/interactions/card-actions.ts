@@ -8,7 +8,7 @@ import {
 import { replyFeishuCard, sendFeishuText } from "../feishu/client";
 import { startNewSession } from "../events/dispatcher";
 import { createLogger } from "../logger";
-import { findRepositoryConnection, findRepositoryTarget, listRepositoryTargets } from "../targets";
+import { findRepositoryTarget, listRepositoryCatalog } from "../targets";
 import type { Env } from "../types";
 
 const log = createLogger("card-actions");
@@ -113,12 +113,21 @@ export async function handleFeishuCardAction(
     return { ok: false, content: "该选择已过期或无权操作，请重新发起请求。" };
   }
   try {
-    const targets = await listRepositoryTargets(env, traceId);
+    const catalog = await listRepositoryCatalog(env, traceId);
+    const { targets } = catalog;
     if (value.action === "select_connection" || value.action === "repository_page") {
       const connectionId = value.action === "select_connection" ? targetKey : value.connectionId;
       if (!connectionId) return { ok: false, content: "代码源无效，请重新发起请求。" };
-      const connection = findRepositoryConnection(targets, connectionId);
+      const connection = catalog.connections.find((candidate) => candidate.id === connectionId);
       if (!connection) return { ok: false, content: "代码源已不可用，请重新发起请求。" };
+      if (connection.catalogStatus === "refreshing") {
+        await sendFeishuText(
+          env,
+          chatId,
+          `${connection.label} 的仓库目录仍在刷新，请稍候几秒后重新选择。`
+        );
+        return { ok: false, content: "目录仍在刷新。" };
+      }
       const repositories = targets.filter((target) => target.connectionId === connection.id);
       const page = value.action === "repository_page" ? value.page : 0;
       const pageCount = Math.max(1, Math.ceil(repositories.length / REPOSITORIES_PER_PAGE));

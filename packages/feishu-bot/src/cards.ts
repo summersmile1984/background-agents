@@ -48,7 +48,9 @@ export function buildConnectionPickerCard(input: {
           value: { action: "select_connection", pendingId: input.pendingId },
           options: input.connections.map((connection) => ({
             text: text(
-              `${connection.label} · ${connection.provider} (${connection.repositoryCount} 个仓库)`
+              connection.catalogStatus === "refreshing"
+                ? `${connection.label} · ${connection.provider}（目录刷新中）`
+                : `${connection.label} · ${connection.provider} (${connection.repositoryCount} 个仓库)`
             ),
             value: connection.id,
           })),
