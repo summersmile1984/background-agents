@@ -71,6 +71,12 @@ module "control_plane_worker" {
         service_name = "open-inspect-slack-bot-${local.name_suffix}"
       }
     ] : [],
+    var.enable_feishu_bot ? [
+      {
+        binding_name = "FEISHU_BOT"
+        service_name = "open-inspect-feishu-bot-${local.name_suffix}"
+      }
+    ] : [],
     var.enable_linear_bot ? [
       {
         binding_name = "LINEAR_BOT"
@@ -169,6 +175,7 @@ module "control_plane_worker" {
       # Per-service sig1 verification keys
       { name = "SERVICE_AUTH_SECRET_WEB", value = random_password.service_auth_secret_web.result },
       { name = "SERVICE_AUTH_SECRET_SLACK_BOT", value = random_password.service_auth_secret_slack_bot.result },
+      { name = "SERVICE_AUTH_SECRET_FEISHU_BOT", value = random_password.service_auth_secret_feishu_bot.result },
       { name = "SERVICE_AUTH_SECRET_GITHUB_BOT", value = random_password.service_auth_secret_github_bot.result },
       { name = "SERVICE_AUTH_SECRET_LINEAR_BOT", value = random_password.service_auth_secret_linear_bot.result },
       # GitHub App credentials for /repos endpoint (listInstallationRepositories)

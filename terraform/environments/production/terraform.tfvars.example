@@ -18,7 +18,7 @@
 #   - Workers KV Storage: Edit
 #   - Workers R2 Storage: Edit
 #   - D1: Edit
-#   - Queues: Edit (required when enable_slack_bot = true)
+#   - Queues: Edit (required when enable_slack_bot or enable_feishu_bot = true)
 # Optional if you manage Cloudflare routes/custom domains:
 #   - Workers Routes: Edit
 # Create at: https://dash.cloudflare.com/profile/api-tokens
@@ -208,6 +208,27 @@ enable_slack_bot = false
 
 slack_bot_token = ""       # e.g., "xoxb-..."
 slack_signing_secret = ""
+
+# =============================================================================
+# Feishu App Credentials (Optional)
+# =============================================================================
+# Create an enterprise self-built app at https://open.feishu.cn/, enable the
+# bot, configure the event Request URL as https://<feishu-worker>/events and
+# the card callback URL as https://<feishu-worker>/card-actions. Do not commit
+# real secrets; use a secret backend or TF_VAR_feishu_* in CI instead.
+
+enable_feishu_bot = false
+feishu_app_id = ""
+feishu_app_secret = ""
+feishu_verification_token = ""
+feishu_encrypt_key = ""
+
+# Enable only after FEISHU_BOT_OPEN_ID is known and group @mention E2E passes.
+feishu_triggers_enabled = false
+feishu_bot_open_id = ""
+
+# Recommended when workers.dev is unavailable from Feishu or your network.
+# cloudflare_feishu_custom_domain = "feishu.example.com"
 
 # Linear Agent (Optional)
 # Create an OAuth Application at: https://linear.app/settings/api/applications/new

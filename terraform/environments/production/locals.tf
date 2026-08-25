@@ -49,6 +49,18 @@ locals {
   )
   slack_bot_url = "https://${local.slack_bot_host}"
 
+  feishu_custom_domain = var.cloudflare_feishu_custom_domain == null ? "" : trimspace(var.cloudflare_feishu_custom_domain)
+  feishu_custom_domain_enabled = (
+    var.enable_feishu_bot &&
+    local.feishu_custom_domain != "" &&
+    local.control_plane_zone_id != ""
+  )
+  feishu_bot_host = (local.feishu_custom_domain_enabled
+    ? local.feishu_custom_domain
+    : "open-inspect-feishu-bot-${local.name_suffix}.${var.cloudflare_worker_subdomain}.workers.dev"
+  )
+  feishu_bot_url = "https://${local.feishu_bot_host}"
+
   # Must match the deployed Worker's `name` and the custom-domain `service` binding.
   web_worker_name = "open-inspect-web-${local.name_suffix}"
 
@@ -84,6 +96,7 @@ locals {
   # Worker script paths (deterministic output locations)
   control_plane_script_path = "${var.project_root}/packages/control-plane/dist/index.js"
   slack_bot_script_path     = "${var.project_root}/packages/slack-bot/dist/index.js"
+  feishu_bot_script_path    = "${var.project_root}/packages/feishu-bot/dist/index.js"
   linear_bot_script_path    = "${var.project_root}/packages/linear-bot/dist/index.js"
   github_bot_script_path    = "${var.project_root}/packages/github-bot/dist/index.js"
 }

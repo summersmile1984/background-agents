@@ -302,7 +302,7 @@ export interface SessionLaunchSpecV1 {
   };
   skillsManifestId: string | null;
   caller: {
-    channel: "web" | "slack" | "github" | "gitea" | "linear" | "automation" | "child";
+    channel: "web" | "slack" | "feishu" | "github" | "gitea" | "linear" | "automation" | "child";
     canonicalUserId: string | null;
     integrationId: string | null;
   };

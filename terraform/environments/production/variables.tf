@@ -64,6 +64,21 @@ variable "cloudflare_slack_custom_domain" {
   }
 }
 
+variable "cloudflare_feishu_custom_domain" {
+  description = "Custom domain (hostname) to attach to the Feishu bot Worker (optional). Requires enable_feishu_bot and cloudflare_zone_id. e.g. 'feishu.example.com'"
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.cloudflare_feishu_custom_domain == null ||
+      trimspace(var.cloudflare_feishu_custom_domain) == "" ||
+      can(regex("(?i)^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.cloudflare_feishu_custom_domain))
+    )
+    error_message = "cloudflare_feishu_custom_domain must be a bare hostname such as 'feishu.example.com' — no scheme, port, path, trailing dot, or whitespace."
+  }
+}
+
 variable "cloudflare_worker_subdomain" {
   description = "Cloudflare Workers account subdomain (e.g. 'myaccount' — .workers.dev is appended automatically)"
   type        = string
@@ -275,6 +290,78 @@ variable "slack_signing_secret" {
   type        = string
   sensitive   = true
   default     = ""
+}
+
+# =============================================================================
+# Feishu App Credentials
+# =============================================================================
+
+variable "enable_feishu_bot" {
+  description = "Enable the Feishu bot worker. Requires the self-built app credentials and event security values."
+  type        = bool
+  default     = false
+
+  validation {
+    condition = var.enable_feishu_bot == false || (
+      length(trimspace(var.feishu_app_id)) > 0 &&
+      length(trimspace(var.feishu_app_secret)) > 0 &&
+      length(trimspace(var.feishu_verification_token)) > 0 &&
+      length(trimspace(var.feishu_encrypt_key)) > 0
+    )
+    error_message = "When enable_feishu_bot is true, feishu_app_id, feishu_app_secret, feishu_verification_token, and feishu_encrypt_key must be non-empty."
+  }
+}
+
+variable "feishu_triggers_enabled" {
+  description = "Kill switch for Feishu group @mention triggers. When false (default), the bot ignores all group messages while private chats continue to work."
+  type        = bool
+  default     = false
+}
+
+variable "feishu_app_id" {
+  description = "Feishu self-built app ID (cli_...)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "feishu_app_secret" {
+  description = "Feishu self-built app secret"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "feishu_verification_token" {
+  description = "Feishu event subscription verification token"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "feishu_encrypt_key" {
+  description = "Feishu event subscription Encrypt Key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "feishu_bot_open_id" {
+  description = "Open ID of the Open-Inspect Feishu bot. Required before group @mention triggers can be enabled."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "feishu_api_base" {
+  description = "Feishu Open Platform API base. Only mainland Feishu is supported in this rollout."
+  type        = string
+  default     = "https://open.feishu.cn"
+
+  validation {
+    condition     = var.feishu_api_base == "https://open.feishu.cn"
+    error_message = "feishu_api_base must be https://open.feishu.cn for this rollout."
+  }
 }
 
 # =============================================================================

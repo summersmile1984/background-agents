@@ -21,6 +21,7 @@ export const SIG1_PREFIX = "sig1";
 export const SERVICE_NAMES = [
   "web",
   "slack-bot",
+  "feishu-bot",
   "github-bot",
   "linear-bot",
   "control-plane",

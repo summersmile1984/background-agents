@@ -4,6 +4,7 @@ import type { ServiceName } from "@open-inspect/shared/service-auth";
 export interface ServiceKeyEnv {
   SERVICE_AUTH_SECRET_WEB?: string;
   SERVICE_AUTH_SECRET_SLACK_BOT?: string;
+  SERVICE_AUTH_SECRET_FEISHU_BOT?: string;
   SERVICE_AUTH_SECRET_GITHUB_BOT?: string;
   SERVICE_AUTH_SECRET_LINEAR_BOT?: string;
 }
@@ -15,6 +16,8 @@ export function serviceAuthSecret(env: ServiceKeyEnv, service: ServiceName): str
       return env.SERVICE_AUTH_SECRET_WEB;
     case "slack-bot":
       return env.SERVICE_AUTH_SECRET_SLACK_BOT;
+    case "feishu-bot":
+      return env.SERVICE_AUTH_SECRET_FEISHU_BOT;
     case "github-bot":
       return env.SERVICE_AUTH_SECRET_GITHUB_BOT;
     case "linear-bot":

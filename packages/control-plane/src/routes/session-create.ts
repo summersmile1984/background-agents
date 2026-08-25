@@ -89,6 +89,7 @@ function callerChannel(
 ): SessionLaunchSpecV1["caller"]["channel"] {
   if (ctx.principal?.kind === "user" || ctx.principal?.kind !== "service") return "web";
   if (ctx.principal.service === "slack-bot") return "slack";
+  if (ctx.principal.service === "feishu-bot") return "feishu";
   if (ctx.principal.service === "linear-bot") return "linear";
   if (ctx.principal.service === "github-bot") return provider === "gitea" ? "gitea" : "github";
   return "web";
