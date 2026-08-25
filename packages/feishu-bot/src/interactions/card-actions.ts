@@ -29,16 +29,17 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-const cardActionSchema = z.object({
-  header: z
-    .object({
-      event_id: z.string().min(1).optional(),
-      tenant_key: z.string().min(1).optional(),
-    })
-    .optional(),
+const cardActionFieldsSchema = z.object({
   context: z.object({ open_chat_id: z.string().min(1).optional() }).optional(),
   open_chat_id: z.string().min(1).optional(),
-  operator: z.object({ open_id: z.string().min(1).optional() }).optional(),
+  operator: z
+    .object({
+      // Legacy card callbacks put the Open ID directly on `operator`.
+      open_id: z.string().min(1).optional(),
+      // Event subscription 2.0 callbacks nest it below `operator_id`.
+      operator_id: z.object({ open_id: z.string().min(1).optional() }).optional(),
+    })
+    .optional(),
   action: z
     .object({
       value: cardActionValueSchema.optional(),
@@ -47,8 +48,41 @@ const cardActionSchema = z.object({
     .optional(),
 });
 
+const cardActionSchema = cardActionFieldsSchema.extend({
+  header: z
+    .object({
+      event_id: z.string().min(1).optional(),
+      tenant_key: z.string().min(1).optional(),
+    })
+    .optional(),
+  // Feishu event subscription 2.0 wraps action fields in `event`, whereas
+  // the legacy card callback format keeps them at the top level.
+  event: cardActionFieldsSchema.optional(),
+});
+
 function actorId(tenantKey: string, openId: string): string {
   return `feishu:${tenantKey}:${openId}`;
+}
+
+export function parseFeishuCardAction(payload: unknown): {
+  value: z.infer<typeof cardActionValueSchema>;
+  targetKey?: string;
+  tenantKey: string;
+  chatId: string;
+  openId: string;
+  actionId: string;
+} | null {
+  const parsed = cardActionSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  const actionPayload = parsed.data.event ?? parsed.data;
+  const value = actionPayload.action?.value;
+  const targetKey = actionPayload.action?.option;
+  const tenantKey = parsed.data.header?.tenant_key;
+  const chatId = actionPayload.context?.open_chat_id ?? actionPayload.open_chat_id;
+  const openId = actionPayload.operator?.open_id ?? actionPayload.operator?.operator_id?.open_id;
+  const actionId = parsed.data.header?.event_id;
+  if (!value || !tenantKey || !chatId || !openId || !actionId) return null;
+  return { value, targetKey, tenantKey, chatId, openId, actionId };
 }
 
 /**
@@ -62,16 +96,11 @@ export async function handleFeishuCardAction(
   env: Env,
   traceId: string
 ): Promise<{ ok: true; content?: string } | { ok: false; content: string }> {
-  const parsed = cardActionSchema.safeParse(payload);
-  const value = parsed.data?.action?.value;
-  const targetKey = parsed.data?.action?.option;
-  const tenantKey = parsed.data?.header?.tenant_key;
-  const chatId = parsed.data?.context?.open_chat_id ?? parsed.data?.open_chat_id;
-  const openId = parsed.data?.operator?.open_id;
-  const actionId = parsed.data?.header?.event_id;
-  if (!parsed.success || !value || !tenantKey || !chatId || !openId || !actionId) {
+  const action = parseFeishuCardAction(payload);
+  if (!action) {
     return { ok: false, content: "请求无效，请重新发起。" };
   }
+  const { value, targetKey, tenantKey, chatId, openId, actionId } = action;
   if (!(await claimCardActionOnce(env, actionId))) return { ok: true, content: "该操作已处理。" };
   const pending = await getPendingRequest(env, value.pendingId);
   const actor = actorId(tenantKey, openId);
