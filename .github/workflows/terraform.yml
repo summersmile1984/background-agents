@@ -8,6 +8,7 @@ on:
       - "scripts/**"
       - "packages/control-plane/**"
       - "packages/slack-bot/**"
+      - "packages/feishu-bot/**"
       - "packages/github-bot/**"
       - "packages/linear-bot/**"
       - "packages/modal-infra/**"
@@ -25,6 +26,7 @@ on:
       - "scripts/**"
       - "packages/control-plane/**"
       - "packages/slack-bot/**"
+      - "packages/feishu-bot/**"
       - "packages/github-bot/**"
       - "packages/linear-bot/**"
       - "packages/modal-infra/**"
@@ -216,6 +218,14 @@ jobs:
           TF_VAR_enable_slack_bot: "${{ secrets.ENABLE_SLACK_BOT || 'true' }}"
           TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
           TF_VAR_slack_signing_secret: ${{ secrets.SLACK_SIGNING_SECRET }}
+          TF_VAR_enable_feishu_bot: "${{ secrets.ENABLE_FEISHU_BOT || 'false' }}"
+          TF_VAR_feishu_app_id: ${{ secrets.FEISHU_APP_ID }}
+          TF_VAR_feishu_app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          TF_VAR_feishu_verification_token: ${{ secrets.FEISHU_VERIFICATION_TOKEN }}
+          TF_VAR_feishu_encrypt_key: ${{ secrets.FEISHU_ENCRYPT_KEY }}
+          TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
+          TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
+          TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           TF_VAR_repo_secrets_encryption_key: ${{ secrets.REPO_SECRETS_ENCRYPTION_KEY }}
@@ -387,6 +397,14 @@ jobs:
           TF_VAR_enable_slack_bot: "${{ secrets.ENABLE_SLACK_BOT || 'true' }}"
           TF_VAR_slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
           TF_VAR_slack_signing_secret: ${{ secrets.SLACK_SIGNING_SECRET }}
+          TF_VAR_enable_feishu_bot: "${{ secrets.ENABLE_FEISHU_BOT || 'false' }}"
+          TF_VAR_feishu_app_id: ${{ secrets.FEISHU_APP_ID }}
+          TF_VAR_feishu_app_secret: ${{ secrets.FEISHU_APP_SECRET }}
+          TF_VAR_feishu_verification_token: ${{ secrets.FEISHU_VERIFICATION_TOKEN }}
+          TF_VAR_feishu_encrypt_key: ${{ secrets.FEISHU_ENCRYPT_KEY }}
+          TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
+          TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
+          TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           TF_VAR_repo_secrets_encryption_key: ${{ secrets.REPO_SECRETS_ENCRYPTION_KEY }}
