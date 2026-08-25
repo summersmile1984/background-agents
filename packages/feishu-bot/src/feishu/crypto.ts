@@ -94,14 +94,20 @@ export async function verifyFeishuPayload(
   const encrypted = typeof encryptValue === "string";
   if (encrypted) {
     if (!config.encryptKey) return { ok: false, reason: "missing_encrypt_key" };
-    if (!headers.timestamp || !headers.nonce || !headers.signature) {
+    const hasAnySignatureHeader =
+      headers.timestamp !== null || headers.nonce !== null || headers.signature !== null;
+    const hasCompleteSignatureHeaders =
+      headers.timestamp !== null && headers.nonce !== null && headers.signature !== null;
+    if (hasAnySignatureHeader && !hasCompleteSignatureHeaders) {
       return { ok: false, reason: "invalid_signature" };
     }
-    const expectedSignature = await sha256Hex(
-      `${headers.timestamp}${headers.nonce}${config.encryptKey}${JSON.stringify(outer)}`
-    );
-    if (!timingSafeEqual(headers.signature, expectedSignature)) {
-      return { ok: false, reason: "invalid_signature" };
+    if (hasCompleteSignatureHeaders) {
+      const expectedSignature = await sha256Hex(
+        `${headers.timestamp!}${headers.nonce!}${config.encryptKey}${JSON.stringify(outer)}`
+      );
+      if (!timingSafeEqual(headers.signature!, expectedSignature)) {
+        return { ok: false, reason: "invalid_signature" };
+      }
     }
     try {
       const decrypted = JSON.parse(await decryptFeishuPayload(encryptValue, config.encryptKey));
@@ -109,6 +115,11 @@ export async function verifyFeishuPayload(
       const payload = { ...outer, ...decrypted };
       if (!timingSafeEqual(tokenFromPayload(payload) ?? "", config.verificationToken)) {
         return { ok: false, reason: "invalid_token" };
+      }
+      // Feishu URL verification encrypts the challenge but does not include the
+      // event-signature headers. Normal encrypted traffic must remain signed.
+      if (!hasCompleteSignatureHeaders && payload.type !== "url_verification") {
+        return { ok: false, reason: "invalid_signature" };
       }
       return { ok: true, payload, encrypted: true };
     } catch {

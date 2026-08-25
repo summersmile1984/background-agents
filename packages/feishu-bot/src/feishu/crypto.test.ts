@@ -76,6 +76,44 @@ describe("verifyFeishuPayload", () => {
     expect(result).toMatchObject({ ok: true, encrypted: true });
   });
 
+  it("accepts an encrypted URL-verification challenge without signature headers", async () => {
+    const outer = {
+      encrypt: await encryptPayload({
+        type: "url_verification",
+        token: TOKEN,
+        challenge: "encrypted-challenge",
+      }),
+    };
+
+    const result = await verifyFeishuPayload(
+      JSON.stringify(outer),
+      { timestamp: null, nonce: null, signature: null },
+      { verificationToken: TOKEN, encryptKey: ENCRYPT_KEY }
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      encrypted: true,
+      payload: { challenge: "encrypted-challenge" },
+    });
+  });
+
+  it("rejects an unsigned encrypted event", async () => {
+    const outer = {
+      encrypt: await encryptPayload({
+        header: { token: TOKEN, event_type: "im.message.receive_v1" },
+      }),
+    };
+
+    const result = await verifyFeishuPayload(
+      JSON.stringify(outer),
+      { timestamp: null, nonce: null, signature: null },
+      { verificationToken: TOKEN, encryptKey: ENCRYPT_KEY }
+    );
+
+    expect(result).toEqual({ ok: false, reason: "invalid_signature" });
+  });
+
   it("rejects an encrypted envelope with a forged signature", async () => {
     const outer = { encrypt: await encryptPayload({ header: { token: TOKEN } }) };
     const result = await verifyFeishuPayload(
