@@ -7,6 +7,8 @@ image=${CUBE_IMAGE:-localhost:5000/oi-e2b:latest}
 template_alias=${CUBE_TEMPLATE_ALIAS:-oi-e2b-multi-harness}
 writable_layer_size=${CUBE_WRITABLE_LAYER_SIZE:-4G}
 dns_server=${CUBE_DNS_SERVER:-119.29.29.29}
+template_cpu_millicores=${CUBE_TEMPLATE_CPU_MILLICORES:-4000}
+template_memory_mb=${CUBE_TEMPLATE_MEMORY_MB:-8192}
 build_dir=$(mktemp -d /tmp/open-inspect-cube-build.XXXXXX)
 
 cleanup() {
@@ -30,6 +32,8 @@ cubemastercli tpl create-from-image \
   --alias "$template_alias" \
   --writable-layer-size "$writable_layer_size" \
   --dns "$dns_server" \
+  --cpu "$template_cpu_millicores" \
+  --memory "$template_memory_mb" \
   --expose-port 49999 \
   --expose-port 49983 \
   --probe 49999

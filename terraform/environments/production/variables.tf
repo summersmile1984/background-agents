@@ -632,6 +632,32 @@ variable "e2b_build_template" {
   default     = true
 }
 
+variable "e2b_template_cpu" {
+  description = "vCPU count assigned to each sandbox created from the Terraform-managed E2B template"
+  type        = number
+  default     = 4
+
+  validation {
+    condition     = var.e2b_template_cpu > 0 && floor(var.e2b_template_cpu) == var.e2b_template_cpu
+    error_message = "e2b_template_cpu must be a positive integer."
+  }
+}
+
+variable "e2b_template_memory_mb" {
+  description = "Memory in MB assigned to each sandbox created from the Terraform-managed E2B template"
+  type        = number
+  default     = 8192
+
+  validation {
+    condition = (
+      var.e2b_template_memory_mb > 0 &&
+      floor(var.e2b_template_memory_mb) == var.e2b_template_memory_mb &&
+      var.e2b_template_memory_mb % 2 == 0
+    )
+    error_message = "e2b_template_memory_mb must be a positive even integer."
+  }
+}
+
 variable "e2b_sandbox_timeout_seconds" {
   description = "Sandbox TTL in seconds. Default assumes a paid E2B plan. Hobby caps TTL at 3600 — set 3300."
   type        = number

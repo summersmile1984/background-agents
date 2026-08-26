@@ -115,6 +115,8 @@ e2b_api_key = ""               # sensitive — runtime REST API key (also auths 
 e2b_template_id = ""           # e.g., "open-inspect-sandbox"
 # e2b_api_url = "https://api.e2b.app"
 # e2b_build_template = true      # set false for a self-hosted API with a prebuilt template
+# e2b_template_cpu = 4           # default: 4 vCPU per sandbox
+# e2b_template_memory_mb = 8192  # default: 8 GiB RAM per sandbox
 # Sandbox TTL. Default 7200 (paid plans); on a plan with a ~1h cap, set 3300.
 # e2b_sandbox_timeout_seconds = 3300
 # Auto-pause makes a lapsed TTL recoverable (pause, not kill) and auto-resumes the
