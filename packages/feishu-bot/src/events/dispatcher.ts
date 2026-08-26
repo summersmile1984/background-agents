@@ -1,15 +1,21 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
 import { buildConnectionPickerCard, buildSessionListCard, buildWorkingCard } from "../cards";
 import {
+  clearThreadSession,
   listConversationSessions,
   lookupThreadSession,
   storePendingRequest,
   storeThreadSession,
   type FeishuConversationCoordinates,
+  type FeishuThreadSession,
 } from "../conversation/store";
 import { replyFeishuCard, sendFeishuCard, sendFeishuText } from "../feishu/client";
 import { createLogger } from "../logger";
-import { createSession, sendPrompt } from "../sessions/control-plane-client";
+import {
+  createSession,
+  defaultHarnessForModel,
+  sendPrompt,
+} from "../sessions/control-plane-client";
 import {
   findRepositoryTarget,
   inferRepositoryTarget,
@@ -49,6 +55,17 @@ function isSessionListRequest(content: string): boolean {
   );
 }
 
+/**
+ * A Feishu root message identifies the conversation, not a stable runtime
+ * configuration. Reusing a session after the deployment model or harness has
+ * changed can send a native model to the old harness. Missing `harness` means
+ * the mapping predates the native-harness rollout, so starting clean is safer
+ * than guessing how it was launched.
+ */
+export function canReuseThreadSession(existing: FeishuThreadSession, model: string): boolean {
+  return existing.model === model && existing.harness === defaultHarnessForModel(model);
+}
+
 async function deliverFollowUp(input: {
   env: Env;
   coordinates: FeishuConversationCoordinates;
@@ -58,6 +75,10 @@ async function deliverFollowUp(input: {
 }): Promise<boolean> {
   const existing = await lookupThreadSession(input.env, input.coordinates);
   if (!existing) return false;
+  if (!canReuseThreadSession(existing, input.env.DEFAULT_MODEL)) {
+    await clearThreadSession(input.env, input.coordinates);
+    return false;
+  }
   if (existing.actorId !== input.actor) {
     await sendFeishuText(
       input.env,
@@ -84,13 +105,11 @@ async function deliverFollowUp(input: {
     traceId: input.traceId,
   });
   if (!result.ok) {
-    await sendFeishuText(
-      input.env,
-      input.coordinates.chatId,
-      result.reason === "stale"
-        ? "该会话已不可继续，请新建会话。"
-        : "暂时无法发送后续请求，请稍后重试。"
-    );
+    if (result.reason === "stale") {
+      await clearThreadSession(input.env, input.coordinates);
+      return false;
+    }
+    await sendFeishuText(input.env, input.coordinates.chatId, "暂时无法发送后续请求，请稍后重试。");
   }
   return true;
 }
@@ -239,6 +258,7 @@ export async function startNewSession(input: {
     repositoryKey: target.repositoryKey,
     targetLabel: target.fullName,
     model,
+    harness: defaultHarnessForModel(model),
     actorId: input.actor,
     createdAt: Date.now(),
     lastMessageId: input.coordinates.rootMessageId,
