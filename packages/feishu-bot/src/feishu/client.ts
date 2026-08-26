@@ -73,7 +73,10 @@ async function sendAuthenticated(
   });
   const parsed = createMessageResponseSchema.safeParse(await response.json().catch(() => null));
   if (!response.ok || !parsed.success || parsed.data.code !== 0) {
-    throw new Error("Feishu message request failed");
+    const apiDetail = parsed.success
+      ? `code=${parsed.data.code}, msg=${(parsed.data.msg || "unknown").slice(0, 200)}`
+      : "invalid_response";
+    throw new Error(`Feishu message request failed (http_status=${response.status}, ${apiDetail})`);
   }
   return parsed.data.data?.message_id;
 }
@@ -113,6 +116,21 @@ export async function replyFeishuCard(
     {
       msg_type: "interactive",
       content: JSON.stringify(card),
+    }
+  );
+}
+
+export async function replyFeishuText(
+  env: Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">,
+  messageId: string,
+  text: string
+): Promise<string | undefined> {
+  return sendAuthenticated(
+    env,
+    `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
+    {
+      msg_type: "text",
+      content: JSON.stringify({ text }),
     }
   );
 }

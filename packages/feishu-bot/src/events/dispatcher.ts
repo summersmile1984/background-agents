@@ -9,7 +9,7 @@ import {
   type FeishuConversationCoordinates,
   type FeishuThreadSession,
 } from "../conversation/store";
-import { replyFeishuCard, sendFeishuCard, sendFeishuText } from "../feishu/client";
+import { replyFeishuCard, replyFeishuText, sendFeishuCard, sendFeishuText } from "../feishu/client";
 import { createLogger } from "../logger";
 import {
   createSession,
@@ -124,7 +124,8 @@ export async function handleFeishuEvent(
   const message = payload.event?.message;
   const coordinates = messageCoordinates(payload);
   const openId = sender?.sender_id?.open_id;
-  if (!coordinates || !openId || sender?.sender_type === "app") return;
+  const messageId = message?.message_id;
+  if (!coordinates || !messageId || !openId || sender?.sender_type === "app") return;
   if (message?.message_type !== "text") {
     await sendFeishuText(
       env,
@@ -148,47 +149,93 @@ export async function handleFeishuEvent(
     await sendFeishuText(env, coordinates.chatId, "请在消息中写下要完成的开发任务。");
     return;
   }
-  const actor = actorId(coordinates.tenantKey, openId);
-  if (!message.root_id && isSessionListRequest(content)) {
-    const sessions = await listConversationSessions(env, { ...coordinates, actorId: actor });
-    await sendFeishuCard(
-      env,
-      coordinates.chatId,
-      buildSessionListCard({ sessions, webAppUrl: env.WEB_APP_URL })
-    );
-    return;
-  }
-  if (await deliverFollowUp({ env, coordinates, actor, content, traceId })) return;
 
-  const catalog = await listRepositoryCatalog(env, traceId);
-  const { targets } = catalog;
-  const inferred = inferRepositoryTarget(targets, content);
-  if (!inferred) {
-    if (targets.length === 0) {
-      await sendFeishuText(
+  try {
+    await replyFeishuText(
+      env,
+      messageId,
+      "已收到，正在工作中。需要选择仓库时，我会继续发送选择卡片。"
+    );
+    log.info("message.receipt_sent", {
+      trace_id: traceId,
+      tenant_key: coordinates.tenantKey,
+      chat_id: coordinates.chatId,
+      message_id: messageId,
+    });
+  } catch (error) {
+    // A receipt improves perceived responsiveness, but its failure must not
+    // prevent the actual task from being processed.
+    log.warn("message.receipt_failed", {
+      trace_id: traceId,
+      tenant_key: coordinates.tenantKey,
+      chat_id: coordinates.chatId,
+      message_id: messageId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+  }
+
+  const actor = actorId(coordinates.tenantKey, openId);
+  try {
+    if (!message.root_id && isSessionListRequest(content)) {
+      const sessions = await listConversationSessions(env, { ...coordinates, actorId: actor });
+      await sendFeishuCard(
         env,
         coordinates.chatId,
-        "当前没有可用仓库。请在 Open-Inspect 设置中检查 GitHub/Gitea connection。 "
+        buildSessionListCard({ sessions, webAppUrl: env.WEB_APP_URL })
       );
       return;
     }
-    const pendingId = await storePendingRequest(env, { ...coordinates, actorId: actor, content });
-    await replyFeishuCard(
+    if (await deliverFollowUp({ env, coordinates, actor, content, traceId })) return;
+
+    const catalog = await listRepositoryCatalog(env, traceId);
+    const { targets } = catalog;
+    const inferred = inferRepositoryTarget(targets, content);
+    if (!inferred) {
+      if (targets.length === 0) {
+        await sendFeishuText(
+          env,
+          coordinates.chatId,
+          "当前没有可用仓库。请在 Open-Inspect 设置中检查 GitHub/Gitea connection。 "
+        );
+        return;
+      }
+      const pendingId = await storePendingRequest(env, { ...coordinates, actorId: actor, content });
+      await replyFeishuCard(
+        env,
+        coordinates.rootMessageId,
+        buildConnectionPickerCard({ pendingId, connections: catalog.connections })
+      );
+      return;
+    }
+    await startNewSession({
       env,
-      coordinates.rootMessageId,
-      buildConnectionPickerCard({ pendingId, connections: catalog.connections })
-    );
-    return;
+      coordinates,
+      actor,
+      content,
+      targetKey: inferred.repositoryKey,
+      traceId,
+      targets,
+    });
+  } catch (error) {
+    log.error("message.processing_failed", {
+      trace_id: traceId,
+      tenant_key: coordinates.tenantKey,
+      chat_id: coordinates.chatId,
+      message_id: messageId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+    await replyFeishuText(
+      env,
+      messageId,
+      "消息已收到，但后续处理暂时失败。请稍后重试；如果仍失败，请检查代码源连接。"
+    ).catch((replyError) => {
+      log.error("message.failure_reply_failed", {
+        trace_id: traceId,
+        message_id: messageId,
+        error: replyError instanceof Error ? replyError : new Error(String(replyError)),
+      });
+    });
   }
-  await startNewSession({
-    env,
-    coordinates,
-    actor,
-    content,
-    targetKey: inferred.repositoryKey,
-    traceId,
-    targets,
-  });
 }
 
 export async function startNewSession(input: {
