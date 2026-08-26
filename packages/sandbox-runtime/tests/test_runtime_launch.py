@@ -70,6 +70,39 @@ def test_validates_and_materializes_authoritative_runtime_environment():
     assert environment["OI_RUNTIME_LAUNCH_DIGEST"] == "a" * 64
 
 
+def test_accepts_provider_split_model_from_sandbox_session_config():
+    """The control plane sends provider and bare model as separate fields."""
+    spec = launch_spec()
+    environment: dict[str, str] = {}
+
+    validate_runtime_launch(
+        {
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "launch_spec": spec,
+        },
+        environment,
+        expected_harness=AgentHarness.CODEX,
+    )
+
+    assert environment["OI_RUNTIME_MODEL"] == "openai/gpt-5.6-luna"
+
+
+def test_rejects_provider_split_model_that_differs_from_launch_spec():
+    spec = launch_spec()
+
+    with pytest.raises(ValueError, match="does not match session model"):
+        validate_runtime_launch(
+            {
+                "provider": "openai",
+                "model": "gpt-5.6-luna-fast",
+                "launch_spec": spec,
+            },
+            {},
+            expected_harness=AgentHarness.CODEX,
+        )
+
+
 def test_materializes_validated_claude_setting_for_the_native_driver():
     spec = launch_spec()
     spec["runtime"].update(
