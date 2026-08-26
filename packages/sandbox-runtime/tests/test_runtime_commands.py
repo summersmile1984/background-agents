@@ -14,14 +14,16 @@ def test_installs_supported_scripts_as_executable_commands(tmp_path: Path) -> No
     source.mkdir()
     (source / "upload-media.js").write_text("#!/usr/bin/env node\n// upload cli")
     (source / "oi-git-sign").write_text("#!/bin/sh\n# signer launcher")
+    (source / "oi-visual-verify").write_text("#!/usr/bin/env python3\n# verifier launcher")
     destination = tmp_path / "installed"
 
     installed = install_runtime_commands(source, destination)
 
-    assert installed == {"oi-git-sign", "upload-media"}
+    assert installed == {"oi-git-sign", "oi-visual-verify", "upload-media"}
     assert (destination / "upload-media").read_text() == ("#!/usr/bin/env node\n// upload cli")
     assert (destination / "upload-media").stat().st_mode & 0o755
     assert (destination / "oi-git-sign").stat().st_mode & 0o755
+    assert (destination / "oi-visual-verify").stat().st_mode & 0o755
 
 
 def test_accepts_identical_preinstalled_executable_without_copying(tmp_path: Path) -> None:

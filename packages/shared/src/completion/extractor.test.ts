@@ -6,6 +6,29 @@ import {
   toEventArtifactInfo,
   type ControlPlaneFetcher,
 } from "./extractor";
+import type { VisualVerificationReport } from "../types/visual-verification";
+
+function passedVisualVerification(messageId = "msg-1"): VisualVerificationReport {
+  return {
+    version: 1,
+    messageId,
+    status: "passed",
+    startedAt: "2026-08-27T00:00:00.000Z",
+    finishedAt: "2026-08-27T00:00:01.000Z",
+    scenarios: [
+      {
+        id: "home",
+        status: "passed",
+        source: "service:web/",
+        viewport: { width: 800, height: 600 },
+        assertions: [{ kind: "visible", status: "passed", selector: "main" }],
+        artifactIds: ["capture-1"],
+        durationMs: 1000,
+      },
+    ],
+    failure: null,
+  };
+}
 
 describe("completion artifact type narrowing", () => {
   it("recognizes video artifacts", () => {
@@ -230,6 +253,42 @@ describe("buildAgentResponseFromEvents", () => {
         { defaultSuccess: true }
       ).success
     ).toBe(false);
+  });
+
+  it("attaches the last valid message-scoped visual verification report", () => {
+    const report = passedVisualVerification();
+    const response = buildAgentResponseFromEvents([
+      {
+        id: "verify:1",
+        type: "visual_verification",
+        data: { requestDigest: "a".repeat(64), report },
+        messageId: "msg-1",
+        createdAt: 10,
+      },
+      {
+        id: "complete:1",
+        type: "execution_complete",
+        data: { success: true },
+        messageId: "msg-1",
+        createdAt: 20,
+      },
+    ]);
+
+    expect(response.visualVerification).toEqual(report);
+  });
+
+  it("ignores a visual report whose prompt identity does not match the event", () => {
+    const response = buildAgentResponseFromEvents([
+      {
+        id: "verify:1",
+        type: "visual_verification",
+        data: { requestDigest: "a".repeat(64), report: passedVisualVerification("other-message") },
+        messageId: "msg-1",
+        createdAt: 10,
+      },
+    ]);
+
+    expect(response.visualVerification).toBeUndefined();
   });
 
   it("prefers message-scoped artifact events over supplied session artifacts", () => {

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import socket
 from pathlib import Path
@@ -19,7 +20,12 @@ class Log:
 
 
 def manager(tmp_path: Path) -> DevServiceManager:
-    return DevServiceManager(workspace_path=tmp_path, log=Log(), warn=lambda *_args: None)
+    return DevServiceManager(
+        sandbox_id="sandbox-test",
+        workspace_path=tmp_path,
+        log=Log(),
+        warn=lambda *_args: None,
+    )
 
 
 def test_postgres_command_runs_as_current_user_when_unprivileged(
@@ -78,6 +84,7 @@ services:
     )
     warnings: list[tuple[str, str]] = []
     manager = DevServiceManager(
+        sandbox_id="sandbox-test",
         workspace_path=workspace,
         log=Log(),
         warn=lambda scope, message: warnings.append((scope, message)),
@@ -89,6 +96,12 @@ services:
         assert os.environ["OPENINSPECT_SERVICE_WEB_PORT"] == str(port)
         assert os.environ["OPENINSPECT_SERVICE_WEB_URL"] == f"http://127.0.0.1:{port}"
         assert DEV_SERVICE_METADATA_PATH.exists()
+        metadata = json.loads(DEV_SERVICE_METADATA_PATH.read_text())
+        assert metadata["version"] == 1
+        assert metadata["sandboxId"] == "sandbox-test"
+        assert metadata["services"][0]["primaryUrl"] == f"http://127.0.0.1:{port}"
+        assert metadata["services"][0]["ports"] == [port]
+        assert DEV_SERVICE_METADATA_PATH.stat().st_mode & 0o777 == 0o600
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.close()
         await writer.wait_closed()
@@ -112,6 +125,7 @@ async def test_invalid_manifest_warns_without_failing_sandbox(tmp_path: Path):
     (manifest_dir / "environment.yaml").write_text("version: 99\n")
     warnings: list[tuple[str, str]] = []
     manager = DevServiceManager(
+        sandbox_id="sandbox-test",
         workspace_path=workspace,
         log=Log(),
         warn=lambda scope, message: warnings.append((scope, message)),

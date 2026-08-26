@@ -16,6 +16,7 @@ import type {
 import { listArtifactsResponseSchema } from "../types/artifacts";
 import type { EventResponse } from "../types/sandbox-events";
 import { listEventsResponseSchema } from "../types/sandbox-events";
+import { visualVerificationReportSchema } from "../types/visual-verification";
 import type { Logger } from "../logger";
 import {
   buildOutboundAuthHeaders,
@@ -209,6 +210,15 @@ export function buildAgentResponseFromEvents(
   }
 
   const completionEvent = findLastEvent(chronologicalEvents, "execution_complete");
+  const verificationEvent = findLastEvent(chronologicalEvents, "visual_verification");
+  const parsedVerification = verificationEvent
+    ? visualVerificationReportSchema.safeParse(verificationEvent.data.report)
+    : null;
+  const visualVerification =
+    parsedVerification?.success &&
+    parsedVerification.data.messageId === verificationEvent?.messageId
+      ? parsedVerification.data
+      : undefined;
   const errorEvent = findLastEvent(chronologicalEvents, "error");
   const errorMessage =
     (completionEvent?.data.error != null ? String(completionEvent.data.error) : undefined) ??
@@ -223,6 +233,7 @@ export function buildAgentResponseFromEvents(
     toolCalls,
     artifacts: eventArtifacts.length > 0 ? eventArtifacts : artifacts,
     mediaArtifacts,
+    ...(visualVerification ? { visualVerification } : {}),
     success,
     error: errorMessage,
   };

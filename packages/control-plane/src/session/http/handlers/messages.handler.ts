@@ -12,6 +12,7 @@ import {
   PromptQueueFullError,
   PromptRequestConflictError,
   SessionNotPromptableError,
+  VisualVerificationUnavailableError,
 } from "../../message-queue";
 
 /**
@@ -59,6 +60,12 @@ export function createMessagesHandler(deps: MessagesHandlerDeps): MessagesHandle
         if (error instanceof PromptRequestConflictError) {
           return Response.json(
             { error: error.message, code: "PROMPT_REQUEST_CONFLICT" },
+            { status: 409 }
+          );
+        }
+        if (error instanceof VisualVerificationUnavailableError) {
+          return Response.json(
+            { error: error.message, code: "VISUAL_VERIFICATION_UNAVAILABLE" },
             { status: 409 }
           );
         }

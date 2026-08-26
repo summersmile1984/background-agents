@@ -138,6 +138,7 @@ async function handleSessionPrompt(
     reasoningEffort: body.reasoningEffort,
     attachments,
     callbackContext,
+    visualVerification: body.visualVerification,
     scmEnrichment: enrichment
       ? {
           userId: enrichment.scmUserId,

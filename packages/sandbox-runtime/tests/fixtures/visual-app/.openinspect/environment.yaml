@@ -1,0 +1,7 @@
+version: 1
+services:
+  processes:
+    - name: web
+      command: python3 app.py --host 127.0.0.1 --port 4173
+      ports: [4173]
+      ready_timeout_seconds: 10

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { VisualVerificationReport } from "./visual-verification";
 
 export const artifactTypeSchema = z.enum(["pr", "screenshot", "video", "preview", "branch"]);
 export type ArtifactType = z.infer<typeof artifactTypeSchema>;
@@ -183,6 +184,8 @@ export interface AgentResponse {
   toolCalls: ToolCallSummary[];
   artifacts: ArtifactInfo[];
   mediaArtifacts: MediaArtifactInfo[];
+  /** Canonical prompt-scoped browser verification outcome, when requested. */
+  visualVerification?: VisualVerificationReport;
   success: boolean;
   error?: string;
 }

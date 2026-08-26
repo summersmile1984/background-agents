@@ -27,4 +27,15 @@ describe("prompt request identity", () => {
     );
     expect(changed.clientRequestId).toBe("request-2");
   });
+
+  it("treats visual verification as part of prompt identity", () => {
+    const base = {
+      content: "Follow up",
+      model: "model-1",
+      attachmentIds: [] as string[],
+    };
+    expect(promptRequestSignature(base)).not.toBe(
+      promptRequestSignature({ ...base, visualVerificationRequested: true })
+    );
+  });
 });

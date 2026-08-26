@@ -8,15 +8,16 @@ description: Verify application UI changes with uploaded screenshot or video art
 Use this skill when the goal is to verify UI changes inside the application and return visual
 evidence in the Open-Inspect session.
 
-`agent-browser` remains the low-level browser tool. This skill defines the workflow contract for
-using it reliably.
+`oi-visual-verify` is the canonical runtime-owned verifier for OpenCode, Codex, Claude Code, and
+DeepSeek. It resolves supervised services, constrains browser networking, evaluates declared
+assertions, captures a screenshot, uploads it in the active prompt, and returns one JSON report.
+`agent-browser` remains available only for exploratory/manual work.
 
 ## Key Fact
 
-Prefer the `open_inspect/upload_media` MCP tool when it is advertised. It keeps the session
-credential outside harness shell commands. If that tool is unavailable, run the `upload-media`
-**bash command** installed on PATH. For videos, use `agent-browser record` directly, then probe and
-upload the resulting MP4 with the same preferred-MCP/fallback-command rule.
+Only say “visual verification passed” when `oi-visual-verify` returns exit code `0`, report status
+`passed`, and at least one `artifactId`. `failed`, `blocked`, and `not_requested` are not passing
+proof. For open-ended debugging or video capture, use the manual workflow later in this skill.
 
 ## When To Use It
 
@@ -38,15 +39,32 @@ The task is not complete until all of these are true:
 
 ## Required Workflow
 
-1. Open the target page with `agent-browser open`.
-2. If viewport matters, set it explicitly with `agent-browser set viewport <width> <height>`.
-3. Wait for the page to settle before capture.
-4. Choose one of:
-   - Viewport screenshot for above-the-fold or device-specific review
-   - Full-page screenshot for full document review
-   - Video recording for interaction flows, animations, transitions, or multi-step behavior
-5. Upload the capture immediately with matching metadata.
-6. Report the result with the artifact ID and actual capture settings.
+1. Ensure the repository service is declared in `.openinspect/environment.yaml` and is ready.
+2. Prefer repository scenarios in `.openinspect/verification.yaml` when host policy allows them.
+3. Build the request from the active prompt context and pipe it to `oi-visual-verify`.
+4. Parse only the final JSON object; report its status, scenario, viewport, and artifact IDs.
+5. If the command is disabled or blocked, say exactly what remains unverified.
+
+Explicit one-page verification example:
+
+```bash
+jq -nc \
+  --slurpfile prompt /tmp/open-inspect-current-prompt.json \
+  '{version:1,sessionId:$prompt[0].sessionId,messageId:$prompt[0].messageId,
+    adHoc:{service:"web",path:"/",viewport:{width:1440,height:900},capture:"viewport"},
+    reason:"user_requested"}' \
+  | oi-visual-verify
+```
+
+Repository-declared scenario example:
+
+```bash
+jq -nc \
+  --slurpfile prompt /tmp/open-inspect-current-prompt.json \
+  '{version:1,sessionId:$prompt[0].sessionId,messageId:$prompt[0].messageId,
+    scenarioIds:["home-desktop"],reason:"repository_declared"}' \
+  | oi-visual-verify
+```
 
 ## Default Decision Rules
 

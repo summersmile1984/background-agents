@@ -184,6 +184,8 @@ export default function SessionPage() {
     isSubmitting,
     submitError,
     setSubmitError,
+    visualVerificationRequested,
+    setVisualVerificationRequested,
     handleSubmit,
     handleInputValueChange,
     handleKeyDown,
@@ -430,6 +432,9 @@ export default function SessionPage() {
           onValueChange: handleInputValueChange,
           onKeyDown: handleKeyDown,
           onStopExecution: stopExecution,
+          visualVerificationRequested,
+          visualVerificationAvailable: sessionState?.visualVerificationEnabled === true,
+          onVisualVerificationChange: setVisualVerificationRequested,
         }}
         skillSuggestions={skillSuggestions}
         commands={runtimeView?.commands ?? []}

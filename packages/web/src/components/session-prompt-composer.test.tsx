@@ -78,6 +78,9 @@ function ComposerHarness({
         onValueChange: setValue,
         onKeyDown: vi.fn(),
         onStopExecution: vi.fn(),
+        visualVerificationRequested: false,
+        visualVerificationAvailable: true,
+        onVisualVerificationChange: vi.fn(),
       }}
       skillSuggestions={{
         status: "ready",
@@ -199,6 +202,58 @@ describe("SessionPromptComposer", () => {
       "title",
       "The harness is fixed when this session is created. Start a new session to change it."
     );
+  });
+
+  it("offers a per-message visual verification control", async () => {
+    const user = userEvent.setup();
+    const onVisualVerificationChange = vi.fn();
+    const inputRef = { current: null };
+    render(
+      <SessionPromptComposer
+        session={{
+          id: "session-1",
+          status: "active",
+          artifacts: [],
+          agentHarness: "codex",
+          onArchive: vi.fn(),
+          onUnarchive: vi.fn(),
+        }}
+        prompt={{
+          value: "Check the page",
+          isProcessing: false,
+          draftLocked: false,
+          sendBlocked: false,
+          submitError: null,
+          inputRef,
+          onSubmit: vi.fn(),
+          onValueChange: vi.fn(),
+          onKeyDown: vi.fn(),
+          onStopExecution: vi.fn(),
+          visualVerificationRequested: false,
+          visualVerificationAvailable: true,
+          onVisualVerificationChange,
+        }}
+        skillSuggestions={{ status: "ready", skills: [] }}
+        attachments={{
+          items: [],
+          error: null,
+          isUploading: false,
+          onAdd: vi.fn(),
+          onRemove: vi.fn(),
+        }}
+        model={{
+          selectedModel: "model-1",
+          reasoningEffort: undefined,
+          items: [],
+          onModelChange: vi.fn(),
+          onReasoningEffortChange: vi.fn(),
+          liveMutation: { model: true, effort: true },
+        }}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Verify UI and attach screenshots" }));
+    expect(onVisualVerificationChange).toHaveBeenCalledWith(true);
   });
 
   it("offers pinned skills in the follow-up textarea", async () => {

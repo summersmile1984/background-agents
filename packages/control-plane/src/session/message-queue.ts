@@ -15,6 +15,10 @@ import type { SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
 import type { MessageSource } from "@open-inspect/shared/types/sessions";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { MAX_UNFINISHED_PROMPTS } from "@open-inspect/shared/types/prompts";
+import {
+  visualVerificationSelectionSchema,
+  type VisualVerificationSelection,
+} from "@open-inspect/shared/types/visual-verification";
 import { AgentRuntimeSelectionError } from "../agent-runtime/selection";
 import type { ClientInfo } from "../types";
 import type { SourceControlProviderName } from "../source-control";
@@ -43,6 +47,7 @@ import {
   SessionAttachmentError,
   resolveSessionAttachments,
 } from "./session-attachment-resolver";
+import { parsePersistedSandboxSettings } from "../sandbox/settings";
 
 interface PromptMessageData {
   clientRequestId?: string;
@@ -50,6 +55,7 @@ interface PromptMessageData {
   model?: string;
   reasoningEffort?: string;
   attachments?: SessionAttachmentReference[];
+  visualVerification?: VisualVerificationSelection;
 }
 
 interface StopExecutionOptions {
@@ -64,6 +70,7 @@ interface EnqueuePromptCoreData {
   model?: string;
   reasoningEffort?: string;
   attachments?: SessionAttachmentReference[];
+  visualVerification?: VisualVerificationSelection;
   callbackContext?: Record<string, unknown>;
   clientRequestId?: string;
 }
@@ -94,9 +101,21 @@ export class PromptRequestConflictError extends Error {
   }
 }
 
+export class VisualVerificationUnavailableError extends Error {
+  constructor() {
+    super(
+      "Visual verification is disabled for this session; enable it in Sandbox settings and start a new session"
+    );
+    this.name = "VisualVerificationUnavailableError";
+  }
+}
+
 export async function fingerprintWebPrompt(
   participantId: string,
-  data: Pick<PromptMessageData, "content" | "model" | "reasoningEffort" | "attachments">
+  data: Pick<
+    PromptMessageData,
+    "content" | "model" | "reasoningEffort" | "attachments" | "visualVerification"
+  >
 ): Promise<string> {
   const canonicalRequest = JSON.stringify({
     participantId,
@@ -104,8 +123,24 @@ export async function fingerprintWebPrompt(
     model: data.model ?? null,
     reasoningEffort: data.reasoningEffort ?? null,
     attachmentIds: data.attachments?.map((attachment) => attachment.attachmentId) ?? [],
+    visualVerification: data.visualVerification ?? null,
   });
   return hashToken(canonicalRequest);
+}
+
+function parseStoredVisualVerification(
+  value: string | null,
+  log: Logger
+): VisualVerificationSelection | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = visualVerificationSelectionSchema.safeParse(JSON.parse(value));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Fall through to the bounded structured warning below.
+  }
+  log.error("prompt.invalid_stored_visual_verification");
+  return undefined;
 }
 
 export function isPromptableSessionStatus(status: SessionRow["status"]): boolean {
@@ -193,6 +228,7 @@ export class SessionMessageQueue {
         model: data.model,
         reasoningEffort: data.reasoningEffort,
         attachments: data.attachments,
+        visualVerification: data.visualVerification,
         clientRequestId: data.clientRequestId,
       });
     } catch (error) {
@@ -227,6 +263,15 @@ export class SessionMessageQueue {
         this.wsManager.send(ws, {
           type: "error",
           code: "PROMPT_REQUEST_CONFLICT",
+          message: error.message,
+          clientRequestId: data.clientRequestId,
+        });
+        return;
+      }
+      if (error instanceof VisualVerificationUnavailableError) {
+        this.wsManager.send(ws, {
+          type: "error",
+          code: "VISUAL_VERIFICATION_UNAVAILABLE",
           message: error.message,
           clientRequestId: data.clientRequestId,
         });
@@ -378,6 +423,10 @@ export class SessionMessageQueue {
       getDefaultReasoningEffort(resolvedModel);
     const resolvedEffort =
       validateReasoningEffort(resolvedModel, requestedEffort ?? undefined, this.log) ?? undefined;
+    const visualVerification = parseStoredVisualVerification(
+      message.visual_verification ?? null,
+      this.log
+    );
 
     const command: SandboxCommand = {
       type: "prompt",
@@ -392,6 +441,17 @@ export class SessionMessageQueue {
       attachments: parseStoredSessionAttachments(message.attachments, () =>
         this.log.error("prompt.invalid_stored_attachments")
       ),
+      ...(visualVerification
+        ? {
+            visualVerificationRequest: {
+              version: 1 as const,
+              sessionId: session?.id ?? "",
+              messageId: message.id,
+              ...visualVerification,
+              reason: "user_requested" as const,
+            },
+          }
+        : {}),
     };
 
     const claimed = this.messageRepository.startMessageProcessing(
@@ -647,6 +707,7 @@ export class SessionMessageQueue {
       model: data.model,
       reasoningEffort: data.reasoningEffort,
       attachments: data.attachments,
+      visualVerification: data.visualVerification,
       callbackContext: data.callbackContext,
     });
 
@@ -657,6 +718,13 @@ export class SessionMessageQueue {
 
   private async enqueuePromptCore(data: EnqueuePromptCoreData): Promise<EnqueuedPrompt> {
     this.assertPromptableSession();
+    if (
+      data.visualVerification !== undefined &&
+      parsePersistedSandboxSettings(this.repository.getSession()?.sandbox_settings ?? null)
+        .visualVerification?.enabled !== true
+    ) {
+      throw new VisualVerificationUnavailableError();
+    }
     let requestFingerprint: string | undefined;
     if (data.clientRequestId) {
       requestFingerprint = await fingerprintWebPrompt(data.participant.id, data);
@@ -747,6 +815,9 @@ export class SessionMessageQueue {
           model: messageModel,
           reasoningEffort: messageReasoningEffort,
           attachments: attachments ? JSON.stringify(attachments) : null,
+          visualVerification: data.visualVerification
+            ? JSON.stringify(data.visualVerification)
+            : null,
           callbackContext: data.callbackContext ? JSON.stringify(data.callbackContext) : null,
           clientRequestId: data.clientRequestId ?? null,
           requestFingerprint: requestFingerprint ?? null,

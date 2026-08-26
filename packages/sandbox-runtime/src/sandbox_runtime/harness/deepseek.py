@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..deepseek_relay import deepseek_relay_url, session_model
 from ..types import AgentHarness
+from .base import merge_system_instructions, visual_verification_system_instruction
 from .json_rpc import JsonRpcProcess
 from .mcp_config import codewhale_mcp_config
 
@@ -54,6 +55,7 @@ class DeepSeekHarnessDriver:
         self._state_path.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._log = log
         self._environment = dict(environment or os.environ)
+        self._platform_instruction = visual_verification_system_instruction(self._environment)
         relay_url = deepseek_relay_url(self._environment, "openai")
         sandbox_token = self._environment.get("SANDBOX_AUTH_TOKEN", "").strip()
         if not relay_url or not sandbox_token:
@@ -153,6 +155,14 @@ class DeepSeekHarnessDriver:
             raise RuntimeError("CodeWhale thread not initialized")
         self._drain_notifications()
         prompt_text = self._materialize_attachments(prompt)
+        if self._platform_instruction:
+            prompt_text = (
+                merge_system_instructions(
+                    f"<open-inspect-platform>\n{self._platform_instruction}\n</open-inspect-platform>",
+                    prompt_text,
+                )
+                or prompt_text
+            )
         request_task = asyncio.create_task(
             self._rpc.request(
                 "thread/message",

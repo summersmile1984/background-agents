@@ -257,6 +257,75 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
     });
   });
 
+  it("saves the visual verification policy with UI units converted", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") return new Response(JSON.stringify({}), { status: 200 });
+      throw new Error("unexpected fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <SWRConfig
+        value={{
+          provider: () => new Map(),
+          fallback: {
+            [SETTINGS_KEY]: { integrationId: "sandbox", settings: { defaults: {} } },
+          },
+          dedupingInterval: Infinity,
+          revalidateOnFocus: false,
+          revalidateIfStale: false,
+          revalidateOnReconnect: false,
+        }}
+      >
+        <SandboxSettingsPage />
+      </SWRConfig>
+    );
+
+    await user.click(screen.getByRole("switch", { name: "Browser checks and screenshots" }));
+    await user.selectOptions(screen.getByLabelText("Run when"), "declared_ui_changes");
+    await user.selectOptions(screen.getByLabelText("Task result"), "require_pass");
+    await user.clear(screen.getByLabelText("Timeout (seconds)"));
+    await user.type(screen.getByLabelText("Timeout (seconds)"), "90");
+    await user.clear(screen.getByLabelText("Upload limit (MiB)"));
+    await user.type(screen.getByLabelText("Upload limit (MiB)"), "4");
+    await user.type(screen.getByLabelText("Allowed service names"), "web, frontend");
+    await user.click(screen.getByText("Allow repository-declared scenarios"));
+    await user.click(screen.getByText("Save Settings"));
+
+    await waitFor(() => {
+      const init = fetchMock.mock.calls.find(([, request]) => request?.method === "PUT")?.[1];
+      const body = JSON.parse(String(init?.body));
+      expect(body.settings.defaults.visualVerification).toEqual({
+        enabled: true,
+        trigger: "declared_ui_changes",
+        maxScenarios: 3,
+        maxCaptures: 4,
+        timeoutMs: 90_000,
+        maxUploadBytes: 4 * 1024 * 1024,
+        allowedServiceNames: ["web", "frontend"],
+        allowRepositoryDeclaration: true,
+        allowVideo: false,
+        completionBehavior: "require_pass",
+      });
+    });
+  });
+
+  it("rejects invalid visual verification service names", async () => {
+    const { fetchMock } = renderWithSWR({
+      integrationId: "sandbox",
+      settings: { defaults: {} },
+    });
+
+    await user.type(screen.getByLabelText("Allowed service names"), "web, ../admin");
+    await user.click(screen.getByText("Save Settings"));
+
+    expect(screen.getByText(/Visual verification: allowedServiceNames/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      SETTINGS_KEY,
+      expect.objectContaining({ method: "PUT" })
+    );
+  });
+
   it("includes configured code-server, VNC, and terminal ports in the save payload", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "PUT") {
@@ -1180,7 +1249,10 @@ describe("SandboxSettingsEditor — environment scope", () => {
 
     // Inherited values render instead of blanks/false…
     expect(screen.getByPlaceholderText("e.g. 3000")).toHaveValue("3000");
-    expect(screen.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("switch", { name: "Web Terminal" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
     expect(screen.getByLabelText("Image Build Timeout")).toHaveValue(1200);
 
     // …and saving an unrelated edit writes only that edit, never the

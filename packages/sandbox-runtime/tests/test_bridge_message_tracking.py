@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from sandbox_runtime.bridge import AgentBridge
+from sandbox_runtime.harness.base import VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
 from sandbox_runtime.opencode_identifier import OpenCodeIdentifier
 from sandbox_runtime.prompt_stream import _PromptState
 from tests.conftest import wire_opencode_transport
@@ -191,6 +192,16 @@ class TestBuildPromptRequestBody:
         assert body["parts"] == [{"type": "text", "text": "Hello"}]
         assert "model" not in body
         assert "messageID" not in body
+
+    def test_with_visual_verification_system_instruction(self, bridge: AgentBridge):
+        body = bridge._ensure_prompt_stream()._build_prompt_request_body(
+            "Hello",
+            "openai/gpt-5.6",
+            system_instruction=VISUAL_VERIFICATION_SYSTEM_INSTRUCTION,
+        )
+
+        assert body["system"] == VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+        assert body["model"] == {"providerID": "openai", "modelID": "gpt-5.6"}
 
     def test_with_opencode_message_id(self, bridge: AgentBridge):
         """Should include messageID when provided (expects OpenCode format)."""

@@ -17,6 +17,7 @@ import { MAX_WEB_PROMPT_CHARS } from "@open-inspect/shared/types/websocket";
 import type { PromptSkillSuggestionSource } from "@/lib/prompt-skill-completion";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { SessionAgentHarness } from "@/components/agent-harness-selector";
+import { VisualVerificationToggle } from "@/components/visual-verification-toggle";
 import type {
   RuntimeCommandOption,
   RuntimeEffortOption,
@@ -43,6 +44,9 @@ type SessionPromptComposerProps = {
     onValueChange: (value: string) => void;
     onKeyDown: (e: React.KeyboardEvent) => void;
     onStopExecution: () => void;
+    visualVerificationRequested: boolean;
+    visualVerificationAvailable: boolean;
+    onVisualVerificationChange: (checked: boolean) => void;
   };
   skillSuggestions: PromptSkillSuggestionSource;
   commands?: readonly RuntimeCommandOption[];
@@ -238,6 +242,13 @@ export function SessionPromptComposer({
               />
 
               <SessionAgentHarness value={session.agentHarness} />
+
+              <VisualVerificationToggle
+                checked={prompt.visualVerificationRequested}
+                onChange={prompt.onVisualVerificationChange}
+                available={prompt.visualVerificationAvailable}
+                disabled={prompt.draftLocked || !sessionPromptable}
+              />
             </div>
 
             {/* Right side - Agent label */}

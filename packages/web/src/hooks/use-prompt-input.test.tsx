@@ -2,7 +2,7 @@
 /// <reference types="@testing-library/jest-dom" />
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { usePromptInput } from "./use-prompt-input";
 
@@ -42,12 +42,18 @@ function PromptHarness({ canSubmit }: { canSubmit: boolean }) {
   );
 
   return (
-    <textarea
-      aria-label="Prompt"
-      value={prompt.prompt}
-      onChange={prompt.handleInputChange}
-      onKeyDown={prompt.handleKeyDown}
-    />
+    <form onSubmit={prompt.handleSubmit}>
+      <textarea
+        aria-label="Prompt"
+        value={prompt.prompt}
+        onChange={prompt.handleInputChange}
+        onKeyDown={prompt.handleKeyDown}
+      />
+      <button type="button" onClick={() => prompt.setVisualVerificationRequested(true)}>
+        Verify UI
+      </button>
+      <button type="submit">Send</button>
+    </form>
   );
 }
 
@@ -72,5 +78,33 @@ describe("usePromptInput", () => {
 
     expect(mocks.sendPrompt).not.toHaveBeenCalled();
     expect(input).toHaveValue("Draft while connecting");
+  });
+
+  it("sends an explicit visual verification selection and clears it after acknowledgement", async () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("request-1");
+    mocks.sendPrompt.mockResolvedValue({
+      ok: true,
+      clientRequestId: "request-1",
+      messageId: "message-1",
+      position: 1,
+    });
+    render(<PromptHarness canSubmit />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), {
+      target: { value: "Check the responsive layout" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Verify UI" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mocks.sendPrompt).toHaveBeenCalledWith(
+        "Check the responsive layout",
+        "model-1",
+        undefined,
+        undefined,
+        "request-1",
+        {}
+      );
+    });
   });
 });

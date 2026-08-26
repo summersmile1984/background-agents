@@ -12,6 +12,7 @@ import type {
 } from "../slack-blocks";
 import { escapeMrkdwnText, splitIntoSlackSections } from "@open-inspect/shared/slack";
 import type { ManualPullRequestArtifactMetadata } from "@open-inspect/shared/types/artifacts";
+import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
 
 type CompletionSlackBlock = SlackSectionBlock | SlackContextBlock | SlackActionsBlock;
 
@@ -72,6 +73,14 @@ export function buildCompletionBlocks(
     });
   }
 
+  const verificationText = formatVisualVerification(response.visualVerification);
+  if (verificationText) {
+    blocks.push({
+      type: "context",
+      elements: [{ type: "mrkdwn", text: verificationText }],
+    });
+  }
+
   // 4. Status footer
   const emoji = response.success ? STATUS_EMOJI.success : STATUS_EMOJI.warning;
   const status = response.success
@@ -118,6 +127,23 @@ export function buildCompletionBlocks(
   });
 
   return blocks;
+}
+
+function formatVisualVerification(report: VisualVerificationReport | undefined): string | null {
+  if (!report || report.status === "not_requested") return null;
+  if (report.status === "passed") {
+    const artifactCount = report.scenarios.reduce(
+      (total, scenario) => total + scenario.artifactIds.length,
+      0
+    );
+    return `:white_check_mark: Visual verification passed · ${report.scenarios.length} scenario${report.scenarios.length === 1 ? "" : "s"} · ${artifactCount} capture${artifactCount === 1 ? "" : "s"}`;
+  }
+  const detail = report.failure?.message
+    ? `: ${truncateError(report.failure.message, ERROR_FOOTER_LIMIT)}`
+    : "";
+  return report.status === "failed"
+    ? `:x: Visual verification failed${detail}`
+    : `:warning: Visual verification blocked${detail}`;
 }
 
 /**

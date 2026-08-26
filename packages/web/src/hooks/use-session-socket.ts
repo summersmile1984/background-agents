@@ -14,6 +14,7 @@ import { createSessionSocketState, sessionSocketReducer } from "@/lib/session-so
 import { swrKeysToRevalidate } from "@/lib/session-socket/swr-revalidation";
 import type { Artifact, SandboxEvent } from "@/types/session";
 import type { SessionAttachmentReference } from "@open-inspect/shared/types/session-attachments";
+import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import type {
   ParticipantPresence,
   PromptQueueItem,
@@ -60,7 +61,8 @@ interface UseSessionSocketReturn {
     model?: string,
     reasoningEffort?: string,
     attachments?: SessionAttachmentReference[],
-    clientRequestId?: string
+    clientRequestId?: string,
+    visualVerification?: VisualVerificationSelection
   ) => Promise<QueuePromptResult>;
   cancelPrompt: (messageId: string) => Promise<CancelPromptResult>;
   stopExecution: () => void;
@@ -272,7 +274,8 @@ export function useSessionSocket(
       model?: string,
       reasoningEffort?: string,
       attachments?: SessionAttachmentReference[],
-      requestedClientRequestId?: string
+      requestedClientRequestId?: string,
+      visualVerification?: VisualVerificationSelection
     ): Promise<QueuePromptResult> => {
       if (!isOpen()) {
         console.error("WebSocket not connected");
@@ -299,6 +302,7 @@ export function useSessionSocket(
         model,
         reasoningEffort,
         attachmentsCount: attachments?.length ?? 0,
+        visualVerification: visualVerification !== undefined,
       });
 
       // Note: user_message event is NOT inserted optimistically here.
@@ -334,6 +338,7 @@ export function useSessionSocket(
           model, // Include model for per-message model switching
           reasoningEffort,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(visualVerification ? { visualVerification } : {}),
         });
       });
     },

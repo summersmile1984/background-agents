@@ -5,6 +5,7 @@ import {
   DEFAULT_VNC_PORT,
   INTERNAL_TTYD_PORT,
 } from "@open-inspect/shared/types/integrations";
+import { DEFAULT_VISUAL_VERIFICATION_POLICY } from "@open-inspect/shared/types/visual-verification";
 import {
   normalizeSandboxSettings,
   parsePersistedSandboxSettings,
@@ -211,5 +212,46 @@ describe("normalizeSandboxSettings", () => {
     ).toEqual({
       tunnelPorts: [3000],
     });
+  });
+
+  it("accepts a complete visual verification host policy", () => {
+    const policy = {
+      ...DEFAULT_VISUAL_VERIFICATION_POLICY,
+      enabled: true,
+      allowedServiceNames: ["web"],
+    };
+
+    expect(normalizeSandboxSettings({ visualVerification: policy })).toEqual({
+      visualVerification: policy,
+    });
+  });
+
+  it("rejects partial or unbounded visual verification policies", () => {
+    expect(() => normalizeSandboxSettings({ visualVerification: { enabled: true } })).toThrow(
+      SandboxSettingsValidationError
+    );
+    expect(() =>
+      normalizeSandboxSettings({
+        visualVerification: {
+          ...DEFAULT_VISUAL_VERIFICATION_POLICY,
+          maxScenarios: 99,
+        },
+      })
+    ).toThrow(SandboxSettingsValidationError);
+  });
+
+  it("drops an invalid stored visual verification policy atomically", () => {
+    expect(
+      normalizeSandboxSettings(
+        {
+          terminalEnabled: true,
+          visualVerification: {
+            ...DEFAULT_VISUAL_VERIFICATION_POLICY,
+            timeoutMs: 999_999,
+          },
+        },
+        { invalid: "omit" }
+      )
+    ).toEqual({ terminalEnabled: true });
   });
 });

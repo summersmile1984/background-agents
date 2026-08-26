@@ -1,10 +1,37 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCompletionCard,
   buildConnectionPickerCard,
   buildRepositoryPickerCard,
   REPOSITORIES_PER_PAGE,
 } from "./cards";
 import type { FeishuRepositoryTarget } from "./targets";
+import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
+
+function visualReport(status: "passed" | "failed" | "blocked"): VisualVerificationReport {
+  return {
+    version: 1,
+    messageId: "message-1",
+    status,
+    startedAt: "2026-08-27T00:00:00.000Z",
+    finishedAt: "2026-08-27T00:00:01.000Z",
+    scenarios:
+      status === "passed"
+        ? [
+            {
+              id: "home",
+              status: "passed",
+              source: "service:web/",
+              viewport: { width: 800, height: 600 },
+              assertions: [],
+              artifactIds: ["capture-1"],
+              durationMs: 1000,
+            },
+          ]
+        : [],
+    failure: status === "passed" ? null : { code: "browser_failed", message: "页面没有成功加载" },
+  };
+}
 
 function target(index: number): FeishuRepositoryTarget {
   return {
@@ -108,4 +135,38 @@ describe("Feishu repository cards", () => {
     expect(serialized.match(/"action":"select_target"/g)).toHaveLength(2);
     expect(serialized).toContain("直接点选仓库，不会唤起手机输入法");
   });
+});
+
+describe("Feishu completion cards", () => {
+  it("shows passed visual verification and screenshot count", () => {
+    const card = buildCompletionCard({
+      sessionId: "session-1",
+      targetLabel: "Gitea · huangdong/chatbi",
+      textContent: "完成",
+      success: true,
+      webAppUrl: "https://inspect.example.com",
+      visualVerification: visualReport("passed"),
+    });
+
+    expect(JSON.stringify(card)).toContain("视觉验证已通过：1 个场景，1 张截图");
+  });
+
+  it.each(["failed", "blocked"] as const)(
+    "does not claim verification passed when the result is %s",
+    (status) => {
+      const serialized = JSON.stringify(
+        buildCompletionCard({
+          sessionId: "session-1",
+          targetLabel: "GitHub · summersmile1984/n9n",
+          textContent: "完成",
+          success: true,
+          webAppUrl: "https://inspect.example.com",
+          visualVerification: visualReport(status),
+        })
+      );
+
+      expect(serialized).toContain("页面没有成功加载");
+      expect(serialized).not.toContain("视觉验证已通过");
+    }
+  );
 });

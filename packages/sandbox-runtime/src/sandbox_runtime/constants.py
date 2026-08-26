@@ -64,3 +64,13 @@ BOOT_WARNINGS_FILE_PATH = "/tmp/oi-boot-warnings.jsonl"
 # layout has a single authority. JSON: {"repositories": [{owner, name, branch,
 # path}]}. Mirrored as a string literal in plugins/inspect-plugin.js.
 REPO_MANIFEST_FILE_PATH = "/tmp/oi-repo-manifest.json"
+
+# Prompt-scoped identity written atomically by the bridge while a harness is
+# running. Runtime-owned commands use it to prevent an agent from accidentally
+# attributing an artifact/report to a different turn.
+PROMPT_CONTEXT_FILE_PATH = "/tmp/open-inspect-current-prompt.json"
+
+# Prompt-scoped canonical visual verification reports. Filenames are SHA-256
+# digests of message IDs; files are owner-only and survive until sandbox exit so
+# repeated wrapper invocations can return the exact persisted outcome.
+VISUAL_VERIFICATION_REPORT_DIR_PATH = "/tmp/open-inspect-visual-reports"

@@ -8,7 +8,7 @@ import type { EnabledScopeUnit } from "./scope";
 // v59 carried OpenCode past its message-ID wraparound.
 // MIN_COMPATIBLE_RUNTIME_VERSION remains safe to boot while the scheduler
 // converges prebuilt images in the background.
-export const MIN_REBUILD_RUNTIME_VERSION = 61;
+export const MIN_REBUILD_RUNTIME_VERSION = 62;
 
 export type ImageBuildRebuildDecision =
   | { type: "skip"; reason: "building" }

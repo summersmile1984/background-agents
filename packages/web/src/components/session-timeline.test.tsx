@@ -195,6 +195,82 @@ describe("context compaction", () => {
   });
 });
 
+describe("visual verification", () => {
+  it("renders the persisted result and opens captured media", async () => {
+    const onOpenMedia = vi.fn();
+    render(
+      <EventItem
+        event={{
+          type: "visual_verification",
+          sandboxId: "sandbox-1",
+          messageId: "message-1",
+          timestamp: 1,
+          requestDigest: "a".repeat(64),
+          report: {
+            version: 1,
+            messageId: "message-1",
+            status: "passed",
+            startedAt: "2026-08-27T00:00:00.000Z",
+            finishedAt: "2026-08-27T00:00:01.000Z",
+            scenarios: [
+              {
+                id: "home",
+                status: "passed",
+                source: "service:web/",
+                viewport: { width: 800, height: 600 },
+                assertions: [],
+                artifactIds: ["capture-1"],
+                durationMs: 1000,
+              },
+            ],
+            failure: null,
+          },
+        }}
+        sessionId="session-1"
+        currentParticipantId={null}
+        participantProfiles={{}}
+        onOpenMedia={onOpenMedia}
+      />
+    );
+
+    expect(
+      screen.getByText("Visual verification passed · 1 scenario · 1 capture")
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open capture 1" }));
+    expect(onOpenMedia).toHaveBeenCalledWith("capture-1");
+  });
+
+  it("renders a failed report as a failure rather than a pass", () => {
+    render(
+      <EventItem
+        event={{
+          type: "visual_verification",
+          sandboxId: "sandbox-1",
+          messageId: "message-1",
+          timestamp: 1,
+          requestDigest: "b".repeat(64),
+          report: {
+            version: 1,
+            messageId: "message-1",
+            status: "failed",
+            startedAt: "2026-08-27T00:00:00.000Z",
+            finishedAt: "2026-08-27T00:00:01.000Z",
+            scenarios: [],
+            failure: { code: "assertion_failed", message: "main is hidden" },
+          },
+        }}
+        sessionId="session-1"
+        currentParticipantId={null}
+        participantProfiles={{}}
+        onOpenMedia={() => {}}
+      />
+    );
+
+    expect(screen.getByText("Visual verification failed: main is hidden")).toBeInTheDocument();
+    expect(screen.queryByText(/Visual verification passed/)).not.toBeInTheDocument();
+  });
+});
+
 const baseTimelineProps = {
   sessionId: "session-1",
   currentParticipantId: null,

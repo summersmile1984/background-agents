@@ -148,6 +148,35 @@ class TestSendWhileConnected:
         assert forwarder._pending_acks["execution_complete:msg-1"]["type"] == "execution_complete"
 
     @pytest.mark.asyncio
+    async def test_visual_verification_is_critical_and_reconnect_safe(self):
+        forwarder = make_forwarder()
+        first_ws = open_ws()
+        await forwarder.bind(first_ws)
+
+        await forwarder.send(
+            {
+                "type": "visual_verification",
+                "messageId": "msg-1",
+                "requestDigest": "a" * 64,
+                "report": {"messageId": "msg-1", "status": "passed"},
+            }
+        )
+
+        [event] = sent_events(first_ws)
+        assert event["ackId"] == "visual_verification:msg-1"
+        assert forwarder._pending_acks["visual_verification:msg-1"]["type"] == (
+            "visual_verification"
+        )
+
+        forwarder.unbind()
+        replacement_ws = open_ws()
+        await forwarder.bind(replacement_ws)
+
+        [replayed] = sent_events(replacement_ws)
+        assert replayed == event
+        assert forwarder.acknowledge("visual_verification:msg-1") is True
+
+    @pytest.mark.asyncio
     async def test_non_critical_event_has_no_ack_id(self):
         forwarder = make_forwarder()
         ws = open_ws()

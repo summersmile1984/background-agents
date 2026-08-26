@@ -11,7 +11,13 @@ import type { EventRow } from "./types";
 type TokenEvent = Extract<SandboxEvent, { type: "token" }>;
 type ToolCallEvent = Extract<SandboxEvent, { type: "tool_call" }>;
 type ExecutionCompleteEvent = Extract<SandboxEvent, { type: "execution_complete" }>;
-type UpsertableEventType = TokenEvent["type"] | ExecutionCompleteEvent["type"];
+type VisualVerificationEvent = Extract<SandboxEvent, { type: "visual_verification" }>;
+type UpsertableEventType =
+  | TokenEvent["type"]
+  | ExecutionCompleteEvent["type"]
+  | VisualVerificationEvent["type"];
+
+export type VisualVerificationRecordResult = "inserted" | "replayed" | "conflict";
 
 const NEXT_TIMELINE_SEQUENCE_SQL = "(SELECT COALESCE(MAX(timeline_sequence), 0) + 1 FROM events)";
 
@@ -128,6 +134,38 @@ export class EventRepository {
     createdAt: number
   ): void {
     this.upsertEventByMessageId("execution_complete", messageId, event, createdAt);
+  }
+
+  /**
+   * Persist exactly one verification result per message. Identical request
+   * digests are acknowledged as replays without replacing the first report;
+   * a different digest is a conflict and is never written.
+   */
+  recordVisualVerificationEvent(
+    messageId: string,
+    event: VisualVerificationEvent,
+    createdAt: number
+  ): VisualVerificationRecordResult {
+    return this.transactionSync(() => {
+      const id = `visual_verification:${messageId}`;
+      const existing = this.sql.exec(`SELECT data FROM events WHERE id = ?`, id).one() as {
+        data?: unknown;
+      } | null;
+      if (existing) {
+        try {
+          const parsed =
+            typeof existing.data === "string"
+              ? (JSON.parse(existing.data) as { requestDigest?: unknown })
+              : null;
+          return parsed?.requestDigest === event.requestDigest ? "replayed" : "conflict";
+        } catch {
+          return "conflict";
+        }
+      }
+
+      this.upsertEventByMessageId("visual_verification", messageId, event, createdAt);
+      return "inserted";
+    });
   }
 
   listEventPage(options: ListEventPageOptions): EventPage {

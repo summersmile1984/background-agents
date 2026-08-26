@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { sessionAttachmentReferencesSchema } from "./session-attachments";
+import { visualVerificationSelectionSchema } from "./visual-verification";
 
 export const MAX_WEB_PROMPT_CHARS = 64_000;
 export const MAX_UNFINISHED_PROMPTS = 10;
@@ -22,6 +23,7 @@ export const webPromptPayloadSchema = z
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
     attachments: sessionAttachmentReferencesSchema.optional(),
+    visualVerification: visualVerificationSelectionSchema.optional(),
   })
   .refine((prompt) => !isBlankPrompt(prompt), {
     message: BLANK_PROMPT_MESSAGE,

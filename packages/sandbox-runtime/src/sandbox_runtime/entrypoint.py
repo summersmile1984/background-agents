@@ -56,6 +56,7 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
     if installed_commands:
         log.info("runtime_commands.installed", commands=sorted(installed_commands))
     dev_services = DevServiceManager(
+        sandbox_id=config.sandbox_id,
         workspace_path=config.workspace_path,
         log=log,
         warn=warnings.record,

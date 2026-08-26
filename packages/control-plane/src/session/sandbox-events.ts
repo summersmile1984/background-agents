@@ -28,6 +28,7 @@ const PUSH_TIMEOUT_MS = 360_000;
 /** Event types that require delivery acknowledgement. */
 const CRITICAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   "execution_complete",
+  "visual_verification",
   "error",
   "snapshot_ready",
   "push_complete",
@@ -171,6 +172,32 @@ export class SessionSandboxEventProcessor {
         createdAt: now,
       });
       this.messenger.broadcast({ type: "sandbox_event", event });
+      return;
+    }
+
+    if (event.type === "visual_verification") {
+      if (event.report.messageId !== event.messageId) {
+        this.log.warn("visual_verification.identity_mismatch", {
+          event_message_id: event.messageId,
+          report_message_id: event.report.messageId,
+        });
+        this.sendAck(ackId);
+        return;
+      }
+      const result = this.eventRepository.recordVisualVerificationEvent(
+        event.messageId,
+        event,
+        now
+      );
+      if (result === "conflict") {
+        this.log.warn("visual_verification.request_conflict", {
+          message_id: event.messageId,
+          request_digest: event.requestDigest,
+        });
+      } else if (result === "inserted") {
+        this.messenger.broadcast({ type: "sandbox_event", event });
+      }
+      this.sendAck(ackId);
       return;
     }
 

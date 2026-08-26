@@ -318,4 +318,31 @@ export type {
 
 export { formatGitHubNoreplyEmail, githubLoginSchema } from "./github-identity";
 
+export {
+  VISUAL_VERIFICATION_VERSION,
+  MAX_VISUAL_VERIFICATION_SCENARIOS,
+  MAX_VISUAL_VERIFICATION_CAPTURES,
+  MAX_VISUAL_VERIFICATION_TIMEOUT_MS,
+  MAX_VISUAL_VERIFICATION_UPLOAD_BYTES,
+  DEFAULT_VISUAL_VERIFICATION_POLICY,
+  visualVerificationViewportSchema,
+  visualVerificationAdHocSchema,
+  visualVerificationRequestSchema,
+  visualVerificationPolicySchema,
+  visualVerificationAssertionResultSchema,
+  visualVerificationScenarioReportSchema,
+  visualVerificationFailureSchema,
+  visualVerificationReportSchema,
+} from "./visual-verification";
+export type {
+  VisualVerificationViewport,
+  VisualVerificationAdHoc,
+  VisualVerificationRequest,
+  VisualVerificationPolicy,
+  VisualVerificationAssertionResult,
+  VisualVerificationScenarioReport,
+  VisualVerificationFailure,
+  VisualVerificationReport,
+} from "./visual-verification";
+
 export * from "./integrations";

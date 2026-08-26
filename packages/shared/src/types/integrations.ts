@@ -2,6 +2,7 @@
 
 import { escapeRegExp } from "../regex";
 import { z } from "zod";
+import type { VisualVerificationPolicy } from "./visual-verification";
 
 export type IntegrationId = "github" | "linear" | "code-server" | "vnc" | "sandbox" | "slack";
 
@@ -228,6 +229,8 @@ export interface SandboxSettings {
    * {@link resolveBuildTimeoutSeconds}.
    */
   buildTimeoutSeconds?: number;
+  /** Runtime-owned, harness-independent browser verification policy. */
+  visualVerification?: VisualVerificationPolicy;
 }
 
 /**

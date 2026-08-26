@@ -4,7 +4,10 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sandbox_runtime.harness.base import HarnessPrompt
+from sandbox_runtime.harness.base import (
+    VISUAL_VERIFICATION_SYSTEM_INSTRUCTION,
+    HarnessPrompt,
+)
 from sandbox_runtime.harness.claude import ClaudeHarnessDriver
 from sandbox_runtime.harness.codex import CodexHarnessDriver
 from sandbox_runtime.harness.deepseek import DeepSeekHarnessDriver
@@ -24,6 +27,23 @@ def deepseek_environment(model: str = "deepseek/deepseek-v4-flash") -> dict[str,
         "SANDBOX_AUTH_TOKEN": "sandbox-token",
         "SESSION_CONFIG": json.dumps({"session_id": "session-1", "model": model}),
     }
+
+
+def visual_policy() -> str:
+    return json.dumps(
+        {
+            "enabled": True,
+            "trigger": "explicit_only",
+            "maxScenarios": 3,
+            "maxCaptures": 4,
+            "timeoutMs": 120000,
+            "maxUploadBytes": 10485760,
+            "allowedServiceNames": [],
+            "allowRepositoryDeclaration": False,
+            "allowVideo": False,
+            "completionBehavior": "report_only",
+        }
+    )
 
 
 class FakeRpc:
@@ -156,6 +176,27 @@ async def test_codex_driver_translates_app_server_notifications():
         "CODEX_OPENAI_BASE_URL" in thread_request["config"]["shell_environment_policy"]["exclude"]
     )
     assert "SANDBOX_AUTH_TOKEN" in thread_request["config"]["shell_environment_policy"]["exclude"]
+
+
+async def test_codex_driver_sends_visual_instruction_without_model_prefix_leakage():
+    rpc = FakeRpc()
+    driver = CodexHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment={"OPENINSPECT_VISUAL_VERIFICATION_POLICY": visual_policy()},
+        rpc=rpc,
+    )
+
+    await driver.start()
+    async for _event in driver.stream_prompt(
+        HarnessPrompt(message_id="message-1", content="hello", model="openai/gpt-5.6")
+    ):
+        pass
+
+    thread_request = next(params for method, params in rpc.requests if method == "thread/start")
+    turn_request = next(params for method, params in rpc.requests if method == "turn/start")
+    assert thread_request["developerInstructions"] == VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+    assert turn_request["model"] == "gpt-5.6"
 
 
 def test_codex_driver_configures_https_model_relay():
@@ -356,6 +397,26 @@ def test_claude_driver_forwards_validated_system_prompt_setting():
     assert options.kwargs["effort"] == "high"
 
 
+def test_claude_driver_merges_visual_instruction_with_user_setting():
+    driver = ClaudeHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment={
+            "CLAUDE_CODE_OAUTH_TOKEN": "setup-token",
+            "OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND": "Follow repository conventions.",
+            "OPENINSPECT_VISUAL_VERIFICATION_POLICY": visual_policy(),
+        },
+        query_function=fake_claude_query,
+        options_class=Options,
+    )
+
+    options = driver._build_options(HarnessPrompt(message_id="message-1", content="hello"))
+
+    assert options.kwargs["system_prompt"]["append"] == (
+        "Follow repository conventions.\n\n" + VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+    )
+
+
 class FakeCodeWhaleRpc:
     def __init__(self, *, include_stale_response: bool = False):
         import asyncio
@@ -497,6 +558,38 @@ async def test_deepseek_driver_binds_session_token_to_custom_endpoint(tmp_path):
     assert "sandbox-token" not in command
     assert "must-stay-on-host" not in command
     await driver.close()
+
+
+async def test_deepseek_driver_prepends_bounded_visual_instruction(tmp_path):
+    rpc = FakeCodeWhaleRpc()
+    environment = deepseek_environment()
+    environment["OPENINSPECT_VISUAL_VERIFICATION_POLICY"] = visual_policy()
+    driver = DeepSeekHarnessDriver(
+        workspace_path="/workspace",
+        state_path=tmp_path / "state",
+        log=Log(),
+        environment=environment,
+        mcp_config_path=tmp_path / "mcp.json",
+        rpc=rpc,
+    )
+
+    async for _event in driver.stream_prompt(
+        HarnessPrompt(
+            message_id="message-1",
+            content="hello",
+            model="deepseek/deepseek-v4-flash",
+        )
+    ):
+        pass
+
+    message_request = next(params for method, params in rpc.requests if method == "thread/message")
+    assert message_request["input"] == (
+        "<open-inspect-platform>\n"
+        + VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+        + "\n</open-inspect-platform>\n\nhello"
+    )
+    thread_request = next(params for method, params in rpc.requests if method == "thread/start")
+    assert thread_request["model"] == "deepseek-v4-flash"
 
 
 def test_native_drivers_ignore_models_owned_by_the_other_provider():
