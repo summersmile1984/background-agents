@@ -151,7 +151,6 @@ async def test_start_deploys_xai_plugin_from_marker(tmp_path):
         supervisor._setup_managed_oauth = MagicMock()
         supervisor._install_tools = MagicMock()
         supervisor._install_skills = MagicMock()
-        supervisor._install_bin_scripts = MagicMock()
         supervisor._wait_for_health = AsyncMock()
 
         await supervisor.start((), supervisor.workspace_path)

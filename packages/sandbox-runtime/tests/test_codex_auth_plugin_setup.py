@@ -136,7 +136,6 @@ class TestCodexAuthPluginSetup:
             sup._setup_managed_oauth = MagicMock()
             sup._install_tools = MagicMock()
             sup._install_skills = MagicMock()
-            sup._install_bin_scripts = MagicMock()
             sup._wait_for_health = AsyncMock()
 
             await sup.start((), sup.workspace_path)
