@@ -102,6 +102,10 @@ Template.build(
     template,
     TEMPLATE_ID,
     api_key=API_KEY,
+    # The control plane supports E2B-compatible deployments whose API keys do
+    # not use the hosted `e2b_...` prefix. Let the configured API endpoint
+    # authenticate the key instead of rejecting it client-side.
+    validate_api_key=False,
     cpu_count=CPU,
     memory_mb=MEM,
     # E2B's built-in logger: elapsed-time + level-aligned lines; degrades to
