@@ -22,6 +22,7 @@ from .opencode_server import OpenCodeServer, resolve_opencode_global_config_dir
 from .repository_boot import RepositoryBoot
 from .repository_hooks import RepositoryHooks
 from .repository_sync import RepositorySynchronizer
+from .runtime_commands import install_runtime_commands
 from .runtime_config import RuntimeConfig
 from .runtime_launch import validate_runtime_launch
 from .supervisor import SandboxSupervisor
@@ -51,6 +52,9 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
         expected_harness=config.agent_harness,
     )
     materialize_harness_credentials(os.environ, log, warnings.record, config.agent_harness)
+    installed_commands = install_runtime_commands()
+    if installed_commands:
+        log.info("runtime_commands.installed", commands=sorted(installed_commands))
     dev_services = DevServiceManager(
         workspace_path=config.workspace_path,
         log=log,
