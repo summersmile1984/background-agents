@@ -1,4 +1,5 @@
 import { createKvCacheStore } from "@open-inspect/shared/cache-store";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { z } from "zod";
 import type { Env } from "../types";
 
@@ -17,6 +18,11 @@ export interface FeishuThreadSession {
   repositoryKey: string;
   targetLabel: string;
   model: string;
+  /**
+   * Harness selected when the session was created. Older KV records omit this
+   * field and are deliberately not reused after the native-harness rollout.
+   */
+  harness?: AgentHarness | "inherit";
   reasoningEffort?: string;
   actorId: string;
   createdAt: number;
@@ -41,6 +47,7 @@ const threadSessionSchema: z.ZodType<FeishuThreadSession> = z.object({
   repositoryKey: z.string().min(1),
   targetLabel: z.string().min(1),
   model: z.string().min(1),
+  harness: z.enum(["opencode", "codex", "claude", "deepseek", "inherit"]).optional(),
   reasoningEffort: z.string().min(1).optional(),
   actorId: z.string().min(1),
   createdAt: z.number().finite().nonnegative(),
