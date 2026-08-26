@@ -76,59 +76,35 @@ describe("listRepositoryCatalog", () => {
     vi.clearAllMocks();
   });
 
-  it("retries only a temporarily omitted connection and merges its cached catalog", async () => {
-    mockSignedControlPlaneFetch
-      .mockResolvedValueOnce(
-        catalogResponse({
-          repos: [
-            repository({
-              id: 1,
-              owner: "octo",
-              name: "site",
-              connectionId: "scm_github_default",
-              provider: "github",
-              connectionLabel: "GitHub",
-            }),
-          ],
-          connections,
-          connectionErrors: [
-            { connectionId: "scm_gitea_primary", code: "SCM_CATALOG_UNAVAILABLE" },
-          ],
-        })
-      )
-      .mockResolvedValueOnce(
-        catalogResponse({
-          repos: [
-            repository({
-              id: 2,
-              owner: "huangdong",
-              name: "n9n",
-              connectionId: "scm_gitea_primary",
-              provider: "gitea",
-              connectionLabel: "Gitea",
-            }),
-          ],
-          connections: [connections[1]!],
-        })
-      );
-    vi.useFakeTimers();
+  it("returns a partial catalog without a synchronous retry", async () => {
+    mockSignedControlPlaneFetch.mockResolvedValueOnce(
+      catalogResponse({
+        repos: [
+          repository({
+            id: 1,
+            owner: "octo",
+            name: "site",
+            connectionId: "scm_github_default",
+            provider: "github",
+            connectionLabel: "GitHub",
+          }),
+        ],
+        connections,
+        connectionErrors: [{ connectionId: "scm_gitea_primary", code: "SCM_CATALOG_UNAVAILABLE" }],
+      })
+    );
 
-    const resultPromise = listRepositoryCatalog(env, "trace-1");
-    await vi.advanceTimersByTimeAsync(3_000);
-    const result = await resultPromise;
+    const result = await listRepositoryCatalog(env, "trace-1");
 
-    expect(mockSignedControlPlaneFetch).toHaveBeenCalledTimes(2);
-    expect(mockSignedControlPlaneFetch.mock.calls[1]?.[1]).toMatchObject({
-      url: "https://internal/repos?connectionId=scm_gitea_primary",
-    });
-    expect(result.targets.map((target) => target.fullName)).toEqual(["octo/site", "huangdong/n9n"]);
+    expect(mockSignedControlPlaneFetch).toHaveBeenCalledOnce();
+    expect(result.targets.map((target) => target.fullName)).toEqual(["octo/site"]);
     expect(result.connections).toEqual([
       {
         id: "scm_gitea_primary",
         label: "Gitea",
         provider: "gitea",
-        repositoryCount: 1,
-        catalogStatus: "available",
+        repositoryCount: 0,
+        catalogStatus: "refreshing",
       },
       {
         id: "scm_github_default",
@@ -141,22 +117,15 @@ describe("listRepositoryCatalog", () => {
   });
 
   it("shows an enabled connection as refreshing instead of silently omitting it", async () => {
-    mockSignedControlPlaneFetch
-      .mockResolvedValueOnce(
-        catalogResponse({
-          repos: [],
-          connections,
-          connectionErrors: [
-            { connectionId: "scm_gitea_primary", code: "SCM_CATALOG_UNAVAILABLE" },
-          ],
-        })
-      )
-      .mockResolvedValueOnce(new Response(null, { status: 503 }));
-    vi.useFakeTimers();
+    mockSignedControlPlaneFetch.mockResolvedValueOnce(
+      catalogResponse({
+        repos: [],
+        connections,
+        connectionErrors: [{ connectionId: "scm_gitea_primary", code: "SCM_CATALOG_UNAVAILABLE" }],
+      })
+    );
 
-    const resultPromise = listRepositoryCatalog(env, "trace-2");
-    await vi.advanceTimersByTimeAsync(3_000);
-    const result = await resultPromise;
+    const result = await listRepositoryCatalog(env, "trace-2");
 
     expect(result.connections).toContainEqual({
       id: "scm_gitea_primary",
