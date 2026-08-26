@@ -82,12 +82,19 @@ pinned harnesses and development services as the managed E2B image.
 cd packages/e2b-infra
 CUBE_IMAGE=localhost:5000/oi-e2b:latest \
   CUBE_TEMPLATE_ALIAS=oi-e2b-multi-harness \
+  CUBE_TEMPLATE_CPU_MILLICORES=4000 \
+  CUBE_TEMPLATE_MEMORY_MB=8192 \
   bash build-cube-template.sh
 ```
 
 The command builds from a temporary context containing only this package and `sandbox-runtime`,
 pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
 template only after it reaches `READY`.
+
+New Cube templates default to 4 vCPU and 8192 MB of memory. Override `CUBE_TEMPLATE_CPU_MILLICORES`
+and `CUBE_TEMPLATE_MEMORY_MB` when the host capacity or workload requires another size. Resource
+changes apply only to sandboxes created from the new template; existing sandboxes keep their
+original limits.
 
 `build-cube-template.sh` sets the sandbox DNS server to `119.29.29.29` by default. Cube's AF_XDP
 network path does not make a resolver bound to a host-local address reachable from the sandbox.

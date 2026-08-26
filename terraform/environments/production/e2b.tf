@@ -36,9 +36,11 @@ module "e2b_infra" {
   count  = local.use_e2b_backend && var.e2b_build_template ? 1 : 0
   source = "../../modules/e2b-infra"
 
-  api_key     = var.e2b_api_key
-  api_url     = var.e2b_api_url
-  template_id = var.e2b_template_id
-  deploy_path = "${var.project_root}/packages/e2b-infra"
-  source_hash = data.external.e2b_source_hash[0].result.hash
+  api_key            = var.e2b_api_key
+  api_url            = var.e2b_api_url
+  template_id        = var.e2b_template_id
+  template_cpu       = var.e2b_template_cpu
+  template_memory_mb = var.e2b_template_memory_mb
+  deploy_path        = "${var.project_root}/packages/e2b-infra"
+  source_hash        = data.external.e2b_source_hash[0].result.hash
 }

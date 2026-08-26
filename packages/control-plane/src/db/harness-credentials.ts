@@ -125,13 +125,21 @@ export class HarnessCredentialStore {
     const trimmed = value.trim();
     if (!trimmed) throw new HarnessCredentialValidationError("Credential value is required");
     validateValue(trimmed);
-    if (kind === "codex-auth-json" && !decodeCodexAuth(trimmed)) {
-      throw new HarnessCredentialValidationError(
-        "Codex auth must be a JSON object or its base64 encoding"
-      );
+    let normalizedValue = trimmed;
+    if (kind === "codex-auth-json") {
+      const decoded = decodeCodexAuth(trimmed);
+      if (!decoded) {
+        throw new HarnessCredentialValidationError(
+          "Codex auth must be a JSON object or its base64 encoding"
+        );
+      }
+      // E2B rejects environment values containing control characters. Auth files
+      // loaded from disk are commonly pretty-printed, so store a compact JSON
+      // representation regardless of whether the user pasted JSON or base64.
+      normalizedValue = JSON.stringify(decoded);
     }
     const normalizedExpiry = parseExpiry(expiresAt ?? undefined);
-    const write: Record<string, string> = { [descriptor.key]: trimmed };
+    const write: Record<string, string> = { [descriptor.key]: normalizedValue };
     if (descriptor.expiryKey && normalizedExpiry) write[descriptor.expiryKey] = normalizedExpiry;
     await this.secrets.setSecrets(write);
 

@@ -76,4 +76,27 @@ describe("HarnessCredentialStore", () => {
     );
     expect(mockSecrets.values.size).toBe(0);
   });
+
+  it.each([
+    [
+      "pretty JSON",
+      JSON.stringify({ auth_mode: "chatgpt", tokens: { access: "secret" } }, null, 2),
+    ],
+    [
+      "base64 JSON",
+      btoa(JSON.stringify({ auth_mode: "chatgpt", tokens: { access: "secret" } }, null, 2)),
+    ],
+  ])("stores %s Codex auth as compact JSON without control characters", async (_label, value) => {
+    const store = new HarnessCredentialStore({} as never, "encryption-key");
+    await store.set("codex-auth-json", value);
+
+    const stored = mockSecrets.values.get("CODEX_AUTH_JSON");
+    expect(stored).toBe(JSON.stringify({ auth_mode: "chatgpt", tokens: { access: "secret" } }));
+    expect(
+      [...stored!].every((character) => {
+        const codePoint = character.charCodeAt(0);
+        return codePoint > 31 && codePoint !== 127;
+      })
+    ).toBe(true);
+  });
 });

@@ -82,9 +82,10 @@ uv run python build-template.py
 ```
 
 Optional build knobs: `E2B_TEMPLATE_CPU` (default `2`), `E2B_TEMPLATE_MEM` MB (default `1024`) —
-these apply to **manual** builds; Terraform-managed templates use the module's fixed defaults of **2
-vCPU / 1024 MB**. See [`packages/e2b-infra/README.md`](../packages/e2b-infra/README.md) for details
-on the template tooling and the launcher.
+these apply to **manual** builds. Terraform-managed production templates use `e2b_template_cpu` and
+`e2b_template_memory_mb`, which default to **4 vCPU / 8192 MB**. See
+[`packages/e2b-infra/README.md`](../packages/e2b-infra/README.md) for details on the template
+tooling and the launcher.
 
 ## Runtime Behavior
 
