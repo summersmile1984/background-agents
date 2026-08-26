@@ -19,6 +19,8 @@ export interface Env {
   APP_NAME?: string;
   /** Group messages are never processed until this explicitly equals true. */
   FEISHU_TRIGGERS_ENABLED?: string;
+  /** Attach bounded prompt-scoped screenshots to completion topics. */
+  FEISHU_MEDIA_DELIVERY_ENABLED?: string;
   /** Required to distinguish a bot @mention from an ordinary group mention. */
   FEISHU_BOT_OPEN_ID?: string;
   /** Mainland Feishu by default; Terraform allow-lists the value. */

@@ -318,6 +318,12 @@ variable "feishu_triggers_enabled" {
   default     = false
 }
 
+variable "feishu_media_delivery_enabled" {
+  description = "Attach bounded prompt-scoped screenshot artifacts to Feishu completion topics."
+  type        = bool
+  default     = false
+}
+
 variable "feishu_app_id" {
   description = "Feishu self-built app ID (cli_...)"
   type        = string

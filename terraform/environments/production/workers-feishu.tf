@@ -72,6 +72,7 @@ module "feishu_bot_worker" {
     { name = "DEFAULT_AGENT_HARNESS", value = var.default_agent_harness },
     { name = "FEISHU_API_BASE", value = var.feishu_api_base },
     { name = "FEISHU_TRIGGERS_ENABLED", value = var.feishu_triggers_enabled ? "true" : "false" },
+    { name = "FEISHU_MEDIA_DELIVERY_ENABLED", value = var.feishu_media_delivery_enabled ? "true" : "false" },
     { name = "FEISHU_BOT_OPEN_ID", value = var.feishu_bot_open_id },
   ]
 
