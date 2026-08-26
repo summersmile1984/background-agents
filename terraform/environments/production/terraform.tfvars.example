@@ -227,6 +227,7 @@ feishu_encrypt_key = ""
 
 # Enable only after FEISHU_BOT_OPEN_ID is known and group @mention E2E passes.
 feishu_triggers_enabled = false
+feishu_media_delivery_enabled = false
 feishu_bot_open_id = ""
 
 # Recommended when workers.dev is unavailable from Feishu or your network.

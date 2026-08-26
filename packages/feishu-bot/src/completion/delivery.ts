@@ -5,6 +5,7 @@ import { replyFeishuCard } from "../feishu/client";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 import type { FeishuCompletionJob } from "./job";
+import { deliverFeishuMediaArtifacts } from "./media-upload";
 
 const log = createLogger("completion-delivery");
 
@@ -42,6 +43,18 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
         pullRequestUrl: pullRequestUrl(response.artifacts),
       })
     );
+    if (env.FEISHU_MEDIA_DELIVERY_ENABLED === "true" && response.mediaArtifacts.length > 0) {
+      await deliverFeishuMediaArtifacts({
+        env,
+        deliveryId: job.deliveryId,
+        tenantKey: job.tenantKey,
+        sessionId: job.sessionId,
+        messageId: job.messageId,
+        rootMessageId: job.rootMessageId,
+        artifacts: response.mediaArtifacts,
+        traceId: job.traceId,
+      });
+    }
     log.info("completion.delivered", {
       delivery_id: job.deliveryId,
       session_id: job.sessionId,
