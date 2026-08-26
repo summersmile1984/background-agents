@@ -3,10 +3,6 @@ import type { z } from "zod";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "./internal-auth";
 
 const CATALOG_FETCH_TIMEOUT_MS = 20_000;
-// A cold Gitea catalog with more than one page may complete just after the
-// control plane returns its bounded partial response. Give that background
-// refresh time to populate KV before asking for only the missing connection.
-const CATALOG_REFRESH_RETRY_DELAY_MS = 3_000;
 
 export interface FeishuRepositoryTarget {
   repositoryKey: string;
@@ -83,18 +79,16 @@ function uniqueTargets(targets: FeishuRepositoryTarget[]): FeishuRepositoryTarge
   return [...new Map(targets.map((target) => [target.repositoryKey, target])).values()];
 }
 
-function waitForCatalogRefresh(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, CATALOG_REFRESH_RETRY_DELAY_MS));
-}
-
 /**
  * Loads the target catalog without silently hiding a slow SCM connection.
  *
  * The control plane intentionally returns a partial catalog when a cold
- * provider exceeds its response budget, while continuing the refresh in the
- * background. We retry just the omitted connection after a short bounded
- * delay. If it remains unavailable, it is still returned to the picker with
- * a clear refreshing state instead of being mistaken for an absent provider.
+ * provider exceeds its response budget and continues that refresh in the
+ * background. Do not synchronously retry here: the control plane can spend 16
+ * seconds on each attempt, so a second attempt would outlive the Feishu
+ * event's background execution window. Return the partial catalog immediately
+ * and mark omitted connections as refreshing; the next card interaction will
+ * read the cache populated by the control plane's background refresh.
  */
 export async function listRepositoryCatalog(
   env: ControlPlaneEnv,
@@ -103,28 +97,10 @@ export async function listRepositoryCatalog(
   const initial = await fetchRepositoryCatalog(env, traceId);
   if (!initial) return { targets: [], connections: [] };
 
-  const catalogs = [initial];
   const unavailable = new Set(initial.connectionErrors.map((entry) => entry.connectionId));
-  if (unavailable.size > 0) {
-    await waitForCatalogRefresh();
-    const retried = await Promise.all(
-      [...unavailable].map(async (connectionId) => ({
-        connectionId,
-        catalog: await fetchRepositoryCatalog(env, traceId, connectionId),
-      }))
-    );
-    for (const result of retried) {
-      if (!result.catalog || result.catalog.connectionErrors.length > 0) continue;
-      catalogs.push(result.catalog);
-      unavailable.delete(result.connectionId);
-    }
-  }
-
-  const targets = uniqueTargets(catalogs.flatMap(toTargets));
+  const targets = uniqueTargets(toTargets(initial));
   const configuredConnections = new Map(
-    catalogs
-      .flatMap((catalog) => catalog.connections)
-      .map((connection) => [connection.id, connection])
+    initial.connections.map((connection) => [connection.id, connection])
   );
   return {
     targets,
