@@ -1,0 +1,21 @@
+version: 1
+service: visual-fixture
+base_path: /
+scenarios:
+  - id: home-desktop
+    path: /
+    viewport: { width: 1440, height: 900 }
+    wait_for: { kind: selector, value: "[data-testid=app-ready]", timeout_seconds: 10 }
+    assertions:
+      - { kind: visible, selector: "main" }
+      - { kind: text_contains, selector: "h1", value: "Visual verification dashboard" }
+      - { kind: no_console_error }
+    capture: viewport
+  - id: home-mobile
+    path: /responsive
+    viewport: { width: 390, height: 844 }
+    wait_for: { kind: selector, value: "[data-testid=app-ready]", timeout_seconds: 10 }
+    assertions:
+      - { kind: visible, selector: "[data-testid=responsive-grid]" }
+      - { kind: url_path, value: /responsive }
+    capture: full_page
