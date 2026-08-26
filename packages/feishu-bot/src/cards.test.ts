@@ -40,8 +40,11 @@ describe("Feishu repository cards", () => {
       ],
     });
 
-    expect(JSON.stringify(card)).toContain("select_connection");
-    expect(JSON.stringify(card)).toContain("Gitea · gitea (64 个仓库)");
+    const serialized = JSON.stringify(card);
+    expect(serialized).toContain("select_connection");
+    expect(serialized).toContain("Gitea · gitea (64 个仓库)");
+    expect(serialized).not.toContain("select_static");
+    expect(serialized).toContain('"connectionId":"gitea"');
   });
 
   it("marks a slow connection as refreshing instead of hiding it", () => {
@@ -82,5 +85,27 @@ describe("Feishu repository cards", () => {
     expect(serialized).toContain(`huangdong/project-${REPOSITORIES_PER_PAGE}`);
     expect(serialized).not.toContain("huangdong/project-0");
     expect(serialized).toContain("repository_page");
+    expect(serialized).toContain(`"repositoryKey":"repo-${REPOSITORIES_PER_PAGE}"`);
+    expect(serialized).not.toContain("select_static");
+  });
+
+  it("uses direct repository buttons so the mobile keyboard never opens", () => {
+    const card = buildRepositoryPickerCard({
+      pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+      connection: {
+        id: "gitea-main",
+        label: "Gitea",
+        provider: "gitea",
+        repositoryCount: 2,
+        catalogStatus: "available",
+      },
+      repositories: [target(0), target(1)],
+      page: 0,
+    });
+
+    const serialized = JSON.stringify(card);
+    expect(serialized).not.toContain("select_static");
+    expect(serialized.match(/"action":"select_target"/g)).toHaveLength(2);
+    expect(serialized).toContain("直接点选仓库，不会唤起手机输入法");
   });
 });
