@@ -28,6 +28,48 @@ describe("parseFeishuCardAction", () => {
     });
   });
 
+  it("reads a code-source selection directly from a mobile-safe button", () => {
+    const action = parseFeishuCardAction({
+      schema: "2.0",
+      header: { event_id: "evt-button-1", tenant_key: "tenant-123" },
+      event: {
+        context: { open_chat_id: "oc_chat" },
+        operator: { operator_id: { open_id: "ou_user" } },
+        action: {
+          value: {
+            action: "select_connection",
+            pendingId,
+            connectionId: "scm_gitea",
+          },
+        },
+      },
+    });
+
+    expect(action).toMatchObject({ targetKey: "scm_gitea" });
+  });
+
+  it("reads a repository selection directly from a mobile-safe button", () => {
+    const action = parseFeishuCardAction({
+      schema: "2.0",
+      header: { event_id: "evt-button-2", tenant_key: "tenant-123" },
+      event: {
+        context: { open_chat_id: "oc_chat" },
+        operator: { operator_id: { open_id: "ou_user" } },
+        action: {
+          value: {
+            action: "select_target",
+            pendingId,
+            connectionId: "scm_gitea",
+            repositoryKey: "scm_gitea:huangdong/chatbi",
+            page: 0,
+          },
+        },
+      },
+    });
+
+    expect(action).toMatchObject({ targetKey: "scm_gitea:huangdong/chatbi" });
+  });
+
   it("keeps compatibility with legacy flat callbacks", () => {
     const action = parseFeishuCardAction({
       header: { event_id: "evt-456", tenant_key: "tenant-456" },

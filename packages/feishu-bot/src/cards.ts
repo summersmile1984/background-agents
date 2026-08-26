@@ -1,9 +1,10 @@
 import type { FeishuCard } from "./feishu/client";
 import type { FeishuRepositoryConnection, FeishuRepositoryTarget } from "./targets";
 
-// Feishu's static-select UI only renders a small option set reliably. Keep the
-// card page below that client limit so every repository remains reachable.
-export const REPOSITORIES_PER_PAGE = 9;
+// Keep mobile cards short enough to scroll comfortably. Repository selection
+// uses buttons instead of select_static because Feishu's mobile selector opens
+// a searchable bottom sheet whose keyboard can cover the available actions.
+export const REPOSITORIES_PER_PAGE = 6;
 const SESSION_LIST_LIMIT = 12;
 
 function text(content: string): { tag: "plain_text"; content: string } {
@@ -25,6 +26,24 @@ function elements(card: FeishuCard): Record<string, unknown>[] {
   return card.elements as Record<string, unknown>[];
 }
 
+function buttonRow(input: {
+  label: string;
+  value: Record<string, unknown>;
+  type?: "default" | "primary";
+}): Record<string, unknown> {
+  return {
+    tag: "action",
+    actions: [
+      {
+        tag: "button",
+        text: text(input.label),
+        type: input.type ?? "default",
+        value: input.value,
+      },
+    ],
+  };
+}
+
 export function buildConnectionPickerCard(input: {
   pendingId: string;
   connections: FeishuRepositoryConnection[];
@@ -35,28 +54,22 @@ export function buildConnectionPickerCard(input: {
       tag: "div",
       text: {
         tag: "lark_md",
-        content: "先选择代码源；下一步会在该代码源内选择仓库。",
+        content: "先点选代码源；下一步会显示该代码源的仓库。手机端无需打开搜索框。",
       },
     },
-    {
-      tag: "action",
-      actions: [
-        {
-          tag: "select_static",
-          name: "connection",
-          placeholder: text("选择 GitHub、Gitea 或其他代码源"),
-          value: { action: "select_connection", pendingId: input.pendingId },
-          options: input.connections.map((connection) => ({
-            text: text(
-              connection.catalogStatus === "refreshing"
-                ? `${connection.label} · ${connection.provider}（目录刷新中）`
-                : `${connection.label} · ${connection.provider} (${connection.repositoryCount} 个仓库)`
-            ),
-            value: connection.id,
-          })),
+    ...input.connections.map((connection) =>
+      buttonRow({
+        label:
+          connection.catalogStatus === "refreshing"
+            ? `${connection.label} · ${connection.provider}（目录刷新中）`
+            : `${connection.label} · ${connection.provider} (${connection.repositoryCount} 个仓库)`,
+        value: {
+          action: "select_connection",
+          pendingId: input.pendingId,
+          connectionId: connection.id,
         },
-      ],
-    }
+      })
+    )
   );
   return card;
 }
@@ -72,25 +85,9 @@ export function buildRepositoryPickerCard(input: {
   const offset = page * REPOSITORIES_PER_PAGE;
   const visible = input.repositories.slice(offset, offset + REPOSITORIES_PER_PAGE);
   const card = title(`选择 ${input.connection.label} 仓库`);
-  const actions: Record<string, unknown>[] = [
-    {
-      tag: "select_static",
-      name: "repository",
-      placeholder: text("选择仓库"),
-      value: {
-        action: "select_target",
-        pendingId: input.pendingId,
-        connectionId: input.connection.id,
-        page,
-      },
-      options: visible.map((repository) => ({
-        text: text(`${repository.provider} · ${repository.fullName}`),
-        value: repository.repositoryKey,
-      })),
-    },
-  ];
+  const navigationActions: Record<string, unknown>[] = [];
   if (page > 0) {
-    actions.push({
+    navigationActions.push({
       tag: "button",
       text: text("上一页"),
       type: "default",
@@ -103,7 +100,7 @@ export function buildRepositoryPickerCard(input: {
     });
   }
   if (page + 1 < pageCount) {
-    actions.push({
+    navigationActions.push({
       tag: "button",
       text: text("下一页"),
       type: "default",
@@ -120,10 +117,22 @@ export function buildRepositoryPickerCard(input: {
       tag: "div",
       text: {
         tag: "lark_md",
-        content: `代码源：**${input.connection.label}** · ${input.connection.repositoryCount} 个仓库 · 第 ${page + 1}/${pageCount} 页`,
+        content: `代码源：**${input.connection.label}** · ${input.connection.repositoryCount} 个仓库 · 第 ${page + 1}/${pageCount} 页\n\n直接点选仓库，不会唤起手机输入法。`,
       },
     },
-    { tag: "action", actions }
+    ...visible.map((repository) =>
+      buttonRow({
+        label: `${repository.provider} · ${repository.fullName}`,
+        value: {
+          action: "select_target",
+          pendingId: input.pendingId,
+          connectionId: input.connection.id,
+          repositoryKey: repository.repositoryKey,
+          page,
+        },
+      })
+    ),
+    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : [])
   );
   return card;
 }

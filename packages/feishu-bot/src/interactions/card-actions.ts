@@ -14,11 +14,18 @@ import type { Env } from "../types";
 const log = createLogger("card-actions");
 
 const cardActionValueSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("select_connection"), pendingId: z.string().uuid() }),
+  z.object({
+    action: z.literal("select_connection"),
+    pendingId: z.string().uuid(),
+    // New button cards carry the selection in value. Keep this optional so
+    // already-sent select_static cards using action.option remain valid.
+    connectionId: z.string().min(1).optional(),
+  }),
   z.object({
     action: z.literal("select_target"),
     pendingId: z.string().uuid(),
     connectionId: z.string().min(1),
+    repositoryKey: z.string().min(1).optional(),
     page: z.number().int().nonnegative(),
   }),
   z.object({
@@ -76,7 +83,13 @@ export function parseFeishuCardAction(payload: unknown): {
   if (!parsed.success) return null;
   const actionPayload = parsed.data.event ?? parsed.data;
   const value = actionPayload.action?.value;
-  const targetKey = actionPayload.action?.option;
+  const targetKey =
+    actionPayload.action?.option ??
+    (value?.action === "select_connection"
+      ? value.connectionId
+      : value?.action === "select_target"
+        ? value.repositoryKey
+        : undefined);
   const tenantKey = parsed.data.header?.tenant_key;
   const chatId = actionPayload.context?.open_chat_id ?? actionPayload.open_chat_id;
   const openId = actionPayload.operator?.open_id ?? actionPayload.operator?.operator_id?.open_id;

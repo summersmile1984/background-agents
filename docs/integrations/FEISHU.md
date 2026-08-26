@@ -9,6 +9,7 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
 
 - 私聊机器人发送文字请求，或在群聊中 @机器人发送文字请求。
 - 使用明确的 `owner/repo` 自动定位仓库；否则通过飞书消息卡片选择 GitHub 或 Gitea 仓库。
+- 代码源和仓库使用分页按钮直接选择；移动端不会打开可能被输入法遮挡的下拉搜索层。
 - 创建 session、将结果回传同一飞书主题，并提供 Web session 与 PR 链接。
 - 在同一主题继续 session；只有原发起人可以继续该 session。
 - 事件与卡片回调的 verification token、加密载荷、签名、事件/action 去重与 Control
@@ -54,6 +55,7 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
 3. 重复执行一次并选择 Gitea 仓库；确认 clone、commit、push、PR 和结果链接全程使用该 connection。
 4. 在同一主题发送 follow-up；确认进入相同 session。让另一测试用户点击旧卡片，确认被拒绝。
 5. 将机器人加到测试群，在配置 bot open ID 后启用群 @；确认普通消息不触发，只有 @机器人触发。
+6. 在手机飞书 App 中分别选择代码源、仓库和翻页；确认全程使用卡片按钮，不会唤起输入法或遮挡操作区。
 
 飞书官方资料：[接收消息](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)、
 [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)、
