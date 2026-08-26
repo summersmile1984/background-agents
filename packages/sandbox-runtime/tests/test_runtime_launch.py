@@ -13,7 +13,7 @@ def launch_spec() -> dict:
     return {
         "version": 1,
         "resolverVersion": "1",
-        "capabilityCatalogVersion": "2026-08-21.1",
+        "capabilityCatalogVersion": "2026-08-21.3",
         "resolvedAt": 1,
         "draftDigest": "a" * 64,
         "target": {

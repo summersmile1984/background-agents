@@ -11,7 +11,11 @@ from .types import AgentHarness
 
 SUPPORTED_LAUNCH_SPEC_VERSION = 1
 SUPPORTED_RESOLVER_VERSIONS = {"1"}
-SUPPORTED_CAPABILITY_CATALOG_VERSIONS = {"2026-08-21.1", "2026-08-21.2"}
+SUPPORTED_CAPABILITY_CATALOG_VERSIONS = {
+    "2026-08-21.1",
+    "2026-08-21.2",
+    "2026-08-21.3",
+}
 SUPPORTED_ROUTES: dict[str, tuple[AgentHarness, tuple[str, ...] | None]] = {
     "opencode:any:configured-provider": (AgentHarness.OPENCODE, None),
     "opencode:deepseek:host-relay": (AgentHarness.OPENCODE, ("deepseek/",)),
