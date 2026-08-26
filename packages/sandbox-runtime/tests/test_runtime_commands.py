@@ -24,6 +24,25 @@ def test_installs_supported_scripts_as_executable_commands(tmp_path: Path) -> No
     assert (destination / "oi-git-sign").stat().st_mode & 0o755
 
 
+def test_accepts_identical_preinstalled_executable_without_copying(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "bin"
+    source.mkdir()
+    destination.mkdir()
+    (source / "upload-media.js").write_text("#!/usr/bin/env node\n")
+    installed = destination / "upload-media"
+    installed.write_text("#!/usr/bin/env node\n")
+    installed.chmod(0o755)
+
+    with patch(
+        "sandbox_runtime.runtime_commands.shutil.copy",
+        side_effect=AssertionError("identical preinstalled command must not be overwritten"),
+    ) as copy:
+        assert install_runtime_commands(source, destination) == {"upload-media"}
+
+    copy.assert_not_called()
+
+
 def test_uses_configured_install_directory(tmp_path: Path, monkeypatch) -> None:
     source = tmp_path / "bin"
     source.mkdir()

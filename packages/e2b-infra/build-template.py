@@ -44,6 +44,8 @@ START_CMD = "python /usr/local/bin/oi-launch"
 READY_CMD = (
     "command -v python && command -v node && command -v opencode "
     "&& command -v code-server "
+    "&& test -x /usr/local/bin/upload-media "
+    "&& test -x /usr/local/bin/oi-git-sign "
     '&& test "$(command -v gh)" = /usr/local/bin/gh && test -x /usr/bin/gh '
     "&& PYTHONPATH=/app python -c 'import sandbox_runtime'"
 )
@@ -88,6 +90,8 @@ template = (
     .copy("sandbox_runtime", "/app/sandbox_runtime")
     # E2B's non-root runtime cannot install this into /usr/local/bin itself.
     .copy("sandbox_runtime/gh-wrapper.sh", "/usr/local/bin/gh", mode=0o755)
+    .copy("sandbox_runtime/bin/upload-media.js", "/usr/local/bin/upload-media", mode=0o755)
+    .copy("sandbox_runtime/bin/oi-git-sign", "/usr/local/bin/oi-git-sign", mode=0o755)
     # The launcher = the template start command (see oi-launch.py).
     .copy("oi-launch.py", "/usr/local/bin/oi-launch", mode=0o755)
     .set_workdir("/workspace")

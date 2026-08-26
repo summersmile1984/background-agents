@@ -35,6 +35,17 @@ def install_runtime_commands(
             continue
         command_name = script.stem if script.suffix == ".js" else script.name
         target = destination / command_name
+        # Some providers (notably E2B) run the supervisor as a non-root user,
+        # so their image builder installs these commands into /usr/local/bin.
+        # Treat an identical executable as already installed instead of trying
+        # to overwrite the root-owned file at session startup.
+        if (
+            target.is_file()
+            and os.access(target, os.X_OK)
+            and target.read_bytes() == script.read_bytes()
+        ):
+            installed.add(command_name)
+            continue
         shutil.copy(script, target)
         target.chmod(0o755)
         installed.add(command_name)
