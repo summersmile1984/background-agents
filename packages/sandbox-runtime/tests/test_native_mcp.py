@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import sandbox_runtime.native_mcp as native_mcp
 from sandbox_runtime.harness.mcp_config import (
     claude_mcp_config,
@@ -136,3 +138,88 @@ def test_control_plane_client_prefers_minimal_explicit_session_id():
     )
 
     assert client.session_id == "session-explicit"
+
+
+def test_media_upload_input_builds_screenshot_metadata(tmp_path):
+    screenshot = tmp_path / "health.png"
+    screenshot.write_bytes(b"png")
+
+    path, metadata = native_mcp._media_upload_input(
+        file_path=str(screenshot),
+        artifact_type="screenshot",
+        caption="Health endpoint",
+        source_url="http://127.0.0.1:3003/api/health",
+        end_url=None,
+        full_page=True,
+        annotated=False,
+        viewport='{"width":1280,"height":720}',
+        duration_ms=None,
+        recording_started_at=None,
+        recording_ended_at=None,
+        dimensions=None,
+        truncated=None,
+        has_audio=None,
+    )
+
+    assert path == screenshot.resolve()
+    assert metadata == {
+        "caption": "Health endpoint",
+        "sourceUrl": "http://127.0.0.1:3003/api/health",
+        "viewport": '{"width":1280,"height":720}',
+        "fullPage": "true",
+    }
+
+
+def test_media_upload_input_rejects_video_without_metadata(tmp_path):
+    video = tmp_path / "flow.mp4"
+    video.write_bytes(b"video")
+
+    with pytest.raises(ValueError, match="video uploads require"):
+        native_mcp._media_upload_input(
+            file_path=str(video),
+            artifact_type="video",
+            caption=None,
+            source_url=None,
+            end_url=None,
+            full_page=False,
+            annotated=False,
+            viewport=None,
+            duration_ms=None,
+            recording_started_at=None,
+            recording_ended_at=None,
+            dimensions=None,
+            truncated=None,
+            has_audio=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_upload_media_tool_uses_trusted_client(monkeypatch, tmp_path):
+    screenshot = tmp_path / "health.png"
+    screenshot.write_bytes(b"png")
+    calls = []
+
+    class FakeClient:
+        async def upload_media(self, file_path, *, artifact_type, metadata):
+            calls.append((file_path, artifact_type, metadata))
+            return {"artifactId": "artifact-1"}
+
+    monkeypatch.setattr(native_mcp, "_client", FakeClient)
+
+    result = await native_mcp.upload_media(
+        str(screenshot),
+        caption="Health endpoint",
+        source_url="http://127.0.0.1:3003/api/health",
+    )
+
+    assert json.loads(result) == {"artifactId": "artifact-1"}
+    assert calls == [
+        (
+            screenshot.resolve(),
+            "screenshot",
+            {
+                "caption": "Health endpoint",
+                "sourceUrl": "http://127.0.0.1:3003/api/health",
+            },
+        )
+    ]

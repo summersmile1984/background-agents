@@ -13,8 +13,9 @@ For the full browser-open + capture + upload workflow, use `visual-verification`
 
 ## Key Fact
 
-`upload-media` is a **bash command** installed on PATH. Run it with your Bash tool. It is not an MCP
-tool or a tool binding.
+Prefer the `open_inspect/upload_media` MCP tool when it is advertised. It can read the sandbox file
+while keeping the session credential outside harness shell commands. If that MCP tool is not
+available, `upload-media` is a **bash command** installed on PATH.
 
 ## When To Use It
 
@@ -26,7 +27,8 @@ tool or a tool binding.
 ## Required Workflow
 
 1. Confirm the image file exists on disk.
-2. Run `upload-media` via Bash with the file path and metadata flags.
+2. Call `open_inspect/upload_media` with the absolute file path and metadata. If it is unavailable,
+   run `upload-media` via Bash with the same inputs.
 3. Report the returned `artifactId` to the user.
 
 ## Command

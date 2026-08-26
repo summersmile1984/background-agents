@@ -13,9 +13,10 @@ using it reliably.
 
 ## Key Fact
 
-`upload-media` is a **bash command** installed on PATH. Run it with your Bash tool, not as an MCP
-tool or tool binding. For videos, use `agent-browser record` directly, then probe and upload the
-resulting MP4 with `upload-media`.
+Prefer the `open_inspect/upload_media` MCP tool when it is advertised. It keeps the session
+credential outside harness shell commands. If that tool is unavailable, run the `upload-media`
+**bash command** installed on PATH. For videos, use `agent-browser record` directly, then probe and
+upload the resulting MP4 with the same preferred-MCP/fallback-command rule.
 
 ## When To Use It
 
