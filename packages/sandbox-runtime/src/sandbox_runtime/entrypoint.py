@@ -82,6 +82,7 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
             ),
             skills_root,
             log,
+            include_bundled_skills=config.agent_harness is not AgentHarness.OPENCODE,
         )
     opencode_server = OpenCodeServer(
         config.opencode_config(),

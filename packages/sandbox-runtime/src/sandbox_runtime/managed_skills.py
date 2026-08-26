@@ -1,4 +1,4 @@
-"""Fetch, validate, and install control-plane-managed OpenCode skills."""
+"""Fetch, validate, and install sandbox skills for every supported harness."""
 
 from __future__ import annotations
 
@@ -327,11 +327,13 @@ class ManagedSkillsMaterializer:
         log: Any,
         *,
         bundled_skills_path: Path = Path("/app/sandbox_runtime/skills"),
+        include_bundled_skills: bool = False,
     ) -> None:
         self.client = client
         self.destination = destination
         self.log = log
         self.bundled_skills_path = bundled_skills_path
+        self.include_bundled_skills = include_bundled_skills
 
     @staticmethod
     def _remove_path(path: Path) -> None:
@@ -377,8 +379,15 @@ class ManagedSkillsMaterializer:
                 pass
         return names
 
-    def _collision_roots(self, repositories: Sequence[RepoEntry], workdir: Path) -> Iterable[Path]:
-        yield self.bundled_skills_path
+    def _collision_roots(
+        self,
+        repositories: Sequence[RepoEntry],
+        workdir: Path,
+        *,
+        include_bundled_skills: bool,
+    ) -> Iterable[Path]:
+        if include_bundled_skills:
+            yield self.bundled_skills_path
         bases = [workdir, *(repository.path for repository in repositories), Path.home()]
         seen: set[Path] = set()
         for base in bases:
@@ -394,10 +403,25 @@ class ManagedSkillsMaterializer:
         installation: ManagedSkillInstallation,
         repositories: Sequence[RepoEntry],
         workdir: Path,
+        bundled: ManagedSkillInstallation | None = None,
     ) -> None:
-        """Reject ambiguous names across every OpenCode skill discovery root."""
+        """Reject ambiguous names across every harness skill discovery root."""
         selected = {skill.name for skill in installation.skills}
-        for root in self._collision_roots(repositories, workdir):
+        if bundled is not None:
+            bundled_names = {skill.name for skill in bundled.skills}
+            overlapping = selected & bundled_names
+            if overlapping:
+                name = sorted(overlapping)[0]
+                raise ManagedSkillsError(
+                    f"managed skill {name!r} collides with bundled skill", code="name_collision"
+                )
+            selected |= bundled_names
+
+        for root in self._collision_roots(
+            repositories,
+            workdir,
+            include_bundled_skills=bundled is None,
+        ):
             if not root.is_dir():
                 continue
             for child in root.iterdir():
@@ -410,6 +434,47 @@ class ManagedSkillsMaterializer:
                         f"managed skill {name!r} collides with discovered skill at {child}",
                         code="name_collision",
                     )
+
+    def _bundled_installation(self) -> ManagedSkillInstallation:
+        """Load image-owned skills through the same validator used for remote skills."""
+        if not self.bundled_skills_path.is_dir():
+            return ManagedSkillInstallation("0" * 64, ())
+
+        skills: list[dict[str, object]] = []
+        for skill_dir in sorted(self.bundled_skills_path.iterdir(), key=lambda path: path.name):
+            if skill_dir.is_symlink() or not skill_dir.is_dir():
+                continue
+            files: list[dict[str, object]] = []
+            for source in sorted(skill_dir.rglob("*"), key=lambda path: path.as_posix()):
+                if source.is_dir():
+                    continue
+                if source.is_symlink() or not source.is_file():
+                    raise ManagedSkillsError(
+                        f"unsafe bundled skill file: {source}", code="installation_invalid"
+                    )
+                content = source.read_text(encoding="utf-8")
+                content_bytes = content.encode("utf-8")
+                files.append(
+                    {
+                        "path": source.relative_to(skill_dir).as_posix(),
+                        "content": content,
+                        "sha256": hashlib.sha256(content_bytes).hexdigest(),
+                        "sizeBytes": len(content_bytes),
+                        "executable": bool(source.stat().st_mode & 0o111),
+                    }
+                )
+            if files:
+                skills.append({"name": skill_dir.name, "files": files})
+
+        return validate_installation(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "manifestSha256": "0" * 64,
+                    "skills": skills,
+                }
+            ).encode()
+        )
 
     @staticmethod
     def _write_journal(journal: Path) -> None:
@@ -500,11 +565,17 @@ class ManagedSkillsMaterializer:
             raise
 
     async def materialize(self, repositories: Sequence[RepoEntry], workdir: Path) -> None:
-        """Fetch, validate, collision-check, and install skills before OpenCode starts."""
+        """Fetch, validate, collision-check, and install skills before the harness starts."""
         try:
             raw = await self.client.fetch_installation()
             installation = validate_installation(raw)
-            self._check_collisions(installation, repositories, workdir)
+            bundled = self._bundled_installation() if self.include_bundled_skills else None
+            self._check_collisions(installation, repositories, workdir, bundled)
+            if bundled is not None:
+                installation = ManagedSkillInstallation(
+                    installation.manifest_sha256,
+                    (*bundled.skills, *installation.skills),
+                )
             self._install(installation)
         except ManagedSkillsError:
             raise

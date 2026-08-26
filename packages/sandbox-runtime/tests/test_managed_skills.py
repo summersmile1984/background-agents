@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -159,6 +160,48 @@ async def test_materializer_replaces_destination(tmp_path):
     assert (destination / "managed" / "SKILL.md").stat().st_mode & 0o777 == 0o400
 
 
+async def test_materializer_installs_bundled_skills_for_native_harnesses(tmp_path):
+    document = _installation()
+    client = MagicMock()
+    client.fetch_installation = AsyncMock(return_value=json.dumps(document).encode())
+    bundled = tmp_path / "bundled" / "agent-browser"
+    bundled.mkdir(parents=True)
+    (bundled / "SKILL.md").write_text(
+        '---\nname: agent-browser\ndescription: "Browser"\n---\n# Browser\n'
+    )
+    destination = tmp_path / "workspace" / ".codex" / "skills"
+    materializer = ManagedSkillsMaterializer(
+        client,
+        destination,
+        MagicMock(),
+        bundled_skills_path=tmp_path / "bundled",
+        include_bundled_skills=True,
+    )
+
+    await materializer.materialize((), tmp_path / "workspace")
+
+    assert (destination / "agent-browser" / "SKILL.md").exists()
+    assert (destination / "managed" / "SKILL.md").exists()
+
+
+def test_bundled_skills_follow_the_managed_skill_contract():
+    bundled_skills_path = Path(__file__).parents[1] / "src" / "sandbox_runtime" / "skills"
+    materializer = ManagedSkillsMaterializer(
+        MagicMock(),
+        Path("/tmp/unused"),
+        MagicMock(),
+        bundled_skills_path=bundled_skills_path,
+        include_bundled_skills=True,
+    )
+
+    installation = materializer._bundled_installation()
+
+    assert {skill.name for skill in installation.skills} >= {
+        "agent-browser",
+        "visual-verification",
+    }
+
+
 async def test_materializer_rejects_bundled_name_collision(tmp_path):
     document = _installation(name="conflict")
     client = MagicMock()
@@ -278,3 +321,20 @@ def test_supervisor_derives_managed_skill_paths_from_global_config(config_variab
     materializer = supervisor.managed_skills
     assert materializer is not None
     assert materializer.destination == config_dir / "skills"
+    assert materializer.include_bundled_skills is False
+
+
+@pytest.mark.parametrize("agent_harness", ["codex", "claude", "deepseek"])
+def test_supervisor_installs_bundled_skills_for_native_harnesses(agent_harness, tmp_path):
+    environment = {
+        "CONTROL_PLANE_URL": "https://control.example",
+        "SESSION_CONFIG": json.dumps({"session_id": "session-1", "agent_harness": agent_harness}),
+        "HOME": str(tmp_path / "home"),
+    }
+
+    with patch.dict("os.environ", environment, clear=True):
+        supervisor = build_supervisor(asyncio.Event())
+
+    materializer = supervisor.managed_skills
+    assert materializer is not None
+    assert materializer.include_bundled_skills is True
