@@ -11,7 +11,8 @@ through flows, dragging, typing, navigation, loading states, transitions, or ani
 ## Key Facts
 
 Use `agent-browser record` as the primary recorder. Record directly to an `.mp4` path so
-`agent-browser` encodes the recording as a silent MP4 that can be uploaded with `upload-media`.
+`agent-browser` encodes the recording as a silent MP4. Prefer the `open_inspect/upload_media` MCP
+tool when it is advertised; otherwise upload with `upload-media`.
 
 ## Required Workflow
 

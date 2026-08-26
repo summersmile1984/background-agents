@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from mimetypes import guess_type
 from pathlib import Path
 from urllib.parse import quote
 
@@ -61,6 +62,34 @@ class ControlPlaneToolClient:
         except ValueError:
             return response.text
 
+    async def upload_media(
+        self,
+        file_path: Path,
+        *,
+        artifact_type: str,
+        metadata: dict[str, str],
+    ) -> object:
+        if not self.token:
+            raise RuntimeError("SANDBOX_AUTH_TOKEN is unavailable")
+        if not self.session_id:
+            raise RuntimeError("session ID is unavailable")
+        mime_type = _media_mime_type(file_path)
+        url = f"{self.base_url}/sessions/{self.session_id}/media"
+        with file_path.open("rb") as media_file:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    files={"file": (file_path.name, media_file, mime_type)},
+                    data={"artifactType": artifact_type, **metadata},
+                )
+        if response.is_error:
+            raise ToolRequestError(response.status_code, _error_detail(response))
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
 
 def _client() -> ControlPlaneToolClient:
     return ControlPlaneToolClient()
@@ -107,6 +136,55 @@ async def create_pull_request(
         )
     except Exception as error:
         return _failure("create pull request", error)
+
+
+@mcp.tool(name="upload_media")
+async def upload_media(
+    file_path: str,
+    artifact_type: str = "screenshot",
+    caption: str | None = None,
+    source_url: str | None = None,
+    end_url: str | None = None,
+    full_page: bool = False,
+    annotated: bool = False,
+    viewport: str | None = None,
+    duration_ms: int | None = None,
+    recording_started_at: int | None = None,
+    recording_ended_at: int | None = None,
+    dimensions: str | None = None,
+    truncated: bool | None = None,
+    has_audio: bool | None = None,
+) -> str:
+    """Upload sandbox media without exposing platform credentials to harness shell commands.
+
+    Capture the file first, then pass its absolute sandbox path. Use artifact_type="video" and
+    provide the recording metadata for MP4 files.
+    """
+    try:
+        resolved_path, metadata = _media_upload_input(
+            file_path=file_path,
+            artifact_type=artifact_type,
+            caption=caption,
+            source_url=source_url,
+            end_url=end_url,
+            full_page=full_page,
+            annotated=annotated,
+            viewport=viewport,
+            duration_ms=duration_ms,
+            recording_started_at=recording_started_at,
+            recording_ended_at=recording_ended_at,
+            dimensions=dimensions,
+            truncated=truncated,
+            has_audio=has_audio,
+        )
+        result = await _client().upload_media(
+            resolved_path,
+            artifact_type=artifact_type,
+            metadata=metadata,
+        )
+        return _json_result(result)
+    except Exception as error:
+        return _failure("upload media", error)
 
 
 @mcp.tool(name="spawn_child")
@@ -220,6 +298,92 @@ def _session_id(raw_config: str) -> str:
         return ""
     value = config.get("sessionId") or config.get("session_id")
     return value if isinstance(value, str) else ""
+
+
+_MEDIA_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+}
+
+
+def _media_mime_type(file_path: Path) -> str:
+    mime_type = _MEDIA_MIME_TYPES.get(file_path.suffix.casefold())
+    if mime_type:
+        return mime_type
+    guessed, _ = guess_type(file_path.name)
+    raise ValueError(
+        f"unsupported media type {guessed or file_path.suffix or '(none)'}; "
+        "expected .png, .jpg, .jpeg, .webp, or .mp4"
+    )
+
+
+def _media_upload_input(
+    *,
+    file_path: str,
+    artifact_type: str,
+    caption: str | None,
+    source_url: str | None,
+    end_url: str | None,
+    full_page: bool,
+    annotated: bool,
+    viewport: str | None,
+    duration_ms: int | None,
+    recording_started_at: int | None,
+    recording_ended_at: int | None,
+    dimensions: str | None,
+    truncated: bool | None,
+    has_audio: bool | None,
+) -> tuple[Path, dict[str, str]]:
+    resolved_path = Path(file_path).expanduser().resolve()
+    if not resolved_path.is_file():
+        raise ValueError("file_path must point to an existing file")
+    mime_type = _media_mime_type(resolved_path)
+    if artifact_type not in {"screenshot", "video"}:
+        raise ValueError("artifact_type must be screenshot or video")
+    if mime_type == "video/mp4" and artifact_type != "video":
+        raise ValueError("MP4 files require artifact_type=video")
+    if artifact_type == "video" and mime_type != "video/mp4":
+        raise ValueError("video artifacts require an MP4 file")
+
+    metadata: dict[str, str] = {}
+    optional = {
+        "caption": caption,
+        "sourceUrl": source_url,
+        "endUrl": end_url,
+        "viewport": viewport,
+        "dimensions": dimensions,
+    }
+    metadata.update({key: value for key, value in optional.items() if value})
+    if full_page:
+        metadata["fullPage"] = "true"
+    if annotated:
+        metadata["annotated"] = "true"
+
+    if artifact_type == "video":
+        required_video = {
+            "caption": caption,
+            "durationMs": duration_ms,
+            "recordingStartedAt": recording_started_at,
+            "recordingEndedAt": recording_ended_at,
+            "dimensions": dimensions,
+            "truncated": truncated,
+        }
+        missing = [key for key, value in required_video.items() if value is None or value == ""]
+        if missing:
+            raise ValueError(f"video uploads require: {', '.join(missing)}")
+        metadata.update(
+            {
+                "durationMs": str(duration_ms),
+                "recordingStartedAt": str(recording_started_at),
+                "recordingEndedAt": str(recording_ended_at),
+                "truncated": str(truncated).lower(),
+                "hasAudio": str(bool(has_audio)).lower(),
+            }
+        )
+    return resolved_path, metadata
 
 
 def _repositories() -> list[dict[str, str]]:

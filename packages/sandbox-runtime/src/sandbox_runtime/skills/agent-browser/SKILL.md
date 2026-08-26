@@ -29,6 +29,11 @@ Prefer `--json` when you need machine-readable output such as a saved path.
 
 Screenshots only appear in the Open-Inspect session after upload.
 
+When the `open_inspect/upload_media` MCP tool is available, prefer it: pass the screenshot's
+absolute sandbox path and optional metadata. It uploads through the trusted platform broker without
+putting the session credential in shell commands. If that tool is not advertised, use the
+`upload-media` bash command below.
+
 ```bash
 upload-media /tmp/current.png --caption "Dashboard after fix"
 upload-media /tmp/full-page.png --full-page
@@ -42,7 +47,8 @@ upload-media /tmp/current.png \
 
 1. Capture the current state with `agent-browser screenshot`.
 2. Make or verify the UI change.
-3. Upload the screenshot with `upload-media`.
+3. Upload the screenshot with `open_inspect/upload_media`, or `upload-media` when the MCP tool is
+   unavailable.
 4. When useful, upload before/after/diff images as separate artifacts.
 
 ## Recording Videos
