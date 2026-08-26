@@ -5,10 +5,25 @@ import {
   type CreateSessionResponse,
   type SendPromptResponse,
 } from "@open-inspect/shared/types/session-api";
+import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "../internal-auth";
 import type { FeishuRepositoryTarget } from "../targets";
 
 const OUTBOUND_TIMEOUT_MS = 10_000;
+
+type FeishuRuntimeHarness = AgentHarness | "inherit";
+
+/**
+ * Feishu currently supplies a deployment default model rather than a harness
+ * picker. Preserve the configured default for provider-neutral models, but do
+ * not send a native harness model to OpenCode by accident.
+ */
+export function defaultHarnessForModel(model: string): FeishuRuntimeHarness {
+  if (model.startsWith("openai/")) return "codex";
+  if (model.startsWith("anthropic/")) return "claude";
+  if (model.startsWith("deepseek/")) return "deepseek";
+  return "inherit";
+}
 
 export type SendPromptResult =
   | { ok: true; data: SendPromptResponse }
@@ -23,7 +38,7 @@ export async function createSession(input: {
 }): Promise<CreateSessionResponse | null> {
   const body = JSON.stringify({
     repositoryKey: input.target.repositoryKey,
-    runtime: { harness: "inherit", model: input.model },
+    runtime: { harness: defaultHarnessForModel(input.model), model: input.model },
   });
   const response = await signedControlPlaneFetch(
     input.env,
