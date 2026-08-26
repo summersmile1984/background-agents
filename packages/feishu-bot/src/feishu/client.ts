@@ -76,9 +76,7 @@ async function sendAuthenticated(
     const apiDetail = parsed.success
       ? `code=${parsed.data.code}, msg=${(parsed.data.msg || "unknown").slice(0, 200)}`
       : "invalid_response";
-    throw new Error(
-      `Feishu message request failed (http_status=${response.status}, ${apiDetail})`
-    );
+    throw new Error(`Feishu message request failed (http_status=${response.status}, ${apiDetail})`);
   }
   return parsed.data.data?.message_id;
 }

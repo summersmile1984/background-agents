@@ -32,9 +32,7 @@ describe("Feishu message client", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(replyFeishuText(env, "om/message", "已收到，正在处理。")).resolves.toBe(
-      "reply-1"
-    );
+    await expect(replyFeishuText(env, "om/message", "已收到，正在处理。")).resolves.toBe("reply-1");
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://open.feishu.cn/open-apis/im/v1/messages/om%2Fmessage/reply",

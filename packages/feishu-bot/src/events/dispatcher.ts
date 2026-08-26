@@ -9,12 +9,7 @@ import {
   type FeishuConversationCoordinates,
   type FeishuThreadSession,
 } from "../conversation/store";
-import {
-  replyFeishuCard,
-  replyFeishuText,
-  sendFeishuCard,
-  sendFeishuText,
-} from "../feishu/client";
+import { replyFeishuCard, replyFeishuText, sendFeishuCard, sendFeishuText } from "../feishu/client";
 import { createLogger } from "../logger";
 import {
   createSession,
