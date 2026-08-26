@@ -279,7 +279,15 @@ class AgentBrowser:
             }
         )
 
-    async def command(self, *arguments: str, stdin: str | None = None) -> dict[str, Any]:
+    async def command(
+        self,
+        *arguments: str,
+        stdin: str | None = None,
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any]:
+        environment = dict(self.environment)
+        if timeout_ms is not None:
+            environment["AGENT_BROWSER_DEFAULT_TIMEOUT"] = str(timeout_ms)
         payload = await self.runner.run(
             [
                 self.executable,
@@ -292,7 +300,7 @@ class AgentBrowser:
             ],
             timeout_seconds=self.timeout_seconds,
             stdin=stdin,
-            environment=self.environment,
+            environment=environment,
         )
         data = payload.get("data")
         if payload.get("success") is not True or not isinstance(data, dict):
@@ -593,14 +601,17 @@ async def apply_wait(browser: AgentBrowser, scenario: VerificationScenario) -> N
     if wait is None:
         await browser.command("wait", "--load", "domcontentloaded")
         return
-    timeout_ms = str(int(wait.timeout_seconds * 1000))
+    timeout_ms = int(wait.timeout_seconds * 1000)
     if wait.kind == "selector" and wait.value:
-        await browser.command("--timeout", timeout_ms, "wait", wait.value)
+        await browser.command("wait", wait.value, timeout_ms=timeout_ms)
     elif wait.kind == "text" and wait.value:
-        await browser.command("--timeout", timeout_ms, "wait", "--text", wait.value)
+        await browser.command("wait", "--text", wait.value, timeout_ms=timeout_ms)
     else:
         await browser.command(
-            "--timeout", timeout_ms, "wait", "--load", wait.value or "domcontentloaded"
+            "wait",
+            "--load",
+            wait.value or "domcontentloaded",
+            timeout_ms=timeout_ms,
         )
 
 

@@ -12,13 +12,15 @@ from typing import Any
 import pytest
 
 from sandbox_runtime.prompt_context import PromptContext, write_prompt_context
-from sandbox_runtime.verification_manifest import VisualVerificationRequest
+from sandbox_runtime.verification_manifest import VerificationScenario, VisualVerificationRequest
 from sandbox_runtime.visual_verification import (
     EXIT_BLOCKED,
     EXIT_FAILED,
     EXIT_PASSED,
+    AgentBrowser,
     JsonCommandRunner,
     VerificationBlocked,
+    apply_wait,
     execute_idempotent_visual_verification,
     execute_visual_verification,
     load_dev_service_metadata,
@@ -111,6 +113,7 @@ class FakeRunner(JsonCommandRunner):
         self.browser_crashes = browser_crashes
         self.current_url = ""
         self.commands: list[list[str]] = []
+        self.environments: list[dict[str, str]] = []
 
     async def run(
         self,
@@ -121,8 +124,9 @@ class FakeRunner(JsonCommandRunner):
         environment: dict[str, str] | None = None,
         failure_kind: str = "browser",
     ) -> dict[str, Any]:
-        del timeout_seconds, stdin, environment, failure_kind
+        del timeout_seconds, stdin, failure_kind
         self.commands.append(command)
+        self.environments.append(dict(environment or {}))
         if command[0] == "/fake/upload-media":
             return {"artifactId": "artifact-1"}
         action = next(
@@ -329,6 +333,48 @@ async def test_visual_verification_passes_only_after_upload(tmp_path: Path, capl
     }
     assert all("url" not in record.__dict__ for record in stage_records)
     assert all("artifact_id" not in record.__dict__ for record in stage_records)
+
+
+@pytest.mark.parametrize(
+    ("wait_for", "expected_arguments"),
+    [
+        ({"kind": "selector", "value": "#ready", "timeout_seconds": 7}, ["wait", "#ready"]),
+        (
+            {"kind": "text", "value": "Dashboard ready", "timeout_seconds": 8},
+            ["wait", "--text", "Dashboard ready"],
+        ),
+        (
+            {"kind": "load", "value": "networkidle", "timeout_seconds": 9},
+            ["wait", "--load", "networkidle"],
+        ),
+    ],
+)
+async def test_apply_wait_matches_agent_browser_0_21_cli(
+    wait_for: dict[str, object], expected_arguments: list[str]
+) -> None:
+    runner = FakeRunner()
+    browser = AgentBrowser(
+        "/fake/agent-browser",
+        runner,
+        "session-1",
+        30,
+        {},
+    )
+    scenario = VerificationScenario.model_validate(
+        {
+            "id": "home",
+            "viewport": {"width": 800, "height": 600},
+            "wait_for": wait_for,
+        }
+    )
+
+    await apply_wait(browser, scenario)
+
+    assert runner.commands[-1][-len(expected_arguments) :] == expected_arguments
+    assert "--timeout" not in runner.commands[-1]
+    assert runner.environments[-1]["AGENT_BROWSER_DEFAULT_TIMEOUT"] == str(
+        int(float(wait_for["timeout_seconds"]) * 1000)
+    )
 
 
 async def test_visual_verification_preserves_capture_on_assertion_failure(tmp_path: Path) -> None:
