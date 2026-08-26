@@ -1,3 +1,8 @@
+---
+name: agent-browser
+description: Use the sandbox browser to inspect and verify web applications visually.
+---
+
 # agent-browser
 
 Use `agent-browser` from bash when you need visual verification in the sandbox.
