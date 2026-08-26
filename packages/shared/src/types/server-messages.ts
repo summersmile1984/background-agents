@@ -41,6 +41,8 @@ const sessionStateSchema = z.object({
   ttydUrl: z.string().nullable().optional(),
   ttydToken: z.string().nullable().optional(),
   sandboxDashboardUrl: z.string().nullable().optional(),
+  /** True when this session's immutable sandbox policy permits browser verification. */
+  visualVerificationEnabled: z.boolean().optional(),
   /**
    * Ordered repository list; [0] = primary. Optional so pre-feature servers
    * and producers stay valid — consumers default to [] (absent means a

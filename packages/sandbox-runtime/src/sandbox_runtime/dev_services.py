@@ -7,7 +7,9 @@ import contextlib
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,7 +31,7 @@ class ManagedProcess:
     name: str
     kind: str
     process: asyncio.subprocess.Process
-    port: int | None = None
+    ports: tuple[int, ...] = ()
     data_dir: Path | None = None
     snapshot_command: str | None = None
     cwd: Path | None = None
@@ -38,7 +40,15 @@ class ManagedProcess:
 class DevServiceManager:
     """Starts optional services without making secondary failures fatal."""
 
-    def __init__(self, *, workspace_path: Path, log: Any, warn: Callable[[str, str], None]) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox_id: str,
+        workspace_path: Path,
+        log: Any,
+        warn: Callable[[str, str], None],
+    ) -> None:
+        self.sandbox_id = sandbox_id
         self.workspace_path = workspace_path
         self.state_root = workspace_path / ".openinspect" / "state"
         self.log = log
@@ -118,7 +128,7 @@ class DevServiceManager:
                 name="postgres",
                 kind="postgres",
                 process=process,
-                port=config.port,
+                ports=(config.port,),
                 data_dir=data_dir,
             )
             self._processes.append(managed)
@@ -187,7 +197,7 @@ class DevServiceManager:
                 name="redis",
                 kind="redis",
                 process=process,
-                port=config.port,
+                ports=(config.port,),
                 data_dir=data_dir,
             )
             self._processes.append(managed)
@@ -229,7 +239,7 @@ class DevServiceManager:
                 name=config.name,
                 kind="process",
                 process=process,
-                port=config.ports[0] if config.ports else None,
+                ports=tuple(config.ports),
                 snapshot_command=config.snapshot_command,
                 cwd=cwd,
             )
@@ -324,22 +334,47 @@ class DevServiceManager:
             {
                 "name": managed.name,
                 "kind": managed.kind,
+                "state": "ready",
                 "pid": managed.process.pid,
-                "port": managed.port,
+                "ports": list(managed.ports),
+                "primaryUrl": (
+                    f"http://127.0.0.1:{managed.ports[0]}"
+                    if managed.kind == "process" and managed.ports
+                    else None
+                ),
+                # Retained for snapshot compatibility while consumers migrate
+                # to the versioned `ports` field.
+                "port": managed.ports[0] if managed.ports else None,
                 "dataDir": str(managed.data_dir) if managed.data_dir else None,
                 "cwd": str(managed.cwd) if managed.cwd else None,
                 "hasSnapshotCommand": managed.snapshot_command is not None,
             }
             for managed in self._processes
         ]
-        DEV_SERVICE_METADATA_PATH.write_text(
-            json.dumps(
-                {
-                    "manifestPath": str(self.manifest_path) if self.manifest_path else None,
-                    "services": metadata,
-                }
-            )
-        )
+        payload = {
+            "version": 1,
+            "sandboxId": self.sandbox_id,
+            "generatedAt": datetime.now(UTC)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+            "manifestPath": str(self.manifest_path) if self.manifest_path else None,
+            "services": metadata,
+        }
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=DEV_SERVICE_METADATA_PATH.parent,
+            prefix=f".{DEV_SERVICE_METADATA_PATH.name}.",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary_path.chmod(0o600)
+            json.dump(payload, temporary, separators=(",", ":"))
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        try:
+            temporary_path.replace(DEV_SERVICE_METADATA_PATH)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     def _record_warning(self, message: str) -> None:
         self.log.warn("dev_service.degraded", warning_message=message)

@@ -21,7 +21,7 @@ import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import websockets
 from websockets import ClientConnection, State
@@ -43,17 +43,32 @@ from .constants import (
 from .diff_capture import ControlPlaneDiffClient, SessionDiffRefreshWorker
 from .event_forwarder import BufferedEventForwarder
 from .git_signing import GitSigningError, GitSigningRuntime
-from .harness.base import HarnessDriver, HarnessPrompt
+from .harness.base import (
+    HarnessDriver,
+    HarnessPrompt,
+    visual_verification_system_instruction,
+)
 from .harness.claude import ClaudeHarnessDriver
 from .harness.codex import CodexHarnessDriver
 from .harness.deepseek import DeepSeekHarnessDriver
 from .harness.mcp_config import load_session_mcp_servers
 from .log_config import configure_logging, get_logger
 from .opencode_client import OpenCodeClient
+from .prompt_context import PromptContext, clear_prompt_context, write_prompt_context
 from .prompt_stream import OpenCodePromptStream
 from .repo_config import find_repo_entry, load_repo_manifest
 from .snapshot_coordinator import SnapshotCoordinator
 from .types import AgentHarness, GitUser
+from .verification_manifest import (
+    VERIFICATION_MANIFEST_RELATIVE_PATH,
+    VisualVerificationRequest,
+    load_visual_verification_policy,
+)
+from .visual_verification import (
+    execute_idempotent_visual_verification,
+    persist_blocked_visual_verification,
+)
+from .visual_verification_store import load_stored_visual_verification
 
 configure_logging()
 
@@ -196,6 +211,7 @@ class AgentBridge:
         self.session_id = session_id
         self.control_plane_url = control_plane_url
         self.auth_token = auth_token
+        self._platform_visual_instruction = visual_verification_system_instruction(os.environ)
         self.opencode_port = opencode_port
         self.opencode_base_url = f"http://localhost:{opencode_port}"
         self.agent_harness = AgentHarness(agent_harness)
@@ -644,23 +660,18 @@ class AgentBridge:
             task = asyncio.create_task(self._handle_prompt(cmd))
             self._current_prompt_task = task
 
-            def handle_task_exception(t: asyncio.Task[None], mid: str = message_id) -> None:
+            def handle_task_exception(
+                t: asyncio.Task[None],
+                mid: str = message_id,
+                prompt_cmd: dict[str, Any] = cmd,
+            ) -> None:
                 # Release the diff worker's idle gate before any refresh request
                 # below so the refresh can start immediately.
                 self.diff_refresh.prompt_finished()
                 if self._current_prompt_task is t:
                     self._current_prompt_task = None
                 if t.cancelled():
-                    asyncio.create_task(
-                        self._send_terminal_event_and_refresh(
-                            {
-                                "type": "execution_complete",
-                                "messageId": mid,
-                                "success": False,
-                                "error": "Task was cancelled",
-                            }
-                        )
-                    )
+                    asyncio.create_task(self._handle_cancelled_prompt(prompt_cmd, str(mid)))
                 elif exc := t.exception():
                     asyncio.create_task(
                         self._send_terminal_event_and_refresh(
@@ -725,6 +736,174 @@ class AgentBridge:
         await self._send_event(event)
         self.diff_refresh.request(str(event.get("messageId") or "") or None)
 
+    async def _send_stored_visual_verification(self, message_id: str) -> None:
+        try:
+            stored_verification = load_stored_visual_verification(message_id)
+        except (OSError, ValueError) as verification_error:
+            self.log.warn(
+                "visual_verification.report_invalid",
+                message_id=message_id,
+                exc=verification_error,
+            )
+            return
+        if stored_verification is None:
+            return
+        await self._send_event(
+            {
+                "type": "visual_verification",
+                "messageId": message_id,
+                "requestDigest": stored_verification.request_digest,
+                "report": stored_verification.report.model_dump(mode="json", by_alias=True),
+            }
+        )
+
+    async def _handle_cancelled_prompt(self, cmd: dict[str, Any], message_id: str) -> None:
+        explicit = cmd.get("visualVerificationRequest")
+        if explicit is not None:
+            try:
+                request = VisualVerificationRequest.model_validate(explicit)
+                if request.session_id != self.session_id or request.message_id != message_id:
+                    raise ValueError(
+                        "Visual verification request identity does not match the prompt"
+                    )
+                report, exit_code = persist_blocked_visual_verification(
+                    request,
+                    failure_code="cancelled",
+                    failure_message="Visual verification was cancelled with the prompt",
+                )
+                self.log.info(
+                    "visual_verification.cancelled",
+                    message_id=message_id,
+                    harness=self.agent_harness.value,
+                    outcome=report.get("status"),
+                    exit_code=exit_code,
+                )
+            except (OSError, ValueError) as verification_error:
+                self.log.warn(
+                    "visual_verification.cancelled_report_failed",
+                    message_id=message_id,
+                    exc=verification_error,
+                )
+            await self._send_stored_visual_verification(message_id)
+        await self._send_terminal_event_and_refresh(
+            {
+                "type": "execution_complete",
+                "messageId": message_id,
+                "success": False,
+                "error": "Task was cancelled",
+            }
+        )
+
+    async def _visual_request_for_prompt(
+        self,
+        cmd: dict[str, Any],
+        message_id: str,
+        *,
+        harness_succeeded: bool,
+    ) -> tuple[VisualVerificationRequest | None, Path]:
+        repository_root = self._harness_workdir()
+        explicit = cmd.get("visualVerificationRequest")
+        if explicit is not None:
+            request = VisualVerificationRequest.model_validate(explicit)
+            if request.session_id != self.session_id or request.message_id != message_id:
+                raise ValueError("Visual verification request identity does not match the prompt")
+            return request, repository_root
+        if not harness_succeeded:
+            return None, repository_root
+
+        policy = load_visual_verification_policy(
+            os.environ.get("OPENINSPECT_VISUAL_VERIFICATION_POLICY")
+        )
+        if not policy.enabled or policy.trigger == "explicit_only":
+            return None, repository_root
+        if policy.trigger == "declared_ui_changes":
+            if not (repository_root / VERIFICATION_MANIFEST_RELATIVE_PATH).is_file():
+                return None, repository_root
+            if not await self._repository_has_ui_changes(repository_root):
+                return None, repository_root
+            reason: Literal["repository_declared", "host_required"] = "repository_declared"
+        else:
+            reason = "host_required"
+        return (
+            VisualVerificationRequest(
+                sessionId=self.session_id,
+                messageId=message_id,
+                reason=reason,
+            ),
+            repository_root,
+        )
+
+    async def _repository_has_ui_changes(self, repository_root: Path) -> bool:
+        """Classify bounded Git status paths; never inspect file contents or prompt text."""
+        process = await asyncio.create_subprocess_exec(
+            "git",
+            "-C",
+            str(repository_root),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _stderr = await process.communicate()
+        if process.returncode or len(stdout) > 1024 * 1024:
+            self.log.warn(
+                "visual_verification.ui_change_detection_failed",
+                repository_root=str(repository_root),
+            )
+            return False
+        ui_suffixes = {
+            ".css",
+            ".html",
+            ".htm",
+            ".js",
+            ".jsx",
+            ".less",
+            ".sass",
+            ".scss",
+            ".svelte",
+            ".ts",
+            ".tsx",
+            ".vue",
+        }
+        ui_roots = {"app", "components", "pages", "public", "src", "web"}
+        for line in stdout.decode(errors="replace").splitlines():
+            raw_path = line[3:] if len(line) > 3 else ""
+            path = raw_path.rsplit(" -> ", 1)[-1].strip('"')
+            candidate = Path(path)
+            if candidate.suffix.lower() in ui_suffixes or (
+                candidate.parts and candidate.parts[0].lower() in ui_roots
+            ):
+                return True
+        return False
+
+    async def _run_platform_visual_verification(
+        self,
+        cmd: dict[str, Any],
+        message_id: str,
+        *,
+        harness_succeeded: bool,
+    ) -> None:
+        request, repository_root = await self._visual_request_for_prompt(
+            cmd,
+            message_id,
+            harness_succeeded=harness_succeeded,
+        )
+        if request is None:
+            return
+        report, exit_code = await execute_idempotent_visual_verification(
+            request,
+            repository_root=repository_root,
+        )
+        self.log.info(
+            "visual_verification.run",
+            message_id=message_id,
+            harness=self.agent_harness.value,
+            trigger=request.reason,
+            outcome=report.get("status"),
+            exit_code=exit_code,
+        )
+
     async def _handle_prompt(self, cmd: dict[str, Any]) -> None:
         """Handle prompt command - send to OpenCode and stream response."""
         message_id = cmd.get("messageId") or cmd.get("message_id", "unknown")
@@ -744,6 +923,13 @@ class AgentBridge:
         )
 
         try:
+            write_prompt_context(
+                PromptContext(
+                    session_id=self.session_id,
+                    message_id=str(message_id),
+                    sandbox_id=self.sandbox_id,
+                )
+            )
             prompt_author = parse_prompt_git_author(author_data)
             await self._configure_git_identity(prompt_author)
 
@@ -806,6 +992,44 @@ class AgentBridge:
             if had_error:
                 outcome = "error"
 
+            await self._run_platform_visual_verification(
+                cmd,
+                str(message_id),
+                harness_succeeded=not had_error,
+            )
+
+            try:
+                stored_verification = load_stored_visual_verification(str(message_id))
+            except (OSError, ValueError) as verification_error:
+                stored_verification = None
+                self.log.warn(
+                    "visual_verification.report_invalid",
+                    message_id=message_id,
+                    exc=verification_error,
+                )
+            if stored_verification is not None:
+                verification_policy = load_visual_verification_policy(
+                    os.environ.get("OPENINSPECT_VISUAL_VERIFICATION_POLICY")
+                )
+                if (
+                    verification_policy.completion_behavior == "require_pass"
+                    and stored_verification.report.status in {"failed", "blocked"}
+                ):
+                    had_error = True
+                    outcome = "error"
+                    error_message = (
+                        "Visual verification was required but did not pass: "
+                        f"{stored_verification.report.status}"
+                    )
+                await self._send_event(
+                    {
+                        "type": "visual_verification",
+                        "messageId": str(message_id),
+                        "requestDigest": stored_verification.request_digest,
+                        "report": stored_verification.report.model_dump(mode="json", by_alias=True),
+                    }
+                )
+
             await self._send_event(
                 {
                     "type": "execution_complete",
@@ -827,6 +1051,7 @@ class AgentBridge:
                 }
             )
         finally:
+            clear_prompt_context(expected_message_id=str(message_id))
             duration_ms = int((time.time() - start_time) * 1000)
             self.log.info(
                 "prompt.run",
@@ -955,6 +1180,7 @@ class AgentBridge:
             model=model,
             reasoning_effort=reasoning_effort,
             attachments=attachments,
+            system_instruction=self._platform_visual_instruction,
         ):
             yield event
 

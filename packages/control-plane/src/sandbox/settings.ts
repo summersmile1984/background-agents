@@ -5,6 +5,7 @@ import {
   type ConfiguredSandboxPort,
   type SandboxSettings,
 } from "@open-inspect/shared/types/integrations";
+import { visualVerificationPolicySchema } from "@open-inspect/shared/types/visual-verification";
 
 type InvalidSandboxSettingsBehavior = "throw" | "omit";
 
@@ -148,6 +149,17 @@ export function normalizeSandboxSettings(
   if (buildTimeoutSeconds !== undefined) {
     // Stored as-is; the build trigger caps it at MAX via resolveBuildTimeoutSeconds.
     result.buildTimeoutSeconds = buildTimeoutSeconds;
+  }
+
+  if (settings.visualVerification !== undefined) {
+    const parsed = visualVerificationPolicySchema.safeParse(settings.visualVerification);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue?.path.length ? `.${issue.path.join(".")}` : "";
+      reject(`visualVerification${path} ${issue?.message ?? "is invalid"}`);
+    } else {
+      result.visualVerification = parsed.data;
+    }
   }
 
   checkPortCollisions(result, reject);

@@ -1,4 +1,5 @@
 import type { FeishuCard } from "./feishu/client";
+import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
 import type { FeishuRepositoryConnection, FeishuRepositoryTarget } from "./targets";
 
 // Keep mobile cards short enough to scroll comfortably. Repository selection
@@ -172,6 +173,7 @@ export function buildCompletionCard(input: {
   error?: string;
   webAppUrl: string;
   pullRequestUrl?: string;
+  visualVerification?: VisualVerificationReport;
 }): FeishuCard {
   const card = title(
     input.success ? "Open-Inspect 已完成" : "Open-Inspect 运行失败",
@@ -184,6 +186,13 @@ export function buildCompletionCard(input: {
     tag: "div",
     text: { tag: "lark_md", content: `目标：**${input.targetLabel}**\n\n${body.slice(0, 3000)}` },
   });
+  const verificationLine = formatVisualVerification(input.visualVerification);
+  if (verificationLine) {
+    elements(card).push({
+      tag: "div",
+      text: { tag: "lark_md", content: verificationLine },
+    });
+  }
   const actions: Record<string, unknown>[] = [
     {
       tag: "button",
@@ -197,6 +206,19 @@ export function buildCompletionCard(input: {
   }
   elements(card).push({ tag: "action", actions });
   return card;
+}
+
+function formatVisualVerification(report: VisualVerificationReport | undefined): string | null {
+  if (!report || report.status === "not_requested") return null;
+  if (report.status === "passed") {
+    const artifactCount = report.scenarios.reduce(
+      (total, scenario) => total + scenario.artifactIds.length,
+      0
+    );
+    return `✅ 视觉验证已通过：${report.scenarios.length} 个场景，${artifactCount} 张截图。`;
+  }
+  const detail = report.failure?.message ? `：${report.failure.message}` : "";
+  return report.status === "failed" ? `❌ 视觉验证失败${detail}` : `⚠️ 视觉验证未完成${detail}`;
 }
 
 export function buildSessionListCard(input: {

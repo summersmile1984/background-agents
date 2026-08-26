@@ -53,6 +53,7 @@ RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
   && chmod 0755 /usr/local/bin/ttyd \
   && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
   && agent-browser install \
+  && agent-browser --version \
   && mkdir -p /home/user/.agent-browser \
   && cp -R /root/.agent-browser/. /home/user/.agent-browser/ \
   && chown -R 1000:1000 /home/user/.agent-browser \
@@ -63,6 +64,7 @@ COPY sandbox_runtime /app/sandbox_runtime
 COPY sandbox_runtime/gh-wrapper.sh /usr/local/bin/gh
 COPY sandbox_runtime/bin/upload-media.js /usr/local/bin/upload-media
 COPY sandbox_runtime/bin/oi-git-sign /usr/local/bin/oi-git-sign
+COPY sandbox_runtime/bin/oi-visual-verify /usr/local/bin/oi-visual-verify
 COPY oi-launch.py /usr/local/bin/oi-launch
 COPY cube-entry.sh /usr/local/bin/cube-entry
 
@@ -71,9 +73,11 @@ RUN printf '/app\n' > "$(python -c 'import site; print(site.getsitepackages()[0]
      > /usr/local/bin/oi-git-credentials \
   && chmod 0755 /usr/local/bin/oi-git-credentials /usr/local/bin/gh \
      /usr/local/bin/upload-media /usr/local/bin/oi-git-sign \
+     /usr/local/bin/oi-visual-verify \
      /usr/local/bin/oi-launch /usr/local/bin/cube-entry \
   && test -x /usr/local/bin/upload-media \
   && test -x /usr/local/bin/oi-git-sign \
+  && test -x /usr/local/bin/oi-visual-verify \
   && git config --system credential.helper /usr/local/bin/oi-git-credentials \
   && git config --system credential.useHttpPath true
 
@@ -82,7 +86,7 @@ ENV HOME=/root \
     PATH=/usr/local/bin:/usr/bin:/bin \
     PYTHONPATH=/app \
     NODE_PATH=/usr/lib/node_modules \
-    SANDBOX_VERSION=v73-native-runtime-commands
+    SANDBOX_VERSION=v74-visual-verification
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/cube-entry"]

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCompletionBlocks } from "./blocks";
 import type { AgentResponse } from "@open-inspect/shared/types/artifacts";
 import type { SlackCallbackContext } from "@open-inspect/shared/types/session-api";
+import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
 
 const BASE_CONTEXT: SlackCallbackContext = {
   source: "slack",
@@ -18,6 +19,31 @@ const BASE_RESPONSE: AgentResponse = {
   mediaArtifacts: [],
   success: true,
 };
+
+function visualReport(status: "passed" | "failed" | "blocked"): VisualVerificationReport {
+  return {
+    version: 1,
+    messageId: "message-1",
+    status,
+    startedAt: "2026-08-27T00:00:00.000Z",
+    finishedAt: "2026-08-27T00:00:01.000Z",
+    scenarios:
+      status === "passed"
+        ? [
+            {
+              id: "home",
+              status: "passed",
+              source: "service:web/",
+              viewport: { width: 800, height: 600 },
+              assertions: [],
+              artifactIds: ["capture-1"],
+              durationMs: 1000,
+            },
+          ]
+        : [],
+    failure: status === "passed" ? null : { code: "browser_failed", message: "page crashed" },
+  };
+}
 
 function getActionElements(
   blocks: ReturnType<typeof buildCompletionBlocks>
@@ -57,6 +83,34 @@ describe("buildCompletionBlocks", () => {
     expect(actionElements).toHaveLength(1);
     expect(actionElements[0]?.action_id).toBe("view_session");
   });
+
+  it("renders a passed visual verification summary", () => {
+    const blocks = buildCompletionBlocks(
+      "session-123",
+      { ...BASE_RESPONSE, visualVerification: visualReport("passed") },
+      BASE_CONTEXT,
+      "https://app.openinspect.dev"
+    );
+
+    expect(JSON.stringify(blocks)).toContain("Visual verification passed · 1 scenario · 1 capture");
+  });
+
+  it.each(["failed", "blocked"] as const)(
+    "renders %s verification without claiming it passed",
+    (status) => {
+      const serialized = JSON.stringify(
+        buildCompletionBlocks(
+          "session-123",
+          { ...BASE_RESPONSE, visualVerification: visualReport(status) },
+          BASE_CONTEXT,
+          "https://app.openinspect.dev"
+        )
+      );
+
+      expect(serialized).toContain("page crashed");
+      expect(serialized).not.toContain("Visual verification passed");
+    }
+  );
 
   it("adds Create PR button for manual PR branch artifacts", () => {
     const response: AgentResponse = {

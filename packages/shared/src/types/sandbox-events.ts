@@ -2,6 +2,7 @@ import { z } from "zod";
 import { sessionDiffBaselineRepositorySchema } from "./session-diffs";
 import { resolvedSessionAttachmentsSchema } from "./session-attachments";
 import { agentHarnessSchema } from "./agent-harness";
+import { visualVerificationReportSchema } from "./visual-verification";
 
 const recordSchema = z.record(z.string(), z.unknown());
 const gitSyncStatusSchema = z.enum(["pending", "in_progress", "completed", "failed"]);
@@ -113,6 +114,11 @@ export const sandboxEventSchema = z.discriminatedUnion("type", [
     type: z.literal("execution_complete"),
     success: z.boolean(),
     error: z.string().optional(),
+  }),
+  messageSandboxEventBaseSchema.extend({
+    type: z.literal("visual_verification"),
+    requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    report: visualVerificationReportSchema,
   }),
   messageSandboxEventBaseSchema.extend({
     type: z.literal("context_compacted"),

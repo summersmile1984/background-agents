@@ -10,7 +10,7 @@ function createMockSql() {
       calls.push({ query, params });
       return {
         toArray: () => rowsByQuery.get(query) ?? [],
-        one: () => null,
+        one: () => rowsByQuery.get(query)?.[0] ?? null,
         rowsWritten: 0,
       };
     },
@@ -191,6 +191,69 @@ describe("EventRepository", () => {
         "msg-1",
         1000,
       ]);
+    });
+  });
+
+  describe("recordVisualVerificationEvent", () => {
+    const event = {
+      type: "visual_verification" as const,
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1,
+      requestDigest: "a".repeat(64),
+      report: {
+        version: 1 as const,
+        messageId: "msg-1",
+        status: "passed" as const,
+        startedAt: "2026-08-26T00:00:00.000Z",
+        finishedAt: "2026-08-26T00:00:01.000Z",
+        scenarios: [
+          {
+            id: "home",
+            status: "passed" as const,
+            source: "web:/",
+            viewport: { width: 800, height: 600 },
+            assertions: [],
+            artifactIds: ["artifact-1"],
+            durationMs: 1000,
+          },
+        ],
+        failure: null,
+      },
+    };
+
+    it("inserts the first report under a deterministic message key", () => {
+      expect(repository.recordVisualVerificationEvent("msg-1", event, 1000)).toBe("inserted");
+
+      expect(mock.calls[0].query).toBe("SELECT data FROM events WHERE id = ?");
+      expect(mock.calls[0].params).toEqual(["visual_verification:msg-1"]);
+      expect(mock.calls[1].params).toEqual([
+        "visual_verification:msg-1",
+        "visual_verification",
+        JSON.stringify(event),
+        "msg-1",
+        1000,
+      ]);
+    });
+
+    it("returns replayed without replacing the first report", () => {
+      mock.setRows("SELECT data FROM events WHERE id = ?", [{ data: JSON.stringify(event) }]);
+
+      expect(repository.recordVisualVerificationEvent("msg-1", event, 2000)).toBe("replayed");
+      expect(mock.calls).toHaveLength(1);
+    });
+
+    it("rejects a different request digest for the same message", () => {
+      mock.setRows("SELECT data FROM events WHERE id = ?", [{ data: JSON.stringify(event) }]);
+
+      expect(
+        repository.recordVisualVerificationEvent(
+          "msg-1",
+          { ...event, requestDigest: "b".repeat(64) },
+          2000
+        )
+      ).toBe("conflict");
+      expect(mock.calls).toHaveLength(1);
     });
   });
 

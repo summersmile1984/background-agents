@@ -197,8 +197,9 @@ function buildImage(options: Pick<BuildOptions, "repoRoot" | "builderMemoryMb">)
       "sudo chmod 0755 /usr/local/bin/ttyd",
       // bun — used by agent-browser and some opencode tooling.
       `curl -fsSL https://bun.sh/install | sudo env BUN_INSTALL=${BUN_INSTALL_DIR} bash || true`,
-      // agent-browser Chromium download (best-effort; the shared libs are installed via aptInstall above).
-      `sudo env HOME=${SANDBOX_HOME} PATH=${NPM_PREFIX}/bin:${BUN_INSTALL_DIR}/bin:${USER_BIN}:/usr/local/bin:/usr/bin:/bin agent-browser install || true`
+      // Browser verification is a runtime contract, so a missing Chromium must fail the image.
+      `sudo env HOME=${SANDBOX_HOME} PATH=${NPM_PREFIX}/bin:${BUN_INSTALL_DIR}/bin:${USER_BIN}:/usr/local/bin:/usr/bin:/bin agent-browser install`,
+      `${NPM_PREFIX}/bin/agent-browser --version`
     )
     .runCommands(
       `curl -fsSL -o /tmp/code-server.deb https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_amd64.deb`,
@@ -257,7 +258,7 @@ function buildImage(options: Pick<BuildOptions, "repoRoot" | "builderMemoryMb">)
       OPENINSPECT_BIN_INSTALL_DIR: USER_BIN,
       NO_PROXY: LOCAL_NO_PROXY,
       no_proxy: LOCAL_NO_PROXY,
-      SANDBOX_VERSION: "v61-codewhale-harness",
+      SANDBOX_VERSION: "v62-visual-verification",
     })
     .workdir(`${SANDBOX_HOME}/workspace`)
     .builderMemory(options.builderMemoryMb);

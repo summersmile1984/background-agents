@@ -54,6 +54,8 @@ class OpenCodeHarnessDriver:
             except Exception as error:
                 self._log.warn("harness.session_resume_failed", harness=self.harness, exc=error)
         self._session_id = await self._client.create_session()
+        if not self._session_id:
+            raise RuntimeError("OpenCode returned no session ID")
         return self._session_id
 
     async def stream_prompt(self, prompt: HarnessPrompt) -> AsyncIterator[dict[str, object]]:

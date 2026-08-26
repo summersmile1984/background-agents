@@ -24,7 +24,7 @@ CODEWHALE_VERSION = "0.9.8"
 CODE_SERVER_VERSION = "4.109.5"
 AGENT_BROWSER_VERSION = "0.21.2"
 # Bump when changing image contents to invalidate the Daytona snapshot.
-SANDBOX_VERSION = "daytona-v8-codewhale-harness"
+SANDBOX_VERSION = "daytona-v9-visual-verification"
 
 
 def build_base_image(repo_root: Path) -> Image:
@@ -77,6 +77,7 @@ def build_base_image(repo_root: Path) -> Image:
             "rm /tmp/code-server.deb",
             f"npm install -g agent-browser@{AGENT_BROWSER_VERSION}",
             "agent-browser install",
+            "agent-browser --version",
             "mkdir -p /workspace /app /tmp/opencode",
             # Install the SCM credential-helper shim and configure git
             # system-wide. The shim delegates to the Python helper module

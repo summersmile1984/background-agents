@@ -27,6 +27,7 @@ export interface CreateMessageData {
   model?: string | null;
   reasoningEffort?: string | null;
   attachments?: string | null;
+  visualVerification?: string | null;
   callbackContext?: string | null;
   clientRequestId?: string | null;
   requestFingerprint?: string | null;
@@ -208,8 +209,8 @@ export class MessageRepository {
 
   createMessage(data: CreateMessageData): void {
     this.sql.exec(
-      `INSERT INTO messages (id, author_id, content, source, model, reasoning_effort, attachments, callback_context, client_request_id, request_fingerprint, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages (id, author_id, content, source, model, reasoning_effort, attachments, visual_verification, callback_context, client_request_id, request_fingerprint, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       data.id,
       data.authorId,
       data.content,
@@ -217,6 +218,7 @@ export class MessageRepository {
       data.model ?? null,
       data.reasoningEffort ?? null,
       data.attachments ?? null,
+      data.visualVerification ?? null,
       data.callbackContext ?? null,
       data.clientRequestId ?? null,
       data.requestFingerprint ?? null,

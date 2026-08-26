@@ -177,6 +177,10 @@
     "./types/analytics": {
       "import": "./dist/types/analytics.js",
       "types": "./dist/types/analytics.d.ts"
+    },
+    "./types/visual-verification": {
+      "import": "./dist/types/visual-verification.js",
+      "types": "./dist/types/visual-verification.d.ts"
     }
   },
   "scripts": {

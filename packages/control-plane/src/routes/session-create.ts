@@ -485,6 +485,7 @@ async function handleCreateSession(
   const result: CreateSessionResponse = {
     sessionId,
     status: "created",
+    visualVerificationEnabled: sandboxSettings.visualVerification?.enabled === true,
   };
 
   return json(result, 201);

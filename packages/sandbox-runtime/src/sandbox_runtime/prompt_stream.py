@@ -189,6 +189,7 @@ class OpenCodePromptStream:
         model: str | None = None,
         reasoning_effort: str | None = None,
         attachments: list[HydratedSessionAttachment] | None = None,
+        system_instruction: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Stream response from OpenCode using Server-Sent Events.
 
@@ -199,7 +200,12 @@ class OpenCodePromptStream:
         """
         opencode_message_id = OpenCodeIdentifier.ascending("message")
         request_body = self._build_prompt_request_body(
-            content, model, opencode_message_id, reasoning_effort, attachments
+            content,
+            model,
+            opencode_message_id,
+            reasoning_effort,
+            attachments,
+            system_instruction,
         )
 
         state = _PromptState(
@@ -825,6 +831,7 @@ class OpenCodePromptStream:
         opencode_message_id: str | None = None,
         reasoning_effort: str | None = None,
         attachments: list[HydratedSessionAttachment] | None = None,
+        system_instruction: str | None = None,
     ) -> dict[str, Any]:
         """Build request body for OpenCode prompt requests.
 
@@ -843,6 +850,9 @@ class OpenCodePromptStream:
             dict(part) for part in self._attachment_processor.build_file_parts(attachments)
         )
         request_body: dict[str, Any] = {"parts": parts}
+
+        if system_instruction:
+            request_body["system"] = system_instruction
 
         if opencode_message_id:
             request_body["messageID"] = opencode_message_id

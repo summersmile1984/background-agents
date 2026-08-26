@@ -164,7 +164,7 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url === "/api/sessions") {
-        return Response.json({ sessionId: "session-1" });
+        return Response.json({ sessionId: "session-1", visualVerificationEnabled: true });
       }
       if (url === "/api/sessions/session-1/prompt") {
         return Response.json({ ok: true });
@@ -249,6 +249,24 @@ describe("Home", () => {
     await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
     expect(sessionCreateBody()).toMatchObject({ agentHarness: "codex" });
     expect(String(sessionCreateBody().model)).toMatch(/^openai\//);
+  });
+
+  it("requests visual verification on the initial prompt", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: "Verify UI and attach screenshots" }));
+    await user.type(screen.getByPlaceholderText("What do you want to build?"), "Build the page");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(mocks.routerPush).toHaveBeenCalledWith("/session/session-1"));
+    const promptCall = vi
+      .mocked(fetch)
+      .mock.calls.find(([input]) => String(input) === "/api/sessions/session-1/prompt");
+    expect(JSON.parse(String(promptCall?.[1]?.body))).toMatchObject({
+      content: "Build the page",
+      visualVerification: {},
+    });
   });
 
   it("creates a connection-pinned session with the stable repository key", async () => {

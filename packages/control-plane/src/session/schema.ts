@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS messages (
   model TEXT,                                       -- LLM model for this specific message (per-message override)
   reasoning_effort TEXT,                            -- Per-message reasoning effort override
   attachments TEXT,                                 -- JSON array
+  visual_verification TEXT,                         -- JSON prompt-scoped verification selection
   callback_context TEXT,                            -- JSON callback context for Slack follow-up notifications
   client_request_id TEXT,                           -- Web-client idempotency key
   request_fingerprint TEXT,                         -- Participant-scoped canonical request hash
@@ -602,6 +603,11 @@ export const MIGRATIONS: readonly SchemaMigration[] = [
     id: 45,
     description: "Add immutable runtime launch specification",
     run: SESSION_LAUNCH_SPEC_TABLE_SQL,
+  },
+  {
+    id: 46,
+    description: "Add prompt-scoped visual verification selection",
+    run: `ALTER TABLE messages ADD COLUMN visual_verification TEXT`,
   },
 ];
 

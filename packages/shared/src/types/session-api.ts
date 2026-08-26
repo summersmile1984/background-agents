@@ -13,6 +13,7 @@ import {
 } from "./sessions";
 import { agentHarnessSchema } from "./agent-harness";
 import { runtimeConfigFragmentSchema } from "./runtime-launch";
+import { visualVerificationSelectionSchema } from "./visual-verification";
 
 export interface UserPreferences {
   userId: string;
@@ -161,6 +162,7 @@ export const sendPromptRequestSchema = z
     reasoningEffort: z.string().optional(),
     attachments: z.unknown().optional(),
     callbackContext: z.unknown().optional(),
+    visualVerification: visualVerificationSelectionSchema.optional(),
   })
   .refine(
     (prompt) =>
@@ -357,6 +359,7 @@ export type CreateMediaArtifactRequest = z.infer<typeof createMediaArtifactReque
 export const createSessionResponseSchema = z.object({
   sessionId: z.string().min(1),
   status: sessionStatusSchema,
+  visualVerificationEnabled: z.boolean().optional(),
 });
 
 export type CreateSessionResponse = z.infer<typeof createSessionResponseSchema>;

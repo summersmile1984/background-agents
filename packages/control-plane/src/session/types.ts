@@ -15,6 +15,7 @@ import type { ArtifactType } from "@open-inspect/shared/types/artifacts";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import type { EventType, GitSyncStatus } from "@open-inspect/shared/types/sandbox-events";
+import type { VisualVerificationRequest } from "@open-inspect/shared/types/visual-verification";
 import type { GitPushSpec } from "../source-control";
 import { z } from "zod";
 
@@ -111,6 +112,7 @@ export interface MessageRow {
   model: string | null; // LLM model for per-message override
   reasoning_effort: string | null; // Reasoning effort for per-message override
   attachments: string | null; // JSON
+  visual_verification?: string | null; // JSON VisualVerificationSelection
   callback_context: string | null; // JSON: { channel, threadTs, repoFullName, model }
   client_request_id: string | null;
   request_fingerprint: string | null;
@@ -190,6 +192,7 @@ interface PromptCommand {
     gitIdentity: PromptGitIdentity;
   };
   attachments?: ResolvedSessionAttachment[];
+  visualVerificationRequest?: VisualVerificationRequest;
 }
 
 interface StopCommand {

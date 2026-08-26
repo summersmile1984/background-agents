@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 CRITICAL_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
         "execution_complete",
+        "visual_verification",
         "error",
         "snapshot_ready",
         "push_complete",

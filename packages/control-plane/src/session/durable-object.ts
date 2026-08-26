@@ -1823,6 +1823,14 @@ export class SessionDO extends DurableObject<Env> {
     const session = this.getSession();
     if (!session) return null;
     const sandbox = this.getSandbox();
+    let visualVerificationEnabled = false;
+    try {
+      visualVerificationEnabled =
+        parsePersistedSandboxSettings(session.sandbox_settings).visualVerification?.enabled ===
+        true;
+    } catch {
+      this.log.warn("Failed to parse sandbox_settings for session snapshot");
+    }
     const publicSession: SessionSnapshotState = {
       id: this.getPublicSessionId(session),
       title: session.title,
@@ -1846,6 +1854,7 @@ export class SessionDO extends DurableObject<Env> {
       tunnelUrls: sandbox?.tunnel_urls ? this.safeParseTunnelUrls(sandbox.tunnel_urls) : null,
       ttydUrl: sandbox?.ttyd_url ?? null,
       sandboxDashboardUrl: this.getSandboxDashboardUrl(sandbox?.modal_object_id),
+      visualVerificationEnabled,
       repositories: this.getSessionRepositoryStates(session),
       environmentId: session.environment_id ?? null,
       environmentName:

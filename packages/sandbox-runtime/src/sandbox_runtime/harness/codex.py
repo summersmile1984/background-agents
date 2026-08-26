@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from ..deepseek_relay import deepseek_relay_url, uses_deepseek_model
 from ..harness_credentials import remove_runtime_codex_auth
 from ..types import AgentHarness
+from .base import visual_verification_system_instruction
 from .json_rpc import JsonRpcProcess
 from .mcp_config import codex_mcp_config
 
@@ -59,6 +60,7 @@ class CodexHarnessDriver:
         self._workspace_path = workspace_path
         self._log = log
         self._environment = dict(environment or os.environ)
+        self._platform_instruction = visual_verification_system_instruction(self._environment)
         self._mcp_servers = mcp_servers
         self._rpc = rpc or JsonRpcProcess(
             self._app_server_command(self._environment),
@@ -93,16 +95,16 @@ class CodexHarnessDriver:
         response: dict[str, Any] | None = None
         if existing_session_id:
             try:
-                response = await self._rpc.request(
-                    "thread/resume",
-                    {
-                        "threadId": existing_session_id,
-                        "cwd": self._workspace_path,
-                        "approvalPolicy": "never",
-                        "sandbox": "danger-full-access",
-                        "config": self._thread_config(),
-                    },
-                )
+                resume_params: dict[str, Any] = {
+                    "threadId": existing_session_id,
+                    "cwd": self._workspace_path,
+                    "approvalPolicy": "never",
+                    "sandbox": "danger-full-access",
+                    "config": self._thread_config(),
+                }
+                if self._platform_instruction:
+                    resume_params["developerInstructions"] = self._platform_instruction
+                response = await self._rpc.request("thread/resume", resume_params)
             except Exception as error:
                 self._log.warn(
                     "harness.session_resume_failed",
@@ -111,16 +113,16 @@ class CodexHarnessDriver:
                     exc=error,
                 )
         if response is None:
-            response = await self._rpc.request(
-                "thread/start",
-                {
-                    "cwd": self._workspace_path,
-                    "approvalPolicy": "never",
-                    "sandbox": "danger-full-access",
-                    "serviceName": "open-inspect",
-                    "config": self._thread_config(),
-                },
-            )
+            start_params: dict[str, Any] = {
+                "cwd": self._workspace_path,
+                "approvalPolicy": "never",
+                "sandbox": "danger-full-access",
+                "serviceName": "open-inspect",
+                "config": self._thread_config(),
+            }
+            if self._platform_instruction:
+                start_params["developerInstructions"] = self._platform_instruction
+            response = await self._rpc.request("thread/start", start_params)
         thread = response.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise RuntimeError("Codex app-server returned no thread ID")

@@ -11,6 +11,7 @@ import type {
   ConfiguredSandboxPort,
   SandboxSettings,
 } from "@open-inspect/shared/types/integrations";
+import type { VisualVerificationPolicy } from "@open-inspect/shared/types/visual-verification";
 import { browserApiFetch, type BrowserApiPath } from "@/lib/browser-api-fetch";
 import {
   DEFAULT_BUILD_TIMEOUT_SECONDS,
@@ -29,9 +30,76 @@ import {
   sandboxTimeoutMinutesFromMs,
   sandboxTimeoutMsFromMinutes,
 } from "./sandbox-timeout";
+import {
+  DEFAULT_VISUAL_VERIFICATION_POLICY,
+  MAX_VISUAL_VERIFICATION_CAPTURES,
+  MAX_VISUAL_VERIFICATION_SCENARIOS,
+  MAX_VISUAL_VERIFICATION_TIMEOUT_MS,
+  MAX_VISUAL_VERIFICATION_UPLOAD_BYTES,
+  visualVerificationPolicySchema,
+} from "@open-inspect/shared/types/visual-verification";
 
 const GLOBAL_SCOPE = "__global__";
 type ResourceField = "cpuCores" | "memoryMib";
+
+interface VisualVerificationDraft {
+  enabled: boolean;
+  trigger: VisualVerificationPolicy["trigger"];
+  maxScenarios: string;
+  maxCaptures: string;
+  timeoutSeconds: string;
+  maxUploadMib: string;
+  allowedServiceNames: string;
+  allowRepositoryDeclaration: boolean;
+  completionBehavior: VisualVerificationPolicy["completionBehavior"];
+  allowVideo: boolean;
+}
+
+function visualVerificationPolicyToDraft(
+  policy: VisualVerificationPolicy
+): VisualVerificationDraft {
+  return {
+    enabled: policy.enabled,
+    trigger: policy.trigger,
+    maxScenarios: String(policy.maxScenarios),
+    maxCaptures: String(policy.maxCaptures),
+    timeoutSeconds: String(policy.timeoutMs / 1000),
+    maxUploadMib: String(policy.maxUploadBytes / (1024 * 1024)),
+    allowedServiceNames: policy.allowedServiceNames.join(", "),
+    allowRepositoryDeclaration: policy.allowRepositoryDeclaration,
+    completionBehavior: policy.completionBehavior,
+    allowVideo: policy.allowVideo,
+  };
+}
+
+function parseVisualVerificationDraft(draft: VisualVerificationDraft): {
+  policy?: VisualVerificationPolicy;
+  error?: string;
+} {
+  const timeoutSeconds = Number(draft.timeoutSeconds);
+  const maxUploadMib = Number(draft.maxUploadMib);
+  const parsed = visualVerificationPolicySchema.safeParse({
+    enabled: draft.enabled,
+    trigger: draft.trigger,
+    maxScenarios: Number(draft.maxScenarios),
+    maxCaptures: Number(draft.maxCaptures),
+    timeoutMs: timeoutSeconds * 1000,
+    maxUploadBytes: maxUploadMib * 1024 * 1024,
+    allowedServiceNames: draft.allowedServiceNames
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+    allowRepositoryDeclaration: draft.allowRepositoryDeclaration,
+    allowVideo: draft.allowVideo,
+    completionBehavior: draft.completionBehavior,
+  });
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const field = issue?.path.length ? `${issue.path.join(".")} ` : "";
+    return { error: `Visual verification: ${field}${issue?.message ?? "invalid value"}.` };
+  }
+  return { policy: parsed.data };
+}
 
 interface GlobalSettingsResponse {
   integrationId: string;
@@ -278,6 +346,11 @@ export function SandboxSettingsEditor({
   const currentSandboxTimeoutMs: number | undefined =
     ownSettings?.sandboxTimeoutMs ?? baseDefaults?.sandboxTimeoutMs;
 
+  const currentVisualVerification: VisualVerificationPolicy =
+    ownSettings?.visualVerification ??
+    baseDefaults?.visualVerification ??
+    DEFAULT_VISUAL_VERIFICATION_POLICY;
+
   const currentMaxConcurrentChildSessions: number =
     ownSettings?.maxConcurrentChildSessions ??
     baseDefaults?.maxConcurrentChildSessions ??
@@ -302,6 +375,9 @@ export function SandboxSettingsEditor({
   const [maxTotalChildSessions, setMaxTotalChildSessions] = useState<string | null>(null);
   const [cpuCores, setCpuCores] = useState<string | null>(null);
   const [memoryMib, setMemoryMib] = useState<string | null>(null);
+  const [visualVerificationDraft, setVisualVerificationDraft] =
+    useState<VisualVerificationDraft | null>(null);
+  const [clearVisualVerificationOverride, setClearVisualVerificationOverride] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -329,6 +405,21 @@ export function SandboxSettingsEditor({
     (currentBuildTimeoutSeconds !== undefined ? String(currentBuildTimeoutSeconds) : "");
   const resolvedSandboxTimeoutMinutes =
     sandboxTimeoutMinutes ?? sandboxTimeoutMinutesFromMs(currentSandboxTimeoutMs);
+  const inheritedVisualVerification =
+    baseDefaults?.visualVerification ?? DEFAULT_VISUAL_VERIFICATION_POLICY;
+  const resolvedVisualVerificationDraft =
+    visualVerificationDraft ??
+    visualVerificationPolicyToDraft(
+      clearVisualVerificationOverride ? inheritedVisualVerification : currentVisualVerification
+    );
+
+  const updateVisualVerificationDraft = <K extends keyof VisualVerificationDraft>(
+    field: K,
+    value: VisualVerificationDraft[K]
+  ) => {
+    setVisualVerificationDraft({ ...resolvedVisualVerificationDraft, [field]: value });
+    setClearVisualVerificationOverride(false);
+  };
 
   const handleAddRow = () => {
     if (rows.length >= MAX_TUNNEL_PORTS) return;
@@ -406,6 +497,15 @@ export function SandboxSettingsEditor({
     const editedSandboxTimeoutMs = sandboxTimeoutMsFromMinutes(trimmedSandboxTimeoutMinutes);
     if (trimmedSandboxTimeoutMinutes !== "" && editedSandboxTimeoutMs === undefined) {
       setError("Session timeout must be at least one second, in one-second increments.");
+      return;
+    }
+
+    const parsedVisualVerification =
+      visualVerificationDraft === null
+        ? undefined
+        : parseVisualVerificationDraft(visualVerificationDraft);
+    if (parsedVisualVerification?.error) {
+      setError(parsedVisualVerification.error);
       return;
     }
 
@@ -517,6 +617,13 @@ export function SandboxSettingsEditor({
         ownSettings?.memoryMib
       );
       if (memory !== undefined) settingsPayload.memoryMib = memory;
+      if (!clearVisualVerificationOverride) {
+        const visualVerificationValue =
+          parsedVisualVerification?.policy ?? ownSettings?.visualVerification;
+        if (visualVerificationValue !== undefined) {
+          settingsPayload.visualVerification = visualVerificationValue;
+        }
+      }
       const body = isGlobal
         ? {
             settings: {
@@ -544,6 +651,8 @@ export function SandboxSettingsEditor({
       setMaxTotalChildSessions(null);
       setCpuCores(null);
       setMemoryMib(null);
+      setVisualVerificationDraft(null);
+      setClearVisualVerificationOverride(false);
       setCodeServerPort(null);
       setVncPort(null);
       setTerminalPort(null);
@@ -590,6 +699,11 @@ export function SandboxSettingsEditor({
   const hasSandboxTimeoutChange =
     sandboxTimeoutMinutes !== null &&
     sandboxTimeoutMinutes.trim() !== currentSandboxTimeoutMinutesString;
+  const hasVisualVerificationChange =
+    (visualVerificationDraft !== null &&
+      JSON.stringify(visualVerificationDraft) !==
+        JSON.stringify(visualVerificationPolicyToDraft(currentVisualVerification))) ||
+    (clearVisualVerificationOverride && ownSettings?.visualVerification !== undefined);
   const hasChanges =
     hasPortChanges ||
     hasTerminalChange ||
@@ -601,7 +715,8 @@ export function SandboxSettingsEditor({
     hasVncPortChange ||
     hasTerminalPortChange ||
     hasBuildTimeoutChange ||
-    hasSandboxTimeoutChange;
+    hasSandboxTimeoutChange ||
+    hasVisualVerificationChange;
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
@@ -890,6 +1005,203 @@ export function SandboxSettingsEditor({
           </p>
         </div>
       </div>
+
+      <fieldset className="min-w-0 rounded-lg border border-border p-4">
+        <legend className="px-1 text-sm font-medium text-foreground">Visual Verification</legend>
+        <div className="max-w-2xl space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <label htmlFor="visual-verification-enabled" className="text-sm font-medium">
+                Browser checks and screenshots
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Run the host-owned verifier after an agent task. Browser credentials stay isolated
+                from the coding harness.
+              </p>
+            </div>
+            <button
+              id="visual-verification-enabled"
+              type="button"
+              role="switch"
+              aria-label="Browser checks and screenshots"
+              aria-checked={resolvedVisualVerificationDraft.enabled}
+              onClick={() =>
+                updateVisualVerificationDraft("enabled", !resolvedVisualVerificationDraft.enabled)
+              }
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                resolvedVisualVerificationDraft.enabled ? "bg-accent" : "bg-muted"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                  resolvedVisualVerificationDraft.enabled ? "translate-x-4" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="visual-verification-trigger"
+                className="mb-1 block text-xs font-medium text-muted-foreground"
+              >
+                Run when
+              </label>
+              <select
+                id="visual-verification-trigger"
+                value={resolvedVisualVerificationDraft.trigger}
+                onChange={(event) =>
+                  updateVisualVerificationDraft(
+                    "trigger",
+                    event.target.value as VisualVerificationPolicy["trigger"]
+                  )
+                }
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="explicit_only">Requested for this message</option>
+                <option value="declared_ui_changes">A declared UI project changes</option>
+                <option value="always_after_success">Every successful task</option>
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="visual-verification-completion"
+                className="mb-1 block text-xs font-medium text-muted-foreground"
+              >
+                Task result
+              </label>
+              <select
+                id="visual-verification-completion"
+                value={resolvedVisualVerificationDraft.completionBehavior}
+                onChange={(event) =>
+                  updateVisualVerificationDraft(
+                    "completionBehavior",
+                    event.target.value as VisualVerificationPolicy["completionBehavior"]
+                  )
+                }
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="report_only">Report failures only</option>
+                <option value="require_pass">Require checks to pass</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <label htmlFor="visual-max-scenarios" className="mb-1 block text-xs font-medium">
+                Max scenarios
+              </label>
+              <Input
+                id="visual-max-scenarios"
+                type="number"
+                min={1}
+                max={MAX_VISUAL_VERIFICATION_SCENARIOS}
+                value={resolvedVisualVerificationDraft.maxScenarios}
+                onChange={(event) =>
+                  updateVisualVerificationDraft("maxScenarios", event.target.value)
+                }
+              />
+            </div>
+            <div>
+              <label htmlFor="visual-max-captures" className="mb-1 block text-xs font-medium">
+                Max screenshots
+              </label>
+              <Input
+                id="visual-max-captures"
+                type="number"
+                min={1}
+                max={MAX_VISUAL_VERIFICATION_CAPTURES}
+                value={resolvedVisualVerificationDraft.maxCaptures}
+                onChange={(event) =>
+                  updateVisualVerificationDraft("maxCaptures", event.target.value)
+                }
+              />
+            </div>
+            <div>
+              <label htmlFor="visual-timeout" className="mb-1 block text-xs font-medium">
+                Timeout (seconds)
+              </label>
+              <Input
+                id="visual-timeout"
+                type="number"
+                min={1}
+                max={MAX_VISUAL_VERIFICATION_TIMEOUT_MS / 1000}
+                value={resolvedVisualVerificationDraft.timeoutSeconds}
+                onChange={(event) =>
+                  updateVisualVerificationDraft("timeoutSeconds", event.target.value)
+                }
+              />
+            </div>
+            <div>
+              <label htmlFor="visual-upload-limit" className="mb-1 block text-xs font-medium">
+                Upload limit (MiB)
+              </label>
+              <Input
+                id="visual-upload-limit"
+                type="number"
+                min={1}
+                max={MAX_VISUAL_VERIFICATION_UPLOAD_BYTES / (1024 * 1024)}
+                value={resolvedVisualVerificationDraft.maxUploadMib}
+                onChange={(event) =>
+                  updateVisualVerificationDraft("maxUploadMib", event.target.value)
+                }
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="visual-service-allowlist" className="mb-1 block text-xs font-medium">
+              Allowed service names
+            </label>
+            <Input
+              id="visual-service-allowlist"
+              value={resolvedVisualVerificationDraft.allowedServiceNames}
+              onChange={(event) =>
+                updateVisualVerificationDraft("allowedServiceNames", event.target.value)
+              }
+              placeholder="web, frontend"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Comma-separated names from .openinspect/environment.yaml. Empty allows any declared
+              service; URLs still must resolve to sandbox loopback.
+            </p>
+          </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={resolvedVisualVerificationDraft.allowRepositoryDeclaration}
+              onChange={(event) =>
+                updateVisualVerificationDraft("allowRepositoryDeclaration", event.target.checked)
+              }
+              className="mt-0.5"
+            />
+            <span>
+              Allow repository-declared scenarios
+              <span className="block text-xs text-muted-foreground">
+                Reads the versioned .openinspect/verification.yaml manifest.
+              </span>
+            </span>
+          </label>
+
+          {!isGlobal && (
+            <Button
+              type="button"
+              variant="subtle"
+              size="xs"
+              disabled={ownSettings?.visualVerification === undefined}
+              onClick={() => {
+                setVisualVerificationDraft(null);
+                setClearVisualVerificationOverride(true);
+              }}
+            >
+              Use inherited visual verification policy
+            </Button>
+          )}
+        </div>
+      </fieldset>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 

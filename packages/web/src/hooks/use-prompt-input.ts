@@ -39,6 +39,7 @@ export function usePromptInput(
   const [prompt, setPromptState] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [visualVerificationRequested, setVisualVerificationRequested] = useState(false);
   const sessionAttachments = useSessionAttachments();
   const hasDraftAttachments = sessionAttachments.hasAttachments;
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +66,7 @@ export function usePromptInput(
   useEffect(() => clearTypingTimeout, [clearTypingTimeout]);
   useEffect(() => {
     retryRequestRef.current = null;
-  }, [selectedModel, reasoningEffort, attachmentDraftSignature]);
+  }, [selectedModel, reasoningEffort, attachmentDraftSignature, visualVerificationRequested]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,6 +117,7 @@ export function usePromptInput(
         model: selectedModel,
         reasoningEffort,
         attachmentIds: sessionAttachments.attachments.map((attachment) => attachment.id),
+        visualVerificationRequested,
       });
       const requestIdentity = resolvePromptRequestIdentity(signature, retryRequestRef.current);
       retryRequestRef.current = requestIdentity;
@@ -124,7 +126,8 @@ export function usePromptInput(
         selectedModel,
         reasoningEffort,
         attachments,
-        requestIdentity.clientRequestId
+        requestIdentity.clientRequestId,
+        visualVerificationRequested ? {} : undefined
       );
       if (!result.ok) {
         setSubmitError(
@@ -141,6 +144,7 @@ export function usePromptInput(
       retryRequestRef.current = null;
       setPrompt("");
       sessionAttachments.clearAttachments();
+      setVisualVerificationRequested(false);
       mutate(isUnarchivedSessionListKey);
     } finally {
       submitInFlightRef.current = false;
@@ -196,6 +200,8 @@ export function usePromptInput(
     inputRef,
     isSubmitting,
     submitError,
+    visualVerificationRequested,
+    setVisualVerificationRequested,
     setSubmitError,
     handleSubmit,
     handleInputChange,

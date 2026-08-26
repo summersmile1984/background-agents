@@ -626,6 +626,43 @@ function ExecutionCompleteEvent({ event }: EventRendererProps) {
   );
 }
 
+function VisualVerificationEvent({ event, onOpenMedia }: EventRendererProps) {
+  if (event.type !== "visual_verification" || event.report.status === "not_requested") return null;
+
+  const { report } = event;
+  const tone =
+    report.status === "passed" ? "success" : report.status === "failed" ? "destructive" : "warning";
+  const artifactIds = report.scenarios.flatMap((scenario) => scenario.artifactIds);
+  const label =
+    report.status === "passed"
+      ? `Visual verification passed · ${report.scenarios.length} scenario${report.scenarios.length === 1 ? "" : "s"} · ${artifactIds.length} capture${artifactIds.length === 1 ? "" : "s"}`
+      : report.status === "failed"
+        ? `Visual verification failed${report.failure?.message ? `: ${report.failure.message}` : ""}`
+        : `Visual verification blocked${report.failure?.message ? `: ${report.failure.message}` : ""}`;
+
+  return (
+    <div className="space-y-2">
+      <StatusRow tone={tone} time={formatEventTime(event)}>
+        {label}
+      </StatusRow>
+      {artifactIds.length > 0 && (
+        <div className="flex flex-wrap gap-2 pl-4">
+          {artifactIds.map((artifactId, index) => (
+            <button
+              key={artifactId}
+              type="button"
+              className="text-xs text-accent hover:underline"
+              onClick={() => onOpenMedia(artifactId)}
+            >
+              Open capture {index + 1}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContextCompactedEvent({ event }: EventRendererProps) {
   if (event.type !== "context_compacted") return null;
 
@@ -683,6 +720,7 @@ const eventRenderers: Partial<
   error: ErrorEvent,
   warning: WarningEvent,
   execution_complete: ExecutionCompleteEvent,
+  visual_verification: VisualVerificationEvent,
   context_compacted: ContextCompactedEvent,
   command_invoked: CommandInvokedEvent,
   command_result: CommandResultEvent,

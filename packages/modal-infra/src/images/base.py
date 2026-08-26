@@ -54,8 +54,8 @@ TTYD_SHA256 = "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
 # The numeric generation is one sequence shared by every image-build provider,
 # and MIN_REBUILD_RUNTIME_VERSION gates which prebuilt images get rebuilt onto
 # it, so bump every provider's label together.
-# v61: Add the native DeepSeek CodeWhale harness runtime.
-CACHE_BUSTER = "v61-codewhale-harness"
+# v62: Add the host-owned visual verification runtime and pinned browser gate.
+CACHE_BUSTER = "v62-visual-verification"
 
 # Base image with all development tools
 base_image = (

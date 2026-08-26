@@ -6,7 +6,7 @@
 
 export const VERCEL_PYTHON_BIN = "/usr/bin/python3.12";
 export const DEFAULT_VERCEL_RUNTIME = "node24";
-export const VERCEL_SANDBOX_VERSION = "v61-codewhale-harness";
+export const VERCEL_SANDBOX_VERSION = "v62-visual-verification";
 export const VERCEL_RUNTIME_WORKDIR = "/tmp/open-inspect-runtime";
 export const VERCEL_LOCAL_RUNTIME_EXTRACT_DIR = `${VERCEL_RUNTIME_WORKDIR}/packages`;
 
@@ -89,7 +89,8 @@ codewhale --version
 if [ ! -x /root/.bun/bin/bun ]; then
   curl -fsSL https://bun.sh/install | sudo -E bash || true
 fi
-sudo env PATH="/root/.bun/bin:$PATH" agent-browser install || true
+sudo env PATH="/root/.bun/bin:$PATH" agent-browser install
+agent-browser --version
 
 if ! command -v code-server >/dev/null 2>&1; then
   curl -fsSL https://code-server.dev/install.sh | sudo sh -s -- --version "$CODE_SERVER_VERSION" || true

@@ -16,6 +16,7 @@ import { createEarliestAlarmScheduler } from "./alarm/scheduler";
 import type { SessionStatusService } from "./session-status-service";
 import { AgentRuntimeSelectionError } from "../agent-runtime/selection";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import { DEFAULT_VISUAL_VERIFICATION_POLICY } from "@open-inspect/shared/types/visual-verification";
 
 function createParticipant(overrides: Partial<ParticipantRow> = {}): ParticipantRow {
   return {
@@ -119,6 +120,16 @@ it("creates a canonical SHA-256 web prompt fingerprint", async () => {
       attachments: [{ name: "different-name.png", attachmentId: "up-1" }],
     })
   ).resolves.toBe(fingerprint);
+});
+
+it("includes visual verification selection in the web prompt fingerprint", async () => {
+  const plain = await fingerprintWebPrompt("part-1", { content: "hello" });
+  const verified = await fingerprintWebPrompt("part-1", {
+    content: "hello",
+    visualVerification: { scenarioIds: ["home-desktop"] },
+  });
+
+  expect(verified).not.toBe(plain);
 });
 
 function buildQueue(
@@ -768,6 +779,76 @@ describe("SessionMessageQueue", () => {
       type: "prompt_queue_updated",
       promptQueue: expect.any(Array),
     });
+  });
+
+  it("persists and dispatches a host-derived visual verification request", async () => {
+    const h = buildQueue();
+    h.repository.getSession.mockReturnValue(
+      createSession({
+        sandbox_settings: JSON.stringify({
+          visualVerification: {
+            ...DEFAULT_VISUAL_VERIFICATION_POLICY,
+            enabled: true,
+          },
+        }),
+      })
+    );
+    await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), {
+      content: "verify this UI",
+      visualVerification: { scenarioIds: ["home-desktop"] },
+    });
+    expect(h.repository.createMessageWithAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        visualVerification: JSON.stringify({ scenarioIds: ["home-desktop"] }),
+      }),
+      []
+    );
+
+    const sandboxWs = { readyState: 1 } as WebSocket;
+    h.repository.getNextPendingMessage.mockReturnValue(
+      createMessage({
+        id: "msg-visual",
+        visual_verification: JSON.stringify({ scenarioIds: ["home-desktop"] }),
+      })
+    );
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+
+    await h.queue.processMessageQueue();
+
+    expect(h.wsManager.send).toHaveBeenCalledWith(
+      sandboxWs,
+      expect.objectContaining({
+        type: "prompt",
+        messageId: "msg-visual",
+        visualVerificationRequest: {
+          version: 1,
+          sessionId: "sess-1",
+          messageId: "msg-visual",
+          scenarioIds: ["home-desktop"],
+          reason: "user_requested",
+        },
+      })
+    );
+  });
+
+  it("rejects an explicit verification request when the session policy is disabled", async () => {
+    const h = buildQueue();
+
+    await h.queue.handlePromptMessage({} as WebSocket, createClientInfo(), {
+      clientRequestId: "request-visual-disabled",
+      content: "verify this UI",
+      visualVerification: {},
+    });
+
+    expect(h.repository.createMessageWithAttachments).not.toHaveBeenCalled();
+    expect(h.wsManager.send).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        type: "error",
+        code: "VISUAL_VERIFICATION_UNAVAILABLE",
+        clientRequestId: "request-visual-disabled",
+      })
+    );
   });
 
   it("leaves the prompt pending and timeline untouched when sandbox send fails", async () => {

@@ -6,6 +6,7 @@ import {
   promptContentSchema,
 } from "@open-inspect/shared/types/prompts";
 import { z } from "zod";
+import { visualVerificationSelectionSchema } from "@open-inspect/shared/types/visual-verification";
 
 export const enqueuePromptRequestSchema = z
   .object({
@@ -17,6 +18,7 @@ export const enqueuePromptRequestSchema = z
     reasoningEffort: z.string().optional(),
     attachments: sessionAttachmentReferencesSchema.optional(),
     callbackContext: z.record(z.string(), z.unknown()).optional(),
+    visualVerification: visualVerificationSelectionSchema.optional(),
     // Trusted SCM enrichment resolved by the router at prompt time.
     scmEnrichment: z
       .object({

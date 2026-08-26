@@ -188,6 +188,8 @@ export const RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS: readonly string[] = [
 export const VCS_CLONE_TOKEN_ENV_VAR = "VCS_CLONE_TOKEN";
 /** Repository-scoped capability for session smart-HTTP Git proxy requests. */
 export const SCM_GIT_CAPABILITY_ENV_VAR = "SCM_GIT_CAPABILITY";
+/** Host-owned JSON policy consumed by the runtime visual verifier. */
+export const VISUAL_VERIFICATION_POLICY_ENV_VAR = "OPENINSPECT_VISUAL_VERIFICATION_POLICY";
 
 /** Host/username pair git pairs with the brokered clone token in the sandbox. */
 export interface ScmCloneIdentity {
@@ -297,6 +299,7 @@ export function buildSandboxEnvVars(
 ): Record<string, string> {
   const envVars: Record<string, string> = { ...(options.baseEnvVars ?? config.userEnvVars ?? {}) };
   delete envVars[SCM_GIT_CAPABILITY_ENV_VAR];
+  delete envVars[VISUAL_VERIFICATION_POLICY_ENV_VAR];
   delete envVars.VNC_PASSWORD;
   delete envVars.NOVNC_PORT;
 
@@ -328,6 +331,12 @@ export function buildSandboxEnvVars(
 
   if (config.agentSlackNotifyEnabled) {
     envVars.AGENT_SLACK_NOTIFY_ENABLED = "true";
+  }
+
+  if (config.sandboxSettings?.visualVerification) {
+    envVars[VISUAL_VERIFICATION_POLICY_ENV_VAR] = JSON.stringify(
+      config.sandboxSettings.visualVerification
+    );
   }
 
   const proxyBaseUrl = config.scmGitProxyBaseUrl?.trim().replace(/\/+$/, "");

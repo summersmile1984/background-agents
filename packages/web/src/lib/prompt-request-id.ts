@@ -8,6 +8,7 @@ export function promptRequestSignature(input: {
   model: string;
   reasoningEffort?: string;
   attachmentIds: string[];
+  visualVerificationRequested?: boolean;
 }): string {
   return JSON.stringify(input);
 }

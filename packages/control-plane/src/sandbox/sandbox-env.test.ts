@@ -14,6 +14,7 @@ import {
   REPO_IMAGE_CALLBACK_ENV,
   RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS,
   scmCloneIdentity,
+  VISUAL_VERIFICATION_POLICY_ENV_VAR,
 } from "./sandbox-env";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -308,6 +309,31 @@ describe("buildSandboxEnvVars", () => {
         { scmIdentity: scmCloneIdentity("github") }
       ).AGENT_SLACK_NOTIFY_ENABLED
     ).toBe("true");
+  });
+
+  it("injects the host visual-verification policy and rejects a user override", () => {
+    const policy = {
+      enabled: true,
+      trigger: "explicit_only" as const,
+      maxScenarios: 3,
+      maxCaptures: 4,
+      timeoutMs: 120_000,
+      maxUploadBytes: 10 * 1024 * 1024,
+      allowedServiceNames: ["web"],
+      allowRepositoryDeclaration: true,
+      allowVideo: false,
+      completionBehavior: "report_only" as const,
+    };
+    const envVars = buildSandboxEnvVars(
+      {
+        ...baseConfig,
+        sandboxSettings: { visualVerification: policy },
+        userEnvVars: { [VISUAL_VERIFICATION_POLICY_ENV_VAR]: "user-controlled" },
+      },
+      { scmIdentity: scmCloneIdentity("github") }
+    );
+
+    expect(JSON.parse(envVars[VISUAL_VERIFICATION_POLICY_ENV_VAR])).toEqual(policy);
   });
 
   it("uses baseEnvVars as the user layer when provided, still overlaid by system vars", () => {

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from ..deepseek_relay import deepseek_relay_url, session_model, uses_deepseek_model
 from ..types import AgentHarness
+from .base import merge_system_instructions, visual_verification_system_instruction
 from .mcp_config import claude_mcp_config
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ class ClaudeHarnessDriver:
         self._workspace_path = workspace_path
         self._log = log
         self._environment = dict(environment or os.environ)
+        self._platform_instruction = visual_verification_system_instruction(self._environment)
         if uses_deepseek_model(self._environment):
             relay_url = deepseek_relay_url(self._environment, "anthropic")
             sandbox_token = self._environment.get("SANDBOX_AUTH_TOKEN", "").strip()
@@ -87,7 +89,10 @@ class ClaudeHarnessDriver:
         self._load_sdk()
         options = self._build_options(prompt)
         prompt_text = self._materialize_attachments(prompt)
-        stream = self._query_function(prompt=prompt_text, options=options)
+        query_function = self._query_function
+        if query_function is None:
+            raise RuntimeError("Claude Agent SDK query function is unavailable")
+        stream = query_function(prompt=prompt_text, options=options)
         self._active_stream = stream
         emitted_text = False
         emitted_output = False
@@ -198,9 +203,10 @@ class ClaudeHarnessDriver:
             "env": self._environment,
             "mcp_servers": claude_mcp_config(self._mcp_servers),
         }
-        system_prompt_append = self._environment.get(
-            "OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND", ""
-        ).strip()
+        system_prompt_append = merge_system_instructions(
+            self._environment.get("OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND"),
+            self._platform_instruction,
+        )
         if system_prompt_append:
             kwargs["system_prompt"]["append"] = system_prompt_append
         if self._session_id:
@@ -210,7 +216,10 @@ class ClaudeHarnessDriver:
             kwargs["model"] = model
         if prompt.reasoning_effort in supported_efforts:
             kwargs["effort"] = prompt.reasoning_effort
-        return self._options_class(**kwargs)
+        options_class = self._options_class
+        if options_class is None:
+            raise RuntimeError("Claude Agent SDK options class is unavailable")
+        return options_class(**kwargs)
 
     def _materialize_attachments(self, prompt: HarnessPrompt) -> str:
         if not prompt.attachments:

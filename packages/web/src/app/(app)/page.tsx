@@ -64,6 +64,7 @@ import type {
 import { useRuntimeLaunchDraft } from "@/hooks/use-runtime-launch-draft";
 import { repoSelectionValue } from "@/lib/repository-selection";
 import { RuntimeSettingsPopover } from "@/components/runtime-settings-popover";
+import { VisualVerificationToggle } from "@/components/visual-verification-toggle";
 import { toast } from "sonner";
 
 const LAST_SELECTED_MODEL_STORAGE_KEY = "open-inspect-last-selected-model";
@@ -162,6 +163,7 @@ export default function Home() {
   });
   const [modelPreferenceDraft, setModelPreferenceDraft] = useState<ModelPreference | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [visualVerificationRequested, setVisualVerificationRequested] = useState(false);
   const [agentHarness, setAgentHarness] = useState<AgentHarness | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<Record<string, unknown>>({});
   const [skillSelection, setSkillSelection] = useState<SessionSkillSelection>({ mode: "all" });
@@ -172,6 +174,10 @@ export default function Home() {
   const [error, setError] = useState("");
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const pendingSessionIdRef = useRef<string | null>(null);
+  const [pendingVisualVerificationAvailable, setPendingVisualVerificationAvailable] = useState<
+    boolean | null
+  >(null);
+  const pendingVisualVerificationAvailableRef = useRef<boolean | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const sessionCreationPromise = useRef<Promise<string | null> | null>(null);
   const sessionCreationErrorRef = useRef<string | null>(null);
@@ -274,6 +280,8 @@ export default function Home() {
     }
     pendingSessionIdRef.current = null;
     setPendingSessionId(null);
+    pendingVisualVerificationAvailableRef.current = null;
+    setPendingVisualVerificationAvailable(null);
     setIsCreatingSession(false);
     sessionCreationPromise.current = null;
     sessionCreationErrorRef.current = null;
@@ -357,6 +365,9 @@ export default function Home() {
           ) {
             pendingSessionIdRef.current = data.sessionId;
             setPendingSessionId(data.sessionId);
+            const visualVerificationAvailable = data.visualVerificationEnabled === true;
+            pendingVisualVerificationAvailableRef.current = visualVerificationAvailable;
+            setPendingVisualVerificationAvailable(visualVerificationAvailable);
             return data.sessionId as string;
           }
           return null;
@@ -506,6 +517,8 @@ export default function Home() {
       pendingConfigRef.current = null;
       pendingSessionIdRef.current = null;
       setPendingSessionId(null);
+      pendingVisualVerificationAvailableRef.current = null;
+      setPendingVisualVerificationAvailable(null);
       setIsCreatingSession(false);
       if (staleDraftSessionId) {
         void browserApiFetch(`/api/sessions/${staleDraftSessionId}/expire-draft`, {
@@ -557,6 +570,13 @@ export default function Home() {
         return;
       }
 
+      if (visualVerificationRequested && pendingVisualVerificationAvailableRef.current === false) {
+        setError(
+          "Visual verification is disabled for this target. Enable it in Settings → Sandbox, then start a new session."
+        );
+        return;
+      }
+
       let attachments: SessionAttachmentReference[] | undefined;
       if (hasAttachments) {
         try {
@@ -574,6 +594,7 @@ export default function Home() {
           model: selectedModel,
           reasoningEffort,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(visualVerificationRequested ? { visualVerification: {} } : {}),
         }),
       });
 
@@ -605,6 +626,9 @@ export default function Home() {
       setReasoningEffort={handleReasoningEffortChange}
       prompt={prompt}
       handlePromptChange={handlePromptChange}
+      visualVerificationRequested={visualVerificationRequested}
+      setVisualVerificationRequested={setVisualVerificationRequested}
+      visualVerificationAvailable={pendingVisualVerificationAvailable !== false}
       attachments={{
         items: sessionAttachments.attachments,
         error: sessionAttachments.attachmentError,
@@ -648,6 +672,9 @@ function HomeContent({
   setReasoningEffort,
   prompt,
   handlePromptChange,
+  visualVerificationRequested,
+  setVisualVerificationRequested,
+  visualVerificationAvailable,
   attachments,
   creating,
   isCreatingSession,
@@ -681,6 +708,9 @@ function HomeContent({
   setReasoningEffort: (value: string | undefined) => void;
   prompt: string;
   handlePromptChange: (value: string) => void;
+  visualVerificationRequested: boolean;
+  setVisualVerificationRequested: (value: boolean) => void;
+  visualVerificationAvailable: boolean;
   attachments: {
     items: ReturnType<typeof useSessionAttachments>["attachments"];
     error: string | null;
@@ -904,6 +934,13 @@ function HomeContent({
                       target={skillPreviewTarget}
                       preview={skillPreview}
                       previewLoading={skillPreviewLoading}
+                      disabled={creating}
+                    />
+
+                    <VisualVerificationToggle
+                      checked={visualVerificationRequested}
+                      onChange={setVisualVerificationRequested}
+                      available={visualVerificationAvailable}
                       disabled={creating}
                     />
                   </div>

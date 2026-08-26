@@ -49,6 +49,7 @@ function createProcessor() {
     upsertTokenEvent: vi.fn(),
     createContextCompactionEvent: vi.fn(),
     upsertToolCallEvent: vi.fn(),
+    recordVisualVerificationEvent: vi.fn(() => "inserted" as const),
     createEvent: vi.fn(),
   } as unknown as EventRepository;
   const artifactRepository = { createArtifact: vi.fn() } as unknown as ArtifactRepository;
@@ -266,6 +267,104 @@ describe("SessionSandboxEventProcessor", () => {
       event: { ...event, timestamp: 1001 },
     });
     expect(h.updateLastActivity).not.toHaveBeenCalled();
+  });
+
+  it("persists and broadcasts the first visual verification report", async () => {
+    const h = createProcessor();
+    const event: Extract<SandboxEvent, { type: "visual_verification" }> = {
+      type: "visual_verification",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      requestDigest: "a".repeat(64),
+      report: {
+        version: 1,
+        messageId: "msg-1",
+        status: "passed",
+        startedAt: "2026-08-26T00:00:00.000Z",
+        finishedAt: "2026-08-26T00:00:01.000Z",
+        scenarios: [
+          {
+            id: "home",
+            status: "passed",
+            source: "web:/",
+            viewport: { width: 800, height: 600 },
+            assertions: [],
+            artifactIds: ["artifact-1"],
+            durationMs: 1000,
+          },
+        ],
+        failure: null,
+      },
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.eventRepository.recordVisualVerificationEvent).toHaveBeenCalledWith(
+      "msg-1",
+      event,
+      expect.any(Number)
+    );
+    expect(h.broadcast).toHaveBeenCalledWith({ type: "sandbox_event", event });
+  });
+
+  it("acks but does not broadcast a replayed visual verification report", async () => {
+    const h = createProcessor();
+    const sandboxWs = {} as WebSocket;
+    h.wsManager.getSandboxSocket.mockReturnValue(sandboxWs);
+    vi.mocked(h.eventRepository.recordVisualVerificationEvent).mockReturnValue("replayed");
+    const event: SandboxEvent & { ackId: string } = {
+      type: "visual_verification",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      ackId: "visual_verification:msg-1",
+      requestDigest: "a".repeat(64),
+      report: {
+        version: 1,
+        messageId: "msg-1",
+        status: "blocked",
+        startedAt: "2026-08-26T00:00:00.000Z",
+        finishedAt: "2026-08-26T00:00:01.000Z",
+        scenarios: [],
+        failure: { code: "service_not_ready", message: "not ready" },
+      },
+    };
+
+    await h.processor.processSandboxEvent(event);
+
+    expect(h.broadcast).not.toHaveBeenCalled();
+    expect(h.wsManager.send).toHaveBeenCalledWith(sandboxWs, {
+      type: "ack",
+      ackId: "visual_verification:msg-1",
+    });
+  });
+
+  it("rejects a visual verification report with a mismatched message identity", async () => {
+    const h = createProcessor();
+    await h.processor.processSandboxEvent({
+      type: "visual_verification",
+      messageId: "msg-1",
+      sandboxId: "sb-1",
+      timestamp: 1000,
+      requestDigest: "a".repeat(64),
+      report: {
+        version: 1,
+        messageId: "msg-other",
+        status: "blocked",
+        startedAt: "2026-08-26T00:00:00.000Z",
+        finishedAt: "2026-08-26T00:00:01.000Z",
+        scenarios: [],
+        failure: { code: "service_not_ready", message: "not ready" },
+      },
+    });
+
+    expect(h.eventRepository.recordVisualVerificationEvent).not.toHaveBeenCalled();
+    expect(h.broadcast).not.toHaveBeenCalled();
+    expect(h.log.warn).toHaveBeenCalledWith("visual_verification.identity_mismatch", {
+      event_message_id: "msg-1",
+      report_message_id: "msg-other",
+    });
   });
 
   it("persists artifact events into artifacts and broadcasts both channels", async () => {

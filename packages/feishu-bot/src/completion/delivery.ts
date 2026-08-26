@@ -41,6 +41,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
         error: response.error || job.error,
         webAppUrl: env.WEB_APP_URL,
         pullRequestUrl: pullRequestUrl(response.artifacts),
+        visualVerification: response.visualVerification,
       })
     );
     if (env.FEISHU_MEDIA_DELIVERY_ENABLED === "true" && response.mediaArtifacts.length > 0) {
