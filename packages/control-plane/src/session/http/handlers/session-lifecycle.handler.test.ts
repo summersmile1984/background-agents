@@ -254,7 +254,10 @@ describe("createSessionLifecycleHandler", () => {
           scmTokenExpiresAt: 9999999,
           scmUserId: "github-user-123",
           parentSessionId: "parent-1",
-          spawnSource: "agent",
+          // Feishu creates sessions through the same internal lifecycle route.
+          // Keep this non-web caller covered so schema drift cannot turn a
+          // valid bot launch into an opaque 400 response.
+          spawnSource: "feishu-bot",
           spawnDepth: 1,
           vncEnabled: true,
         }),
@@ -275,7 +278,7 @@ describe("createSessionLifecycleHandler", () => {
       reasoningEffort: "high",
       status: "created",
       parentSessionId: "parent-1",
-      spawnSource: "agent",
+      spawnSource: "feishu-bot",
       spawnDepth: 1,
       codeServerEnabled: false,
       vncEnabled: true,
