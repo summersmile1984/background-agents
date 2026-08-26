@@ -226,6 +226,7 @@ jobs:
           TF_VAR_feishu_encrypt_key: ${{ secrets.FEISHU_ENCRYPT_KEY }}
           TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
           TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
+          TF_VAR_feishu_media_delivery_enabled: "${{ secrets.FEISHU_MEDIA_DELIVERY_ENABLED || 'false' }}"
           TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
@@ -406,6 +407,7 @@ jobs:
           TF_VAR_feishu_encrypt_key: ${{ secrets.FEISHU_ENCRYPT_KEY }}
           TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
           TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
+          TF_VAR_feishu_media_delivery_enabled: "${{ secrets.FEISHU_MEDIA_DELIVERY_ENABLED || 'false' }}"
           TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
