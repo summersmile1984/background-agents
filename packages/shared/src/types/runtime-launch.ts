@@ -358,6 +358,7 @@ const resolvedRuntimeTargetSnapshotSchema = z.object({
 export const runtimeLaunchCallerChannelSchema = z.enum([
   "web",
   "slack",
+  "feishu",
   "github",
   "gitea",
   "linear",

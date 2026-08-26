@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveRuntimeLaunchDraftRequestSchema,
   runtimeConfigFragmentSchema,
+  runtimeLaunchCallerChannelSchema,
   runtimeLaunchTargetSchema,
 } from "./runtime-launch";
 
@@ -39,5 +40,9 @@ describe("runtime launch contracts", () => {
         effort: "inherit",
       })
     ).toEqual({ harness: "inherit", routeId: "auto", model: "inherit", effort: "inherit" });
+  });
+
+  it("accepts Feishu as an immutable launch caller channel", () => {
+    expect(runtimeLaunchCallerChannelSchema.parse("feishu")).toBe("feishu");
   });
 });
