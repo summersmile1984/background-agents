@@ -103,9 +103,20 @@ def validate_runtime_launch(
     if model_prefixes and not model.startswith(model_prefixes):
         raise ValueError(f"model {model!r} is not valid for runtime route {route_id!r}")
     configured_model = session_config.get("model")
-    if configured_model != model:
+    configured_provider = session_config.get("provider")
+    canonical_configured_model = (
+        f"{configured_provider}/{configured_model}"
+        if isinstance(configured_provider, str)
+        and configured_provider
+        and isinstance(configured_model, str)
+        and configured_model
+        and "/" not in configured_model
+        else configured_model
+    )
+    if canonical_configured_model != model:
         raise ValueError(
-            f"launch_spec model {model!r} does not match session model {configured_model!r}"
+            "launch_spec model "
+            f"{model!r} does not match session model {canonical_configured_model!r}"
         )
     if effort is not None and not isinstance(effort, str):
         raise ValueError("launch_spec runtime effort must be a string or null")
