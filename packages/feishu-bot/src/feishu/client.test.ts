@@ -182,8 +182,7 @@ describe("Feishu media client", () => {
     ).rejects.toMatchObject({
       reason: "invalid_media",
       status: 400,
-      message:
-        "Feishu image upload failed (http_status=400, code=234001, msg=invalid image)",
+      message: "Feishu image upload failed (http_status=400, code=234001, msg=invalid image)",
     });
   });
 });
