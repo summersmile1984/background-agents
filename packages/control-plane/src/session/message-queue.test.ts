@@ -822,7 +822,7 @@ describe("SessionMessageQueue", () => {
         messageId: "msg-visual",
         visualVerificationRequest: {
           version: 1,
-          sessionId: "sess-1",
+          sessionId: "s1",
           messageId: "msg-visual",
           scenarioIds: ["home-desktop"],
           reason: "user_requested",

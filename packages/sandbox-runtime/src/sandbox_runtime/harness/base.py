@@ -13,11 +13,12 @@ from ..verification_manifest import load_visual_verification_policy
 
 VISUAL_VERIFICATION_POLICY_ENV = "OPENINSPECT_VISUAL_VERIFICATION_POLICY"
 VISUAL_VERIFICATION_SYSTEM_INSTRUCTION = (
-    "Open-Inspect platform visual verification is enabled. When the user requests browser/UI "
-    "verification or repository policy requires it, invoke `oi-visual-verify` with its versioned "
-    "JSON request. Only call a UI change visually verified when the command's final JSON has "
-    "status `passed` and non-empty artifact IDs; for `failed` or `blocked`, state what remains "
-    "unverified and never claim that verification passed."
+    "Open-Inspect platform visual verification is enabled and runs automatically after your "
+    "response when the prompt requests browser/UI verification or repository policy requires it. "
+    "Do not invoke `oi-visual-verify` or `upload-media` yourself for this platform verification; "
+    "finish the requested repository work and leave the supervised application ready. Do not "
+    "claim visual verification passed in your response because the platform report and artifact "
+    "IDs are authoritative and are produced after the harness turn completes."
 )
 
 if TYPE_CHECKING:

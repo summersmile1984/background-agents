@@ -445,7 +445,9 @@ export class SessionMessageQueue {
         ? {
             visualVerificationRequest: {
               version: 1 as const,
-              sessionId: session?.id ?? "",
+              // The sandbox authenticates with the public session name. The
+              // row id is the Durable Object's internal id and can differ.
+              sessionId: session?.session_name || session?.id || "",
               messageId: message.id,
               ...visualVerification,
               reason: "user_requested" as const,
