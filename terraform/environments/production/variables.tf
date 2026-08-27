@@ -621,6 +621,12 @@ variable "e2b_api_url" {
   default     = "https://api.e2b.app"
 }
 
+variable "e2b_preview_base_url" {
+  description = "Optional trusted HTTPS gateway base URL for user-facing E2B-compatible sandbox previews"
+  type        = string
+  default     = ""
+}
+
 variable "e2b_template_id" {
   description = "E2B template name built by the e2b-infra module and used for fresh sandboxes"
   type        = string
