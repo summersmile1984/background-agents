@@ -238,9 +238,12 @@ export async function uploadFeishuMessageImage(
   const parsed = uploadImageResponseSchema.safeParse(await response.json().catch(() => null));
   const imageKey = parsed.success ? parsed.data.data?.image_key : undefined;
   if (!response.ok || !parsed.success || parsed.data.code !== 0 || !imageKey) {
+    const apiDetail = parsed.success
+      ? `code=${parsed.data.code}, msg=${(parsed.data.msg || "unknown").slice(0, 200)}`
+      : "invalid_response";
     throw new FeishuApiError(
       classifyFeishuFailure(response, "upload"),
-      "Feishu image upload failed",
+      `Feishu image upload failed (http_status=${response.status}, ${apiDetail})`,
       response.status
     );
   }

@@ -365,6 +365,9 @@ export async function deliverFeishuMediaArtifacts(
           artifact_id: artifact.id,
           outcome: "error",
           reason,
+          ...(error instanceof FeishuApiError
+            ? { http_status: error.status, error_message: error.message }
+            : {}),
         });
         continue;
       }
