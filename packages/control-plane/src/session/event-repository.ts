@@ -148,9 +148,12 @@ export class EventRepository {
   ): VisualVerificationRecordResult {
     return this.transactionSync(() => {
       const id = `visual_verification:${messageId}`;
-      const existing = this.sql.exec(`SELECT data FROM events WHERE id = ?`, id).one() as {
-        data?: unknown;
-      } | null;
+      // Cloudflare's SqlStorageCursor.one() throws when the query returns no
+      // rows. A first report is the normal no-row case, so inspect the optional
+      // first row instead of treating absence as an exception.
+      const existing = this.sql.exec(`SELECT data FROM events WHERE id = ?`, id).toArray()[0] as
+        | { data?: unknown }
+        | undefined;
       if (existing) {
         try {
           const parsed =
