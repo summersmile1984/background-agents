@@ -1,7 +1,8 @@
 # Per-Sandbox Development Environments
 
-Every sandbox image includes PostgreSQL, Redis, a browser desktop, screenshot tooling, code-server,
-and a web terminal. Repository-owned services are opt-in through `.openinspect/environment.yaml` in
+Maintained sandbox images include PostgreSQL, Redis, browser/screenshot tooling, code-server, and a
+web terminal. The self-hosted Cube image also starts one shared AIO Chromium/CDP/Browser-MCP runtime
+for all harnesses. Repository-owned services are opt-in through `.openinspect/environment.yaml` in
 the primary repository:
 
 ```yaml
@@ -46,6 +47,21 @@ When enabled, built-in services export:
 Process environment values support ordinary `$VARIABLE` expansion after the built-in database
 services are ready. Tunnel ports, CPU, memory, sandbox timeout, and scoped secrets remain host-owned
 settings so a repository cannot silently broaden its own network or credential access.
+
+## Browser, preview, and screenshots
+
+Repository processes and the browser share the sandbox network namespace. Browser tools should use
+the local URL (for example, `http://127.0.0.1:3000`) while the application listens on `0.0.0.0` when
+it must also be reachable through a configured preview gateway.
+
+The paths have different lifetimes:
+
+- a preview URL is a live route to a configured application port and stops working when the sandbox
+  is paused or destroyed;
+- a screenshot or video becomes a durable session artifact only after `upload_media` succeeds;
+- Chromium CDP and Browser MCP are private runtime ports and must never be listed in `tunnelPorts`.
+
+See [How It Works](./HOW_IT_WORKS.md#browser-automation-preview-and-media) for the complete flow.
 
 ## Persistence and snapshots
 

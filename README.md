@@ -9,7 +9,7 @@ Open-Inspect provides a hosted background coding agent that can:
 
 - Work on tasks in the background while you focus on other things
 - Access full development environments (Node.js, Python, git, browser automation, VS Code)
-- Connect from anywhere — web UI, Slack, GitHub PRs, Linear issues, or webhooks
+- Connect from anywhere — web UI, Slack, Feishu, GitHub PRs, Linear issues, or webhooks
 - Enable multiplayer sessions where multiple people can collaborate in real time
 - Create PRs with proper commit attribution to the prompting user
 - Run on a schedule — cron jobs, Sentry alerts, and webhook-triggered automations
@@ -24,46 +24,49 @@ Open-Inspect provides a hosted background coding agent that can:
 
 ### How It Works
 
-The system uses a shared GitHub App installation for git operations (clone, fetch, push). The
-control plane mints short-lived installation tokens server-side and brokers them to sandboxes
-through the git credential helper on demand. This means:
+The installation owns one or more source-control connections. GitHub connections use a shared GitHub
+App; self-hosted Gitea connections use a dedicated service-account PAT that remains encrypted and
+server-side. Every repository-backed session pins one connection and stable repository ID for its
+lifetime. This means:
 
-- **All users share the same GitHub App credentials** - The GitHub App must be installed on your
-  organization's repositories, and any user of the system can access any repo the App has access to
-- **No per-user repository access validation** - The system does not verify that a user has
-  permission to access a specific repository before creating a session
-- **GitHub users' OAuth tokens are used for PR creation** - For GitHub logins, PRs are created using
-  the user's GitHub OAuth token, ensuring proper attribution and that they can only create PRs on
-  repos they have write access to. Users who sign in another way (e.g. Google) carry no SCM token,
-  so their PRs fall back to the shared GitHub App bot
+- **All users share the configured repository authority** — any admitted user can work with any
+  repository visible to an enabled connection
+- **No per-user repository access validation** — the system does not verify a user's forge access
+  before creating a session; the deployment is therefore single-tenant
+- **Sandboxes do not receive long-lived forge credentials** — GitHub credentials are minted on
+  demand; pinned Gitea sessions use a repository-scoped, session-authenticated Git HTTP proxy
+- **PR attribution depends on the connection** — GitHub can use the prompting user's OAuth token;
+  service-account connections such as Gitea create PRs as that account
 
 ### Token Architecture
 
-| Token Type         | Purpose                                | Scope                            |
-| ------------------ | -------------------------------------- | -------------------------------- |
-| GitHub App Token   | Brokered git clone/fetch/push auth     | All repos where App is installed |
-| User OAuth Token   | Create PRs, user info                  | Repos user has access to         |
-| Sandbox Auth Token | Sandbox-to-control-plane session calls | Single session                   |
-| WebSocket Token    | Real-time session auth                 | Single session                   |
+| Token Type                   | Purpose                                      | Scope                            |
+| ---------------------------- | -------------------------------------------- | -------------------------------- |
+| GitHub App Token             | Short-lived GitHub API and Git operations    | App installation                 |
+| Gitea service-account PAT    | Server-side Gitea API and Git proxy upstream | One configured Gitea connection  |
+| User OAuth Token             | GitHub PR attribution and user identity      | Repositories the user can access |
+| Sandbox Auth Token           | Sandbox-to-control-plane calls               | One session                      |
+| Sandbox Git proxy capability | Authorized Git HTTP requests                 | One session/build and repository |
+| WebSocket Token              | Real-time client connection                  | One session                      |
 
 ### Why Single-Tenant Only
 
-This architecture follows
+This shared-connection architecture follows
 [Ramp's Inspect design](https://builders.ramp.com/post/why-we-built-our-background-agent), which was
 built for internal use where all employees are trusted and have access to company repositories.
 
 **For multi-tenant deployment**, you would need:
 
-- Per-tenant GitHub App installations
-- Access validation at session creation
-- Tenant isolation in the data model
+- Per-tenant source-control connections and credentials
+- User- or tenant-level repository authorization at session creation
+- Tenant isolation in Durable Objects, D1, object storage, caches, and sandbox scheduling
 
 ### Deployment Recommendations
 
 1. **Deploy behind your organization's SSO/VPN** - Ensure only authorized employees can access the
    web interface
-2. **Install GitHub App only on intended repositories** - The App's installation scope defines what
-   the system can access
+2. **Limit every SCM connection** - Install the GitHub App only on intended repositories and use a
+   dedicated, least-privileged Gitea service account
 3. **Restrict sign-in** - Configure allowed GitHub users, email domains, or active GitHub
    organization membership (`ALLOWED_GITHUB_ORGS`)
 4. **Use GitHub's repository selection** - When installing the App, select specific repositories
@@ -71,45 +74,57 @@ built for internal use where all employees are trusted and have access to compan
 
 ## Architecture
 
+```mermaid
+flowchart TB
+  subgraph clients["Clients and entry points"]
+    web["Web"]
+    slack["Slack"]
+    feishu["Feishu"]
+    githubBot["GitHub bot"]
+    linear["Linear / webhooks"]
+  end
+
+  subgraph cloudflare["Control plane · Cloudflare"]
+    workers["Web BFF and bot Workers"]
+    session["Session Durable Object<br/>SQLite · queue · WebSocket hub"]
+    d1["D1<br/>catalog · connections · settings · encrypted secrets"]
+    media["Object storage<br/>screenshots and videos"]
+  end
+
+  subgraph sandbox["Per-session sandbox · selected backend"]
+    supervisor["Sandbox supervisor"]
+    bridge["Provider-neutral bridge"]
+    harness["Selected harness<br/>OpenCode · Codex · Claude · DeepSeek"]
+    dev["Repository and dev services<br/>git · databases · app ports"]
+    subgraph cubeBrowser["Cube backend only"]
+      browser["Shared Chromium<br/>CDP 127.0.0.1:9222"]
+      browserMcp["aio_browser MCP<br/>127.0.0.1:8100/mcp"]
+    end
+  end
+
+  scm["Pinned SCM connection<br/>GitHub App or Gitea"]
+  preview["Trusted HTTPS preview gateway"]
+
+  clients --> workers --> session
+  session <--> bridge
+  session <--> d1
+  bridge <--> harness
+  supervisor --> bridge
+  supervisor --> dev
+  supervisor --> browser
+  harness --> browserMcp --> browser
+  harness -->|agent-browser| browser
+  session <--> scm
+  harness -->|upload_media| session
+  session --> media
+  dev -->|configured app port| preview --> clients
 ```
-                                    ┌──────────────────┐
-                                    │     Clients      │
-                                    │ ┌──────────────┐ │
-                                    │ │  Web / Slack │ │
-                                    │ │ GitHub / Lin.│ │
-                                    │ │   Webhooks   │ │
-                                    │ └──────────────┘ │
-                                    └────────┬─────────┘
-                                             │
-                                             ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                     Control Plane (Cloudflare)                     │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                   Durable Objects (per session)              │  │
-│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌───────────────┐    │  │
-│  │  │ SQLite  │  │WebSocket│  │  Event  │  │   GitHub      │    │  │
-│  │  │   DB    │  │   Hub   │  │ Stream  │  │ Integration   │    │  │
-│  │  └─────────┘  └─────────┘  └─────────┘  └───────────────┘    │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │              D1 Database (repo-scoped secrets)               │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────┬───────────────────────────────────┘
-                                 │
-                                 ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                 Data Plane (Sandbox Backend)                       │
-│  ┌──────────────────────────────────────────────────────────────┐  │
-│  │                     Session Sandbox                          │  │
-│  │  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │  │
-│  │  │ Supervisor│──│  OpenCode │──│   Bridge  │─────────────────┼──┼──▶ Control Plane
-│  │  └───────────┘  └───────────┘  └───────────┘                 │  │
-│  │                      │                                       │  │
-│  │              Full Dev Environment                            │  │
-│  │      (Node.js, Python, git, agent-browser)                   │  │
-│  └──────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────┘
-```
+
+On the self-hosted Cube path, Cube remains the VM, lifecycle, and E2B-compatible envd foundation.
+The image copies only Chromium and `@agent-infra/mcp-server-browser` from the pinned ByteDance Agent
+Infra AIO Sandbox image. CDP and Browser MCP stay loopback-only; screenshots leave the sandbox only
+through the authenticated media API. See [How It Works](docs/HOW_IT_WORKS.md) and
+[ADR 0005](docs/adr/0005-cube-aio-browser-runtime.md).
 
 ## Packages
 
@@ -120,11 +135,12 @@ built for internal use where all employees are trusted and have access to compan
 | [sandbox-runtime](packages/sandbox-runtime)       | Shared in-sandbox agent runtime             |
 | [modal-infra](packages/modal-infra)               | Modal sandbox infrastructure                |
 | [daytona-infra](packages/daytona-infra)           | Daytona snapshot infrastructure             |
-| [e2b-infra](packages/e2b-infra)                   | E2B sandbox template infrastructure         |
+| [e2b-infra](packages/e2b-infra)                   | Managed E2B and Cube template tooling       |
 | [opencomputer-infra](packages/opencomputer-infra) | OpenComputer template infrastructure        |
 | [slack-bot](packages/slack-bot)                   | Slack integration (sessions from messages)  |
 | [github-bot](packages/github-bot)                 | GitHub integration (auto-review, @mention)  |
 | [linear-bot](packages/linear-bot)                 | Linear integration (issue → coding session) |
+| [feishu-bot](packages/feishu-bot)                 | Feishu integration (cards, sessions, media) |
 | [shared](packages/shared)                         | Shared types and utilities                  |
 
 ## Getting Started

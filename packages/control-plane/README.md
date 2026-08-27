@@ -8,42 +8,33 @@ The control plane provides:
 
 - **Session Management**: SQLite-backed Durable Objects for each session
 - **Real-time Streaming**: WebSocket connections with hibernation support
-- **Multi-client Sync**: Web, Slack, extension clients all see the same state
-- **GitHub Integration**: GitHub App for repository access
-- **Token Encryption**: AES-256-GCM encryption for GitHub tokens at rest
+- **Multi-client Sync**: Web, Slack, Feishu, GitHub, and Linear clients see the same state
+- **Source-Control Connections**: Stable repository identity with pinned GitHub/Gitea connections
+- **Credential Boundaries**: GitHub token minting and server-side Gitea PAT/Git proxy authorization
+- **Media Artifacts**: Validated screenshot/video upload, object storage, and authenticated
+  streaming
 - **Secrets**: Encrypted global, repo-scoped, and environment-scoped secrets stored in D1, injected
   into sandboxes as env vars
 - **Environments**: Named repository sets with their own secrets and prebuilt images, stored in D1
 
 ## Architecture
 
+```mermaid
+flowchart TB
+  clients["Web BFF and service-authenticated bot Workers"] --> router["API router"]
+  router --> session["Per-session Durable Object<br/>SQLite · queue · WebSocket hibernation"]
+  router <--> d1["D1<br/>indexes · repository catalog · SCM connections<br/>settings · encrypted secrets"]
+  router <--> r2["Media object storage"]
+  router <--> scm["GitHub/Gitea adapters and Git proxy"]
+  session <--> sandbox["Provider-neutral sandbox lifecycle and bridge"]
+  sandbox -->|upload_media| router
+  session -->|artifact_created / tunnel_urls| clients
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Cloudflare Workers                            │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                   API Gateway (router.ts)                 │   │
-│  │   POST /sessions  │  GET /sessions/:id  │  WebSocket      │   │
-│  └─────────────────────────────┬────────────────────────────┘   │
-│                                │                                 │
-│  ┌─────────────────────────────┴────────────────────────────┐   │
-│  │              Durable Objects (per session)                │   │
-│  │  ┌────────────────┐  ┌──────────────┐  ┌──────────────┐  │   │
-│  │  │   SQLite DB    │  │  WebSocket   │  │    Event     │  │   │
-│  │  │ - session      │  │    Hub       │  │   Stream     │  │   │
-│  │  │ - participants │  │ (hibernation)│  │              │  │   │
-│  │  │ - messages     │  └──────────────┘  └──────────────┘  │   │
-│  │  │ - events       │                                       │   │
-│  │  │ - artifacts    │                                       │   │
-│  │  │ - sandbox      │                                       │   │
-│  │  │ - ws_mapping   │                                       │   │
-│  │  └────────────────┘                                       │   │
-│  └───────────────────────────────────────────────────────────┘   │
-│  ┌───────────────────────────────────────────────────────────┐   │
-│  │   D1 Database (sessions index, environments, automations,   │   │
-│  │              image builds, encrypted secrets)               │   │
-│  └───────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+The Durable Object is authoritative for one session's queue, participants, events, artifacts,
+sandbox record, and normalized tunnel URLs. D1 is authoritative for cross-session indexes and
+configuration. Media bytes live in object storage; only metadata and object keys enter session
+state. Source-control credentials and Host model-provider keys never enter a client response.
 
 ## API Endpoints
 
@@ -55,25 +46,28 @@ The control plane provides:
 
 ### Sessions
 
-| Endpoint                        | Method    | Description                    |
-| ------------------------------- | --------- | ------------------------------ |
-| `/sessions`                     | GET       | List user's sessions           |
-| `/sessions`                     | POST      | Create new session             |
-| `/sessions/:id`                 | GET       | Get canonical session snapshot |
-| `/sessions/:id`                 | DELETE    | Delete session                 |
-| `/sessions/:id/sandbox-access`  | GET       | Get sandbox connection details |
-| `/sessions/:id/prompt`          | POST      | Enqueue prompt                 |
-| `/sessions/:id/stop`            | POST      | Stop execution                 |
-| `/sessions/:id/ws`              | WebSocket | Real-time connection           |
-| `/sessions/:id/events`          | GET       | Paginated events               |
-| `/sessions/:id/artifacts`       | GET       | List artifacts                 |
-| `/sessions/:id/participants`    | GET/POST  | Manage participants            |
-| `/sessions/:id/messages`        | GET       | List messages                  |
-| `/sessions/:id/pr`              | POST      | Create pull request            |
-| `/sessions/:id/scm-credentials` | POST      | Broker sandbox git credentials |
-| `/sessions/:id/ws-token`        | POST      | Generate WebSocket token       |
-| `/sessions/:id/archive`         | POST      | Archive session                |
-| `/sessions/:id/unarchive`       | POST      | Unarchive session              |
+| Endpoint                          | Method    | Description                    |
+| --------------------------------- | --------- | ------------------------------ |
+| `/sessions`                       | GET       | List user's sessions           |
+| `/sessions`                       | POST      | Create new session             |
+| `/sessions/:id`                   | GET       | Get canonical session snapshot |
+| `/sessions/:id`                   | DELETE    | Delete session                 |
+| `/sessions/:id/sandbox-access`    | GET       | Get sandbox connection details |
+| `/sessions/:id/prompt`            | POST      | Enqueue prompt                 |
+| `/sessions/:id/stop`              | POST      | Stop execution                 |
+| `/sessions/:id/ws`                | WebSocket | Real-time connection           |
+| `/sessions/:id/events`            | GET       | Paginated events               |
+| `/sessions/:id/artifacts`         | GET       | List artifacts                 |
+| `/sessions/:id/participants`      | GET/POST  | Manage participants            |
+| `/sessions/:id/messages`          | GET       | List messages                  |
+| `/sessions/:id/pr`                | POST      | Create pull request            |
+| `/sessions/:id/scm-credentials`   | POST      | Broker sandbox git credentials |
+| `/sessions/:id/tunnel-urls`       | GET       | Read normalized preview URLs   |
+| `/sessions/:id/media`             | POST      | Upload sandbox media artifact  |
+| `/sessions/:id/media/:artifactId` | GET       | Stream authenticated media     |
+| `/sessions/:id/ws-token`          | POST      | Generate WebSocket token       |
+| `/sessions/:id/archive`           | POST      | Archive session                |
+| `/sessions/:id/unarchive`         | POST      | Unarchive session              |
 
 ### Create PR Payload
 
@@ -95,8 +89,8 @@ closed PR releases its head branch for a fresh PR. The success response is
 
 ### SCM Credentials
 
-`POST /sessions/:id/scm-credentials` is a sandbox-authenticated endpoint used by the in-sandbox git
-credential helper. It returns fresh SCM credentials for git operations in this shape:
+`POST /sessions/:id/scm-credentials` is a sandbox-authenticated endpoint used by compatible
+credential-helper paths. It returns fresh SCM credentials for Git operations in this shape:
 
 ```json
 {
@@ -107,9 +101,26 @@ credential helper. It returns fresh SCM credentials for git operations in this s
 ```
 
 Common failures are `401` for a missing or invalid sandbox token, `404` when the session no longer
-exists, and `5xx` when provider configuration or upstream token minting fails. Source-control
-providers must implement `generateCredentialHelperAuth` before helper-backed sandbox git auth works
-for that provider.
+exists, and `5xx` when provider configuration or upstream token minting fails. A connection-pinned
+Gitea session deliberately receives `409`: its Git remote targets the server-side smart-HTTP proxy,
+and releasing the connection PAT to the helper would violate the connection boundary.
+
+### Media and Preview URLs
+
+`POST /sessions/:id/media` accepts a sandbox-authenticated multipart screenshot or video plus
+bounded metadata. The route verifies the declared MIME type against file signatures and enforces
+per-file and per-session limits before writing object storage. It then persists a normalized
+artifact in the session Durable Object and broadcasts `artifact_created`.
+
+`GET /sessions/:id/media/:artifactId` is user- or service-authenticated. It verifies that the
+artifact belongs to that session, retrieves the stored object, and supports byte ranges for video.
+Web renders this route directly; bot Workers use service authentication before re-uploading a
+supported image to their platform.
+
+`GET /sessions/:id/tunnel-urls` returns the provider-resolved `{ port: url }` map. Preview URLs are
+live routes, not stored media, and may stop responding after the sandbox pauses. On Cube,
+`E2B_PREVIEW_BASE_URL` must point to a trusted HTTPS gateway that resolves only a known sandbox ID
+and configured application port.
 
 ### Repositories
 
@@ -381,37 +392,34 @@ as interchangeable during an incident:
 > **Single-Tenant Only**: This control plane is designed for single-tenant deployment where all
 > users are trusted members of the same organization.
 
-### GitHub App Token Flow
+### Source-Control Credential Flow
 
-The system uses two types of GitHub tokens:
+| Credential                   | Used For                          | Delivery / boundary                 | Access scope                     |
+| ---------------------------- | --------------------------------- | ----------------------------------- | -------------------------------- |
+| GitHub App token             | API, clone, fetch, push           | Minted server-side; short-lived     | App installation                 |
+| GitHub user OAuth token      | Identity and PR attribution       | Server-only                         | User's provider scopes           |
+| Gitea service-account PAT    | API and Git proxy upstream        | Encrypted D1; never leaves server   | One configured connection        |
+| Sandbox Git proxy capability | Clone, fetch, push via smart HTTP | Hashed at rest; sent to one sandbox | One session/build and repository |
 
-| Token            | Used For           | Delivery                      | Access Scope                     |
-| ---------------- | ------------------ | ----------------------------- | -------------------------------- |
-| GitHub App Token | Clone, fetch, push | Brokered to credential helper | All repos where App is installed |
-| User OAuth Token | Create PRs         | Server-only                   | User's accessible repos          |
+Fresh and prebuilt-image sandboxes do not receive a long-lived forge credential in a Git remote or
+environment. GitHub helper paths request short-lived authorization on demand. Connection-pinned
+Gitea remotes target the authenticated smart-HTTP proxy; the control plane verifies the sandbox
+capability, session, connection, repository, method, and path before attaching the PAT to the exact
+upstream origin. Legacy snapshots and one-shot builds may still use explicit compatibility paths
+until migration fallback reaches zero.
 
-Fresh and prebuilt-image sandboxes do not receive a long-lived `GITHUB_TOKEN`, `GITHUB_APP_TOKEN`,
-or `VCS_CLONE_TOKEN` for normal git operations. Git invokes the sandbox credential helper, which
-calls `/sessions/:id/scm-credentials` with the sandbox auth token and receives short-lived
-credentials on demand. Legacy snapshots and one-shot image builds may still receive env-token
-fallbacks for compatibility. The helper preserves the existing installation-wide model by serving
-credentials for HTTPS git requests to the configured SCM host, including setup/start hooks that
-clone auxiliary private repos. This avoids stale embedded credentials in long-running sessions and
-Daytona persistent resumes; Modal snapshot restores still mint a fresh fallback token during
-restore.
-
-If a `create-pr` request is triggered by a participant without a user OAuth token (for example,
-Slack-created or Google-login sessions), the sandbox can still push the branch with brokered GitHub
-App credentials and the control plane returns a manual GitHub `pull/new` URL instead of failing the
-request.
+If a GitHub PR request is triggered without a user OAuth token (for example, a bot-created or
+Google-login session), the App can still push and the control plane returns the provider's
+bot/manual completion path. Gitea PRs are created through the connection service account.
 
 ### Why This Matters
 
-- **No per-user repo access validation**: When a session is created, the system does not verify that
-  the user has access to the requested repository
-- **Shared GitHub App installation**: A single `GITHUB_APP_INSTALLATION_ID` is used for all users
-- **Trust boundary is the organization**: All users with access to the web app can work with any
-  repository the GitHub App is installed on
+- **No per-user repo access validation**: Session creation authorizes against the configured
+  connection, not the prompting user's forge account
+- **Shared connection authority**: GitHub App installations and Gitea service accounts are
+  deployment resources
+- **Trust boundary is the organization**: Admitted users can work with repositories visible to an
+  enabled connection
 
 ### Configuration
 
@@ -449,6 +457,8 @@ for the complete list.
 1. Deploy behind SSO/VPN to restrict access to authorized employees
 2. Install the GitHub App only on repositories you want the system to access
 3. Use GitHub's "Only select repositories" option when installing the App
+4. Use a dedicated, least-privileged Gitea account and exact HTTPS `SCM_ALLOWED_HOSTS` entries
+5. Never expose sandbox CDP or Browser MCP ports through the preview gateway
 
 ## Verification Criteria
 

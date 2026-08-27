@@ -90,6 +90,25 @@ verification and media upload remain the authoritative path for returning screen
 clients. `agent-browser` auto-connects to this managed Chromium instance, so canonical visual
 verification does not launch a second browser process tree.
 
+```mermaid
+flowchart LR
+  cube["Cube VM<br/>envd · code-interpreter · resource limits"] --> supervisor["Open-Inspect supervisor"]
+  supervisor --> bridge["Bridge + selected harness"]
+  supervisor --> chromium["AIO Chromium<br/>CDP loopback :9222"]
+  supervisor --> mcp["AIO Browser MCP<br/>loopback :8100/mcp"]
+  bridge -->|aio_browser| mcp --> chromium
+  bridge -->|agent-browser| chromium
+  chromium --> app["Repository dev server"]
+  app --> preview["Configured preview gateway"]
+  chromium --> screenshot["Screenshot file"]
+  bridge --> upload["upload_media"]
+  screenshot --> upload
+  upload -->|session capability| controlPlane["Control plane media storage"]
+```
+
+The ownership and security decision is recorded in
+[`docs/adr/0005-cube-aio-browser-runtime.md`](../../docs/adr/0005-cube-aio-browser-runtime.md).
+
 ```bash
 cd packages/e2b-infra
 CUBE_IMAGE=localhost:5000/oi-e2b:latest \

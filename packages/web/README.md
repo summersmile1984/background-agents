@@ -8,6 +8,9 @@ Next.js web application for interacting with Open-Inspect coding sessions.
 - Session dashboard with list view
 - Real-time streaming via WebSocket
 - Message timeline with tool calls
+- Connection-aware GitHub/Gitea repository picker
+- Harness, model, reasoning-effort, environment, and branch selection for new sessions
+- PR, screenshot/video, visual-verification, and live-preview artifacts
 - Multi-participant presence indicators
 - Responsive design for desktop and mobile
 
@@ -37,8 +40,13 @@ Next.js web application for interacting with Open-Inspect coding sessions.
 └─────────────────────────────────────────────────────────────────┘
               │                              │
               ▼                              ▼
-      Control Plane API              Control Plane WebSocket
+      Signed Control Plane API       Session WebSocket
 ```
+
+The Next.js server is a BFF: it forwards the opaque browser session cookie and signs calls to the
+control plane. Browser code never receives GitHub App keys, Gitea PATs, sandbox capabilities, media
+object keys, or Host model-provider credentials. Screenshot/video bytes stream through authenticated
+Web API routes after the control plane verifies session ownership.
 
 ## Setup
 
@@ -46,7 +54,8 @@ Next.js web application for interacting with Open-Inspect coding sessions.
 
 - Node.js 22+
 - A deployed control plane with at least one sign-in provider
-- GitHub App repository credentials configured on the control plane
+- GitHub App bootstrap repository credentials configured on the control plane; optional Gitea
+  connections are added later under Settings > Source Control
 
 ### Sign-In and GitHub App Setup
 
@@ -117,15 +126,18 @@ npm run build
 
 ### New Session (`/session/new`)
 
-- Repository selector (populated from GitHub)
-- Optional title field
+- Source-control connection and repository selector (GitHub/Gitea), Environment selector, or
+  repository-free scratch session
+- Branch, Harness, model, reasoning effort, and optional title
 - Creates session and redirects to session view
 
 ### Settings (`/settings`)
 
-- Repository-scoped secrets management
-- Select a repository, then add/edit/delete environment variable secrets
-- Secrets are encrypted and stored in D1, injected into sandboxes at runtime
+- Source-control connections and migration/preflight status
+- Harness readiness and deployment credentials
+- Global, repository, and Environment secrets and sandbox settings
+- Model, MCP, managed skill, image-build, and integration configuration
+- Secret values are encrypted in D1 and are never returned after write
 
 ### Session View (`/session/[id]`)
 
@@ -135,7 +147,8 @@ npm run build
 - Streaming content display
 - Participant presence list
 - Stop button during execution
-- Artifacts sidebar (PRs, screenshots)
+- Artifacts sidebar (PRs, screenshots, videos, and visual-verification reports)
+- Live preview links from the session's normalized tunnel URL map
 
 ## WebSocket Protocol
 

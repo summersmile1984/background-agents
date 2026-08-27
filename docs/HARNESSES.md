@@ -3,8 +3,8 @@
 Open-Inspect keeps its existing browser-to-control-plane WebSocket protocol and selects the coding
 agent implementation inside each sandbox. The sandbox bridge is the provider boundary: it adapts
 OpenCode, Codex app-server, Claude Agent SDK, and CodeWhale/DeepSeek events into the same session
-event stream. This keeps the web client, Slack, GitHub, and Linear integrations independent of a
-particular harness protocol.
+event stream. This keeps the Web client, Slack, Feishu, GitHub, and Linear integrations independent
+of a particular harness protocol.
 
 ## Configure Harnesses
 
@@ -42,6 +42,22 @@ precedence rules.
 Native harness credentials are removed from image-build environments. Codex login files are removed
 before snapshots, and the agent command environment is sanitized so tools do not inherit these
 values.
+
+## Runtime-Owned MCP and Browser Tools
+
+Every native harness receives the local `open_inspect` MCP server. It owns platform actions such as
+PR creation, media upload, and child-session coordination, keeping the sandbox capability out of
+harness-generated shell commands. OpenCode receives equivalent runtime commands and server-side tool
+integration.
+
+The maintained Cube image additionally starts the runtime-owned `aio_browser` MCP at the exact
+loopback URL recorded in `AIO_BROWSER_MCP_URL`. OpenCode, Codex, Claude Code, and DeepSeek receive
+that reserved entry automatically. The URL validator accepts only loopback HTTP with the `/mcp`
+path; a session-supplied MCP server cannot replace the built-in name.
+
+`agent-browser` and `aio_browser` share the supervisor-owned Chromium CDP endpoint. Harness choice
+therefore does not change browser state, screenshot behavior, or the authenticated media upload
+path. See [ADR 0005](./adr/0005-cube-aio-browser-runtime.md).
 
 ## Host Model Relay
 
