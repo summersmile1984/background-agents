@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { DEFAULT_MODEL, getDefaultReasoningEffort } from "@open-inspect/shared/models";
-import { resolveModelPreference } from "./model-selection";
+import { resolveModelPreference, resolveSessionModelPreference } from "./model-selection";
+
+describe("resolveSessionModelPreference", () => {
+  it("keeps the immutable LaunchSpec runtime when live options are empty", () => {
+    expect(
+      resolveSessionModelPreference(
+        { model: "openai/gpt-5.6-luna", reasoningEffort: "medium" },
+        [],
+        { model: "openai/gpt-5.6-luna", reasoningEffort: "medium" }
+      )
+    ).toEqual({ model: "openai/gpt-5.6-luna", reasoningEffort: "medium" });
+  });
+});
 
 describe("resolveModelPreference", () => {
   it("keeps a valid model and reasoning effort", () => {
