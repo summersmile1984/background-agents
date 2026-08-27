@@ -46,6 +46,11 @@ def visual_policy() -> str:
     )
 
 
+def test_visual_verification_instruction_defers_to_platform_runner() -> None:
+    assert "runs automatically after your response" in VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+    assert "Do not invoke `oi-visual-verify`" in VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
+
+
 class FakeRpc:
     def __init__(self):
         import asyncio
