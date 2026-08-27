@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listRepositoryCatalog } from "./targets";
+import { inferRepositoryBranch, listRepositoryCatalog } from "./targets";
 
 const { mockSignedControlPlaneFetch } = vi.hoisted(() => ({
   mockSignedControlPlaneFetch: vi.fn(),
@@ -134,5 +134,30 @@ describe("listRepositoryCatalog", () => {
       repositoryCount: 0,
       catalogStatus: "refreshing",
     });
+  });
+});
+
+describe("inferRepositoryBranch", () => {
+  const target = {
+    repositoryKey: "repo-1",
+    fullName: "summersmile1984/background-agents",
+    displayName: "background-agents",
+    provider: "github",
+    connectionId: "scm_github_default",
+    connectionLabel: "GitHub",
+    defaultBranch: "main",
+  };
+
+  it("accepts an explicit owner/repo@branch reference with slashes", () => {
+    expect(
+      inferRepositoryBranch(
+        target,
+        "summersmile1984/background-agents@codex/visual-e2e-fixture 生产视觉验证"
+      )
+    ).toBe("codex/visual-e2e-fixture");
+  });
+
+  it("does not infer a branch from an ordinary repository mention", () => {
+    expect(inferRepositoryBranch(target, "检查 summersmile1984/background-agents")).toBeUndefined();
   });
 });

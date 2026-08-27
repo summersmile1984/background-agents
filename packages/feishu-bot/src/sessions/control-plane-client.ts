@@ -33,12 +33,14 @@ export type SendPromptResult =
 export async function createSession(input: {
   env: ControlPlaneEnv;
   target: FeishuRepositoryTarget;
+  branch?: string;
   model: string;
   actorId: string;
   traceId?: string;
 }): Promise<CreateSessionResponse | null> {
   const body = JSON.stringify({
     repositoryKey: input.target.repositoryKey,
+    ...(input.branch ? { branch: input.branch } : {}),
     runtime: { harness: defaultHarnessForModel(input.model), model: input.model },
   });
   const response = await signedControlPlaneFetch(
