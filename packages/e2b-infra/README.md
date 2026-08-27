@@ -87,6 +87,10 @@ CUBE_IMAGE=localhost:5000/oi-e2b:latest \
   bash build-cube-template.sh
 ```
 
+Set `CUBE_IMAGE_BUILD_LABEL` to a unique value when Cube must rebuild the image artifact instead of
+reusing one cached for the same image digest. This is useful when recovering from a corrupted
+artifact; the label changes only the image metadata and does not alter the sandbox runtime.
+
 The command builds from a temporary context containing only this package and `sandbox-runtime`,
 pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
 template only after it reaches `READY`.
@@ -96,7 +100,7 @@ and `CUBE_TEMPLATE_MEMORY_MB` when the host capacity or workload requires anothe
 changes apply only to sandboxes created from the new template; existing sandboxes keep their
 original limits.
 
-`build-cube-template.sh` sets the sandbox DNS server to `119.29.29.29` by default. Cube's AF_XDP
+`build-cube-template.sh` sets the sandbox DNS server to `223.5.5.5` by default. Cube's AF_XDP
 network path does not make a resolver bound to a host-local address reachable from the sandbox.
 Override the resolver with `CUBE_DNS_SERVER` when the Cube network provides another
 sandbox-reachable DNS service.

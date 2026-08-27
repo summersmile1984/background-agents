@@ -10,7 +10,13 @@ function createMockSql() {
       calls.push({ query, params });
       return {
         toArray: () => rowsByQuery.get(query) ?? [],
-        one: () => rowsByQuery.get(query)?.[0] ?? null,
+        one: () => {
+          const rows = rowsByQuery.get(query) ?? [];
+          if (rows.length !== 1) {
+            throw new Error(`Expected exactly one result, got ${rows.length}`);
+          }
+          return rows[0];
+        },
         rowsWritten: 0,
       };
     },
