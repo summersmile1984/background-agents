@@ -393,6 +393,7 @@ class CodexHarnessDriver:
             "mcp_servers": codex_mcp_config(
                 self._mcp_servers,
                 builtin_environment,
+                self._environment,
             ),
         }
 

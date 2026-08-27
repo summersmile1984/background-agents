@@ -34,6 +34,7 @@ class ClaudeHarnessDriver:
         "WebFetch",
         "WebSearch",
         "Write",
+        "mcp__aio_browser__*",
         "mcp__open_inspect__*",
     )
 
@@ -201,7 +202,7 @@ class ClaudeHarnessDriver:
             "include_partial_messages": not uses_deepseek_model(self._environment),
             "system_prompt": {"type": "preset", "preset": "claude_code"},
             "env": self._environment,
-            "mcp_servers": claude_mcp_config(self._mcp_servers),
+            "mcp_servers": claude_mcp_config(self._mcp_servers, self._environment),
         }
         system_prompt_append = merge_system_instructions(
             self._environment.get("OI_HARNESS_SETTING_SYSTEM_PROMPT_APPEND"),

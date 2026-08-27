@@ -205,7 +205,8 @@ development environment.
 - Debian Linux with common dev tools
 - Node.js 22, Python 3.12, git, curl
 - Package managers: npm, pnpm, pip, uv
-- agent-browser CLI + headless Chrome (for browser automation)
+- agent-browser CLI plus Chromium/CDP/Browser MCP (for browser automation; Cube images reuse the
+  pinned browser-only slice from ByteDance Agent Infra AIO Sandbox)
 - OpenCode, Codex, Claude Code, and DeepSeek CodeWhale harness runtimes
 
 Open-Inspect supports these sandbox backends:

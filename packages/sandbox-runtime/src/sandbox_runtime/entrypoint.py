@@ -10,7 +10,7 @@ import signal
 
 from .agent_bridge_process import AgentBridgeProcess
 from .boot_warnings import BootWarningSink
-from .browser_desktop import BrowserDesktop
+from .browser_desktop import AioBrowserRuntimeConfig, BrowserDesktop
 from .code_server import CodeServer
 from .constants import VNC_DISPLAY, VNC_PASSWORD_ENV_VAR
 from .dev_services import DevServiceManager
@@ -37,7 +37,8 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
     """Consume process secrets and compose the production runtime."""
     config = RuntimeConfig.from_env(os.environ)
     vnc_password = os.environ.pop(VNC_PASSWORD_ENV_VAR, None) or None
-    if vnc_password:
+    aio_browser = AioBrowserRuntimeConfig.from_env(os.environ)
+    if vnc_password or aio_browser:
         os.environ["DISPLAY"] = VNC_DISPLAY
     log = get_logger(
         "supervisor",
@@ -98,7 +99,7 @@ def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
     agent_bridge = AgentBridgeProcess(config.bridge_process_config(), log)
     code_server = CodeServer(log)
     web_terminal = WebTerminal(log)
-    browser_desktop = BrowserDesktop(log, password=vnc_password)
+    browser_desktop = BrowserDesktop(log, password=vnc_password, aio_browser=aio_browser)
     supervisor = SandboxSupervisor(
         config,
         repository_boot,

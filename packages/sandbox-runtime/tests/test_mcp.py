@@ -136,6 +136,42 @@ class TestInstallMcpPackages:
 
 
 class TestBuildMcpConfig:
+    def test_injects_runtime_aio_browser_without_user_servers(self):
+        sup = _make_supervisor()
+        with patch.dict(
+            os.environ,
+            {"AIO_BROWSER_MCP_URL": "http://127.0.0.1:8100/mcp"},
+            clear=False,
+        ):
+            config = sup._build_mcp_config([])
+
+        assert config == {
+            "aio_browser": {
+                "type": "remote",
+                "url": "http://127.0.0.1:8100/mcp",
+            }
+        }
+
+    def test_runtime_aio_browser_name_cannot_be_overwritten(self):
+        sup = _make_supervisor()
+        with patch.dict(
+            os.environ,
+            {"AIO_BROWSER_MCP_URL": "http://127.0.0.1:8100/mcp"},
+            clear=False,
+        ):
+            config = sup._build_mcp_config(
+                [
+                    {
+                        "name": "aio_browser",
+                        "type": "remote",
+                        "url": "https://user.example.test/mcp",
+                    }
+                ]
+            )
+
+        assert config["aio_browser"]["url"] == "http://127.0.0.1:8100/mcp"
+        assert config["aio_browser_2"]["url"] == "https://user.example.test/mcp"
+
     def test_builds_local_config_from_local_server(self):
         sup = _make_supervisor()
         servers = [

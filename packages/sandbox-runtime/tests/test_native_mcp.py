@@ -122,6 +122,36 @@ def test_codex_builtin_mcp_receives_only_explicit_platform_environment():
     assert "env" not in config["user_server"]
 
 
+def test_aio_browser_mcp_is_injected_for_every_native_harness():
+    environment = {"AIO_BROWSER_MCP_URL": "http://127.0.0.1:8100/mcp"}
+
+    assert codex_mcp_config((), None, environment)["aio_browser"] == {
+        "url": "http://127.0.0.1:8100/mcp"
+    }
+    assert claude_mcp_config((), environment)["aio_browser"] == {
+        "type": "http",
+        "url": "http://127.0.0.1:8100/mcp",
+    }
+    assert codewhale_mcp_config((), environment)["servers"]["aio_browser"] == {
+        "url": "http://127.0.0.1:8100/mcp"
+    }
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1:8100/mcp",
+        "http://example.com:8100/mcp",
+        "http://127.0.0.1:8100/sse",
+        "http://user:password@127.0.0.1:8100/mcp",
+        "http://127.0.0.1:8100/mcp?token=secret",
+        "http://127.0.0.1/mcp",
+    ],
+)
+def test_aio_browser_mcp_rejects_non_runtime_endpoints(url):
+    assert "aio_browser" not in codex_mcp_config((), None, {"AIO_BROWSER_MCP_URL": url})
+
+
 def test_session_id_accepts_wire_and_legacy_casing():
     assert native_mcp._session_id('{"session_id":"session-1"}') == "session-1"
     assert native_mcp._session_id('{"sessionId":"session-2"}') == "session-2"

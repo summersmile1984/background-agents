@@ -110,7 +110,12 @@ class DeepSeekHarnessDriver:
         else:
             mcp_path = Path(mcp_config_path)
             mcp_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        mcp_path.write_text(json.dumps(codewhale_mcp_config(mcp_servers), separators=(",", ":")))
+        mcp_path.write_text(
+            json.dumps(
+                codewhale_mcp_config(mcp_servers, self._environment),
+                separators=(",", ":"),
+            )
+        )
         mcp_path.chmod(0o600)
         self._environment["CODEWHALE_MCP_CONFIG"] = str(mcp_path)
 

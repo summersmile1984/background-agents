@@ -76,7 +76,19 @@ the App can clone.
 
 The fork also carries an additive CubeSandbox build path. It uses Cube's `sandbox-code` base image
 so the E2B-compatible envd and code-interpreter services remain available, while installing the same
-pinned harnesses and development services as the managed E2B image.
+pinned harnesses and development services as the managed E2B image. The Cube image additionally
+extracts the browser-only slice from the pinned ByteDance Agent Infra AIO Sandbox image: Chromium
+and the official `@agent-infra/mcp-server-browser`. It deliberately does not copy AIO's duplicate
+Jupyter, code-server, terminal, Node, or Python stacks.
+
+At runtime the browser processes remain inside the Cube VM. Chromium CDP listens only on
+`127.0.0.1:9222`, and the AIO Browser MCP endpoint listens only on `127.0.0.1:8100/mcp`. The sandbox
+supervisor starts, monitors, and restarts both alongside the existing Xvfb/noVNC desktop. OpenCode,
+Codex, Claude Code, and DeepSeek CodeWhale receive the loopback MCP endpoint automatically as
+`aio_browser`; no AIO port or API key is exposed to the public internet. Platform visual
+verification and media upload remain the authoritative path for returning screenshots to Web and bot
+clients. `agent-browser` auto-connects to this managed Chromium instance, so canonical visual
+verification does not launch a second browser process tree.
 
 ```bash
 cd packages/e2b-infra
@@ -104,6 +116,12 @@ original limits.
 network path does not make a resolver bound to a host-local address reachable from the sandbox.
 Override the resolver with `CUBE_DNS_SERVER` when the Cube network provides another
 sandbox-reachable DNS service.
+
+After creating a test session from a new template, verify both private browser endpoints inside the
+sandbox: `/json/version` on port 9222 must include `webSocketDebuggerUrl`, and the Browser MCP
+process must listen on loopback port 8100. Then run `oi-visual-verify` against a repository dev
+service and confirm that its uploaded screenshot appears in the same Web session before promoting
+the template to production.
 
 ## Host model relay for Cube
 
