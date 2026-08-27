@@ -163,4 +163,27 @@ describe("Feishu media client", () => {
     ).rejects.toMatchObject({ reason: "invalid_media" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("includes the Feishu API error code and message for image upload failures", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 7200 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 234001, msg: "invalid image" }, 400));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      uploadFeishuMessageImage(env, {
+        bytes: new Uint8Array([1, 2, 3]).buffer,
+        mimeType: "image/png",
+        filename: "artifact.png",
+      })
+    ).rejects.toMatchObject({
+      reason: "invalid_media",
+      status: 400,
+      message:
+        "Feishu image upload failed (http_status=400, code=234001, msg=invalid image)",
+    });
+  });
 });
