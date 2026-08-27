@@ -2,7 +2,7 @@ version: 1
 services:
   processes:
     - name: visual-fixture
-      command: python3 app.py --host 127.0.0.1 --port 4173
+      command: python3 app.py --host 0.0.0.0 --port 4173
       cwd: packages/sandbox-runtime/tests/fixtures/visual-app
       ports: [4173]
       ready_timeout_seconds: 15
