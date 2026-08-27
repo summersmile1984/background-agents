@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractAgentResponse } from "@open-inspect/shared/completion/extractor";
-import { replyFeishuCard } from "../feishu/client";
+import { replySessionCard } from "../conversation/delivery";
 import type { Env } from "../types";
 import { processFeishuCompletion } from "./delivery";
 import { deliverFeishuMediaArtifacts } from "./media-upload";
 import type { FeishuCompletionJob } from "./job";
 
 vi.mock("@open-inspect/shared/completion/extractor", () => ({ extractAgentResponse: vi.fn() }));
-vi.mock("../feishu/client", () => ({ replyFeishuCard: vi.fn() }));
+vi.mock("../conversation/delivery", () => ({ replySessionCard: vi.fn() }));
+vi.mock("../conversation/store", () => ({
+  updateThreadSession: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("./media-upload", () => ({ deliverFeishuMediaArtifacts: vi.fn() }));
 
 const job: FeishuCompletionJob = {
@@ -36,7 +39,7 @@ const env = {
 describe("Feishu completion delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(replyFeishuCard).mockResolvedValue("completion-1");
+    vi.mocked(replySessionCard).mockResolvedValue({ messageId: "completion-1" });
     vi.mocked(deliverFeishuMediaArtifacts).mockResolvedValue({
       replied: 1,
       failed: 0,
@@ -63,7 +66,7 @@ describe("Feishu completion delivery", () => {
 
     await processFeishuCompletion(job, env);
 
-    expect(replyFeishuCard).toHaveBeenCalledOnce();
+    expect(replySessionCard).toHaveBeenCalledOnce();
     expect(deliverFeishuMediaArtifacts).toHaveBeenCalledWith({
       env,
       deliveryId: job.deliveryId,
@@ -71,10 +74,12 @@ describe("Feishu completion delivery", () => {
       sessionId: job.sessionId,
       messageId: job.messageId,
       rootMessageId: job.rootMessageId,
+      chatType: "p2p",
+      replyMode: "flat",
       artifacts: [screenshot],
       traceId: job.traceId,
     });
-    expect(vi.mocked(replyFeishuCard).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(vi.mocked(replySessionCard).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(deliverFeishuMediaArtifacts).mock.invocationCallOrder[0]
     );
   });
@@ -93,7 +98,7 @@ describe("Feishu completion delivery", () => {
       FEISHU_MEDIA_DELIVERY_ENABLED: "false",
     });
 
-    expect(replyFeishuCard).toHaveBeenCalledOnce();
+    expect(replySessionCard).toHaveBeenCalledOnce();
     expect(deliverFeishuMediaArtifacts).not.toHaveBeenCalled();
   });
 
@@ -116,8 +121,55 @@ describe("Feishu completion delivery", () => {
 
     await processFeishuCompletion(job, env);
 
-    expect(JSON.stringify(vi.mocked(replyFeishuCard).mock.calls[0]?.[2])).toContain(
+    expect(JSON.stringify(vi.mocked(replySessionCard).mock.calls[0]?.[2])).toContain(
       "https://4173-sandbox.example/"
     );
+  });
+
+  it("keeps completion cards and media inside the stored native topic", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done in topic",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [{ id: "artifact-topic", type: "screenshot" }],
+      success: true,
+    });
+    const topicJob: FeishuCompletionJob = {
+      ...job,
+      chatType: "group",
+      threadId: "thread-1",
+      replyMode: "thread",
+      branch: "codex/topic-a",
+      harness: "codex",
+      reasoningEffort: "high",
+    };
+
+    await processFeishuCompletion(topicJob, env);
+
+    expect(replySessionCard).toHaveBeenCalledWith(
+      env,
+      {
+        tenantKey: "tenant-1",
+        chatId: "chat-1",
+        chatType: "group",
+        rootMessageId: "root-1",
+        threadId: "thread-1",
+        replyMode: "thread",
+      },
+      expect.any(Object),
+      topicJob.deliveryId
+    );
+    expect(deliverFeishuMediaArtifacts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rootMessageId: "root-1",
+        chatType: "group",
+        threadId: "thread-1",
+        replyMode: "thread",
+      })
+    );
+    const card = JSON.stringify(vi.mocked(replySessionCard).mock.calls[0]?.[2]);
+    expect(card).toContain("codex/topic-a");
+    expect(card).toContain("codex");
+    expect(card).toContain("high");
   });
 });

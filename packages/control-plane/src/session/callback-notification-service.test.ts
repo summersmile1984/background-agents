@@ -54,13 +54,16 @@ function createTestHarness(overrides?: {
 
   const slackBot = createMockFetcher();
   const linearBot = createMockFetcher();
+  const feishuBot = createMockFetcher();
   const sleep = vi.fn(async () => {});
 
   const env: CallbackServiceEnv = {
     SERVICE_AUTH_SECRET_SLACK_BOT: "test-secret",
     SERVICE_AUTH_SECRET_LINEAR_BOT: "test-secret",
+    SERVICE_AUTH_SECRET_FEISHU_BOT: "test-secret",
     SLACK_BOT: slackBot,
     LINEAR_BOT: linearBot,
+    FEISHU_BOT: feishuBot,
     ...overrides?.env,
   };
 
@@ -80,6 +83,7 @@ function createTestHarness(overrides?: {
     env,
     slackBot,
     linearBot,
+    feishuBot,
     sleep,
   };
 }
@@ -345,6 +349,44 @@ describe("CallbackNotificationService", () => {
       const body = JSON.parse(String(linearFetch.mock.calls[0][1]?.body));
       expect(body.context.issueId).toBe("issue-1");
       expect(linearCompletionCallbackSchema.safeParse(body).success).toBe(true);
+      expect(await verifyCallbackSignature(body, "test-secret")).toBe(true);
+    });
+
+    it("preserves Feishu topic and runtime coordinates in the signed callback", async () => {
+      vi.mocked(harness.repository.getMessageCallbackContext).mockReturnValue({
+        callback_context: JSON.stringify({
+          source: "feishu",
+          tenantKey: "tenant-1",
+          chatId: "chat-1",
+          rootMessageId: "root-1",
+          chatType: "group",
+          threadId: "thread-1",
+          replyMode: "thread",
+          targetLabel: "owner/repo",
+          branch: "codex/topic-a",
+          harness: "codex",
+          model: "openai/gpt-5.6-luna",
+          reasoningEffort: "high",
+        }),
+        source: "feishu",
+      });
+      vi.mocked(harness.feishuBot.fetch).mockResolvedValue(new Response("ok", { status: 200 }));
+
+      await harness.service.notifyComplete("msg-1", true);
+
+      expect(harness.feishuBot.fetch).toHaveBeenCalledOnce();
+      expect(harness.slackBot.fetch).not.toHaveBeenCalled();
+      const body = JSON.parse(String(harness.feishuBot.fetch.mock.calls[0][1]?.body));
+      expect(body.context).toMatchObject({
+        source: "feishu",
+        rootMessageId: "root-1",
+        chatType: "group",
+        threadId: "thread-1",
+        replyMode: "thread",
+        branch: "codex/topic-a",
+        harness: "codex",
+        reasoningEffort: "high",
+      });
       expect(await verifyCallbackSignature(body, "test-secret")).toBe(true);
     });
   });

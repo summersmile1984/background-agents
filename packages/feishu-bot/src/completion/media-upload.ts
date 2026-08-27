@@ -1,10 +1,6 @@
 import type { MediaArtifactInfo } from "@open-inspect/shared/types/artifacts";
-import {
-  FeishuApiError,
-  replyFeishuImage,
-  replyFeishuText,
-  uploadFeishuMessageImage,
-} from "../feishu/client";
+import { replySessionImage, replySessionText } from "../conversation/delivery";
+import { FeishuApiError, uploadFeishuMessageImage } from "../feishu/client";
 import { signedControlPlaneFetch } from "../internal-auth";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
@@ -57,6 +53,9 @@ interface DeliverMediaArtifactsInput {
   sessionId: string;
   messageId: string;
   rootMessageId: string;
+  chatType?: "p2p" | "group";
+  threadId?: string;
+  replyMode?: "thread" | "flat";
   artifacts: MediaArtifactInfo[];
   traceId?: string;
 }
@@ -223,9 +222,13 @@ async function sendAggregateWarning(
   if (result.omitted > 0) parts.push(`${result.omitted} 个媒体因格式或大小限制未发送`);
   const text = `${parts.join("，")}。完整媒体仍保留在 Open-Inspect Web 会话中。`;
   try {
-    const warningMessageId = await replyFeishuText(input.env, input.rootMessageId, text);
+    const warningMessage = await replySessionText(
+      input.env,
+      { rootMessageId: input.rootMessageId, replyMode: input.replyMode ?? "flat" },
+      text
+    );
     record.warningState = "sent";
-    if (warningMessageId) record.warningMessageId = warningMessageId;
+    if (warningMessage?.messageId) record.warningMessageId = warningMessage.messageId;
   } catch (error) {
     if (error instanceof FeishuApiError && error.reason === "ambiguous") {
       record.warningState = "ambiguous";
@@ -373,11 +376,15 @@ export async function deliverFeishuMediaArtifacts(
       }
 
       try {
-        const replyMessageId = await replyFeishuImage(input.env, input.rootMessageId, imageKey);
+        const replyMessage = await replySessionImage(
+          input.env,
+          { rootMessageId: input.rootMessageId, replyMode: input.replyMode ?? "flat" },
+          imageKey
+        );
         result.replied += 1;
         await recordOutcome(input, key, record, artifact.id, {
           state: "replied",
-          ...(replyMessageId ? { replyMessageId } : {}),
+          ...(replyMessage?.messageId ? { replyMessageId: replyMessage.messageId } : {}),
         });
         log.info("feishu.media.reply", {
           trace_id: input.traceId,

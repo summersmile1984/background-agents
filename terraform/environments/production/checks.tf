@@ -52,6 +52,19 @@ resource "terraform_data" "cloudflare_feishu_custom_domain_gate" {
   }
 }
 
+resource "terraform_data" "feishu_thread_followup_gate" {
+  lifecycle {
+    precondition {
+      condition = !var.feishu_bound_thread_followups_enabled || (
+        var.enable_feishu_bot &&
+        var.feishu_triggers_enabled &&
+        var.feishu_thread_replies_enabled
+      )
+      error_message = "feishu_bound_thread_followups_enabled requires enable_feishu_bot, feishu_triggers_enabled, and feishu_thread_replies_enabled. It also requires the Feishu group-all-messages app permission."
+    }
+  }
+}
+
 # Fail the plan when no access control is configured. Uses terraform_data with a
 # precondition so this is a hard error, not an advisory check-block warning.
 resource "terraform_data" "access_control_gate" {

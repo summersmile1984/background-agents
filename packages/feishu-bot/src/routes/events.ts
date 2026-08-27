@@ -46,8 +46,9 @@ eventRoutes.post("/events", async (c) => {
     try {
       if (!(await claimEventOnce(c.env, eventId))) return c.json({ ok: true });
     } catch (error) {
-      // The event parser is still idempotent at session-create boundaries; do
-      // not force a Feishu retry that can multiply otherwise valid work.
+      // Avoid forcing a Feishu retry while KV is unhealthy. The dispatcher
+      // refuses to create a new sandbox when it cannot read the root mapping,
+      // which is safer than knowingly multiplying work.
       log.error("event.dedupe", {
         trace_id: traceId,
         event_id: eventId,

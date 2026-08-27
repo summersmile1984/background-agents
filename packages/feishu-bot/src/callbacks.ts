@@ -35,8 +35,14 @@ callbacksRouter.post("/complete", async (c) => {
     tenantKey: context.tenantKey,
     chatId: context.chatId,
     rootMessageId: context.rootMessageId,
+    ...(context.chatType ? { chatType: context.chatType } : {}),
+    ...(context.threadId ? { threadId: context.threadId } : {}),
+    ...(context.replyMode ? { replyMode: context.replyMode } : {}),
     targetLabel: context.targetLabel,
+    ...(context.branch ? { branch: context.branch } : {}),
+    ...(context.harness ? { harness: context.harness } : {}),
     model: context.model,
+    ...(context.reasoningEffort ? { reasoningEffort: context.reasoningEffort } : {}),
     traceId,
   });
   try {

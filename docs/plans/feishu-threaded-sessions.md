@@ -1,0 +1,525 @@
+# 飞书并行线程会话实施方案
+
+## 状态
+
+**Implementation in progress — 本地代码与自动测试已完成，等待生产部署和真实飞书 E2E。**
+
+本文是把飞书多会话体验对齐 Slack thread 的实施依据。它聚焦已经上线的
+`packages/feishu-bot`，替代早期总方案中“用 `root_id`
+即视为已完成线程体验”的假设；通用飞书入口、SCM、Harness、截图和预览架构仍以
+[飞书机器人入口方案](./feishu-bot-integration.md) 与 [飞书集成文档](../integrations/FEISHU.md)
+为准。
+
+实施完成后的核心不变量是：
+
+> 一个飞书话题只绑定一个 Open-Inspect session；一个 session 只绑定一个 sandbox、固定仓库和固定分支。
+
+新顶层任务可以并行创建新 session；在已有话题中的消息只能续办该话题绑定的 session，绝不能因为模型、关键词或最近使用记录切换到另一个 session。
+
+## 1. 当前问题与代码证据
+
+Slack 已经把展示层和路由层统一到 `thread_ts`：
+
+- `packages/slack-bot/src/events/message-handler.ts` 用 `event.thread_ts || event.ts` 作为 thread
+  key；
+- `packages/slack-bot/src/sessions/thread-session-store.ts` 保存 `channel + threadTs -> session`；
+- 仓库澄清、工作状态、完成消息和媒体都携带相同的 `thread_ts`；
+- thread follow-up 会读取映射并投递到原 session。
+
+飞书目前只实现了路由层：
+
+- `packages/feishu-bot/src/events/dispatcher.ts` 用 `message.root_id || message.message_id` 生成
+  `rootMessageId`；
+- `packages/feishu-bot/src/conversation/store.ts` 保存
+  `tenantKey + chatId + rootMessageId -> session`；
+- 但是 `packages/feishu-bot/src/feishu/client.ts` 的回复 body 没有
+  `reply_in_thread`，确认、仓库卡、工作卡、完成卡和图片仍出现在主 timeline；
+- 入站 schema 没有读取 `thread_id`；
+- 群聊在查询已有 session 之前就要求每条消息都 @机器人；
+- 若干 session 错误仍调用 `sendFeishuText(chatId)`，会逃离原话题；
+- “会话列表”只包含 Web 链接、目标和模型，不能清楚展示并行分支、Harness、状态或飞书话题归属。
+
+飞书回复消息 API 支持 `reply_in_thread=true`。官方 Lark
+CLI 对该字段的语义是：回复进入目标消息的话题而不是主消息流：
+
+- [飞书回复消息 API](https://open.feishu.cn/document/server-docs/im-v1/message/reply)
+- [Lark 官方 CLI：reply in thread](https://github.com/larksuite/cli/blob/main/skills/lark-im/references/lark-im-messages-reply.md)
+
+## 2. 产品与交互决策
+
+### 2.1 群聊是并行开发的主工作面
+
+创建一个固定的“Open-Inspect 工作台”普通群或话题群并加入机器人。不是每个 session 创建一个群；一个群可以承载多个并行话题：
+
+```mermaid
+flowchart LR
+  G["Open-Inspect 工作台群"]
+  G --> R1["顶层任务 A：chatbi 登录页"]
+  G --> R2["顶层任务 B：n9n 构建"]
+  G --> R3["顶层任务 C：Gitea 支持"]
+  R1 --> T1["话题 A"] --> S1["Session A"] --> B1["Sandbox A / Branch A"]
+  R2 --> T2["话题 B"] --> S2["Session B"] --> B2["Sandbox B / Branch B"]
+  R3 --> T3["话题 C"] --> S3["Session C"] --> B3["Sandbox C / Branch C"]
+```
+
+交互规则：
+
+1. 群内一条新的顶层 `@Open-Inspect` 消息创建一个新话题和新 session。
+2. 首条“已收到”、代码源/仓库选择、工作卡都回复到这个话题。
+3. 用户在话题中继续发送消息时，投递到唯一绑定的 session。
+4. session 的完成、失败、截图、预览和 PR 都回复到同一话题。
+5. 要更换仓库、分支或 Harness，必须创建新顶层任务；已启动 session 不允许原地切换。
+6. 两个话题可同时运行，不设置 chat 级别的隐式“当前 session”。
+
+### 2.2 私聊是控制中心和兼容入口
+
+飞书私聊客户端不作为原生多话题体验的强依赖。私聊保留：
+
+- 顶层消息默认创建新 session；
+- 引用回复一个已绑定的根消息或机器人卡片时，续办对应 session；
+- 卡片始终显示 session 短编号、仓库、分支、Harness、模型和状态；
+- “会话列表”可以打开 Web session；第二阶段增加 `#短编号` 显式续办；
+- 不实现“最后活跃 session 就是当前 session”，避免多个沙盒并行时串线。
+
+### 2.3 群内是否需要重复 @
+
+最终体验是：新顶层任务必须 @机器人；已绑定话题中由原发起人发送的后续消息无需重复 @。
+
+但飞书当前权限边界需要明确处理：只有 `im:message.group_at_msg:readonly`
+时，机器人通常收不到未 @ 的话题后续消息。要实现无 @ 续办，需要申请该租户当前版本中“获取群组中所有消息”的应用权限（通常为
+`im:message.group_msg`），这会让机器人收到所在群的其他消息。代码必须先检查话题映射，再丢弃未绑定、未 @ 的群消息，不记录完整无关消息内容。
+
+因此发布分两档：
+
+| 模式                   | 权限           | 行为                                            |
+| ---------------------- | -------------- | ----------------------------------------------- |
+| Mention follow-up      | 现有群 @ 权限  | 原生话题隔离可用，但每条 follow-up 仍需 @机器人 |
+| Bound-thread follow-up | 群全部消息权限 | 已绑定话题无需 @；未绑定且未 @ 的消息立即忽略   |
+
+## 3. 目标消息和会话模型
+
+### 3.1 稳定路由键
+
+`rootMessageId` 继续作为稳定路由键。创建话题前的首条事件尚没有 `thread_id`，而第一个
+`reply_in_thread=true` 回复会派生话题；如果中途改用 `thread_id`
+作为主键，首回合和后续回合会落入不同 KV key。
+
+```ts
+type FeishuReplyMode = "thread" | "flat";
+
+interface FeishuConversationCoordinates {
+  tenantKey: string;
+  chatId: string;
+  chatType: "p2p" | "group";
+  rootMessageId: string; // stable session routing key
+  threadId?: string; // Feishu presentation coordinate only
+  replyMode: FeishuReplyMode;
+}
+```
+
+解析规则：
+
+1. `rootMessageId = message.root_id || message.message_id`；
+2. 保存 `message.thread_id`，但不用于替换 KV 主键；
+3. 已经携带 `thread_id` 的事件强制 `replyMode=thread`；
+4. 新群顶层任务且线程创建开关开启时使用 `replyMode=thread`；
+5. P2P 顶层任务默认 `replyMode=flat`；
+6. 旧记录或旧 callback 没有 mode 时默认 `flat`，避免滚动部署期间意外改变投递位置。
+
+### 3.2 KV 记录 V2
+
+沿用现有 KV key，不做破坏性迁移：
+
+```text
+thread:<tenantKey>:<chatId>:<rootMessageId>
+session-index:<tenantKey>:<chatId>:<actorId>
+```
+
+写入 V2 记录，读取时兼容旧记录：
+
+```ts
+interface FeishuThreadSessionV2 {
+  version: 2;
+  sessionId: string;
+  actorId: string;
+  repositoryKey: string;
+  targetLabel: string;
+  branch?: string;
+  harness: AgentHarness | "inherit";
+  model: string;
+  reasoningEffort?: string;
+  chatType: "p2p" | "group";
+  replyMode: "thread" | "flat";
+  rootMessageId: string;
+  threadId?: string;
+  state: "starting" | "active" | "delivery_failed" | "completed" | "failed";
+  createdAt: number;
+  updatedAt: number;
+  lastMessageId?: string;
+}
+```
+
+要求：
+
+- V1 记录解析后补默认值，不批量扫描或删除现有 KV；
+- 创建 session 成功后、发送首 prompt 之前写入 `starting`
+  映射，消除工作卡出现后用户立即回复却找不到映射的窗口；
+- 首 prompt 成功后置 `active`，未送达置 `delivery_failed`；完成 callback 置 `completed` 或
+  `failed`；
+- 每次有效 follow-up 和 completion 刷新 TTL；
+- TTL 初期保持现有 7 天以与 Slack 一致，后续若产品要求长期恢复，再单独设计 D1 持久索引，不在本变更中混入存储迁移。
+
+### 3.3 Shared callback 兼容
+
+给 `FeishuCallbackContext` 增加可选字段：
+
+```ts
+chatType?: "p2p" | "group";
+threadId?: string;
+replyMode?: "thread" | "flat";
+```
+
+字段保持可选以兼容：
+
+- 已在运行的旧 session；
+- Control Plane 与 Feishu Worker 的滚动部署；
+- completion queue 中已经存在的 V1 job。
+
+`FeishuCompletionJob`
+同样增加可选字段，不提升 queue 版本。旧 job 默认投递到 flat；新 job 按 callback 中固定的 mode 投递。线程创建 feature
+flag 只控制**新任务是否创建话题**，不能把一个已经绑定话题的 completion 降级到主 timeline。
+
+## 4. 出站消息设计
+
+### 4.1 统一回复结果
+
+`createMessageResponseSchema` 不再只解析 `message_id`，改为：
+
+```ts
+interface FeishuSentMessage {
+  messageId: string;
+  rootMessageId?: string;
+  parentMessageId?: string;
+  threadId?: string;
+}
+```
+
+回复 helper 接受统一 options：
+
+```ts
+interface FeishuReplyOptions {
+  replyInThread?: boolean;
+  idempotencyKey?: string;
+}
+```
+
+body 在 `replyInThread` 明确时携带 `reply_in_thread`；幂等 key 映射到飞书
+`uuid`。调用方只保存返回的 opaque ID，绝不推导 URL 或 repo。
+
+### 4.2 Session delivery facade
+
+新增 `packages/feishu-bot/src/conversation/delivery.ts`，提供：
+
+```ts
+replySessionText(env, coordinates, text, idempotencyKey?)
+replySessionCard(env, coordinates, card, idempotencyKey?)
+replySessionImage(env, coordinates, imageKey, idempotencyKey?)
+```
+
+规则：
+
+- 始终回复 `coordinates.rootMessageId`；
+- `coordinates.replyMode === "thread"` 时统一发送 `reply_in_thread=true`；
+- session 相关错误、权限拒绝、仓库刷新提示和媒体警告也必须通过 facade；
+- `sendFeishuText/Card(chatId)` 只允许用于会话列表、安装提示等明确的 chat-level 通知；
+- lint 无法表达该语义，因此用调用点审计测试和 `rg` 发布检查防止重新泄漏到主 timeline。
+
+### 4.3 卡片信息层级
+
+工作卡和完成卡统一显示：
+
+```text
+[#A12F] huangdong/chatbi · codex · branch/codex-login
+状态：正在启动 / 工作中 / 已完成 / 失败
+模型：gpt-5.6-luna · effort: high
+```
+
+短编号由 `sessionId`
+的不可逆短摘要生成，只用于显示和显式查找，不能作为授权凭据。卡片动作仍使用 opaque pending/action
+ID 并校验 actor、chat、root 和 session。
+
+会话列表至少显示：短编号、SCM/repo、分支、Harness、模型、状态、创建时间和 Web 链接。若飞书提供经过验证的稳定话题 deep
+link 再增加“打开话题”，不能自行拼接未公开 URL。
+
+## 5. 入站路由状态机
+
+```mermaid
+stateDiagram-v2
+  [*] --> Parse: im.message.receive_v1
+  Parse --> Ignore: app/system/unsupported chat
+  Parse --> Existing: root key has session mapping
+  Parse --> Unbound: no mapping
+  Existing --> RejectActor: actor is not session owner
+  Existing --> FollowUp: actor matches and runtime is reusable
+  Existing --> NewFlow: mapping stale or runtime incompatible
+  Unbound --> Ignore: group message has no mention
+  Unbound --> NewFlow: P2P or group @mention
+  NewFlow --> Picker: target ambiguous
+  NewFlow --> Starting: target resolved and session created
+  Starting --> Active: first prompt delivered
+  Starting --> DeliveryFailed: prompt not delivered
+  FollowUp --> Active: prompt delivered
+  FollowUp --> Stale: control plane reports stale session
+```
+
+执行顺序必须是：
+
+1. 验证、解密和事件去重；
+2. 解析 actor、chat、root/thread 坐标和文字；
+3. 查询已有 root → session 映射；
+4. 若存在映射，先执行 actor/runtime/stale 检查，再决定是否要求 mention；
+5. 若不存在映射，P2P 允许新建，群聊必须 @机器人；
+6. 发送话题内回执；
+7. 续办或进入目标选择/新建流程。
+
+这能保证启用“群全部消息”权限后，未绑定群消息只发生一次 KV lookup，不进入 repo catalog、Control
+Plane、模型或日志正文。
+
+## 6. 文件级改动清单
+
+| 文件                                                                  | 具体改动                                                                        |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `packages/feishu-bot/src/events/payload.ts`                           | 解析 `thread_id`；增加 payload fixtures                                         |
+| `packages/feishu-bot/src/feishu/client.ts`                            | 回复 options、`reply_in_thread`、`uuid`、完整 response schema                   |
+| `packages/feishu-bot/src/conversation/delivery.ts`                    | 新增 session-scoped text/card/image facade                                      |
+| `packages/feishu-bot/src/conversation/store.ts`                       | V2 mapping、reply mode、thread metadata、状态和 TTL refresh                     |
+| `packages/feishu-bot/src/events/dispatcher.ts`                        | 先查映射再做 mention gate；所有 session 回复走 facade；创建时写 starting/active |
+| `packages/feishu-bot/src/interactions/card-actions.ts`                | pending record 保留 chat/reply mode；分页、错误与启动均回原话题                 |
+| `packages/feishu-bot/src/completion/job.ts`                           | 可选 chat/thread/reply mode 字段，兼容 V1                                       |
+| `packages/feishu-bot/src/callbacks.ts`                                | callback context 原样传递线程坐标到 queue job                                   |
+| `packages/feishu-bot/src/completion/delivery.ts`                      | 完成卡走 session facade；更新 mapping 终态                                      |
+| `packages/feishu-bot/src/completion/media-upload.ts`                  | 截图、聚合警告携带相同 reply mode；保持媒体幂等记录                             |
+| `packages/feishu-bot/src/cards.ts`                                    | session 短编号、branch、Harness、effort、状态和入口说明                         |
+| `packages/feishu-bot/src/types/index.ts`                              | 新增线程创建和 bound-follow-up feature flag                                     |
+| `packages/shared/src/types/session-api.ts`                            | callback context 可选 thread fields；先构建 shared                              |
+| `packages/control-plane/src/session/callback-notification-service.ts` | 保证新增字段签名后原样回传；补回归测试                                          |
+| `terraform/environments/production/variables.tf`                      | 新增两个布尔 rollout 变量，默认 false                                           |
+| `terraform/environments/production/workers-feishu.tf`                 | 传入 Worker 环境变量                                                            |
+| `.github/workflows/terraform.yml`                                     | 从 repository secret/variable 传入 rollout flags                                |
+| `terraform/environments/production/terraform.tfvars.example`          | 记录开关、权限依赖和最终推荐值                                                  |
+| `docs/integrations/FEISHU.md`                                         | 更新群工作台、话题续办、私聊降级、权限与 E2E runbook                            |
+
+建议环境变量：
+
+```text
+FEISHU_THREAD_REPLIES_ENABLED=false
+FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED=false
+```
+
+Terraform 对应：
+
+```hcl
+feishu_thread_replies_enabled          = false
+feishu_bound_thread_followups_enabled  = false
+```
+
+第二个变量为 true 时，部署检查和文档必须明确要求群全部消息权限。生产最终推荐两个都为 true；若租户不批准较宽权限，则保持第一个 true、第二个 false，用户在话题 follow-up 时继续 @机器人。
+
+## 7. 分阶段执行
+
+### 阶段 A：协议和兼容层
+
+- [x] shared callback schema 增加可选 thread fields；先构建 `@open-inspect/shared`；
+- [x] Feishu event schema 解析 `thread_id`；
+- [x] Feishu reply client 支持 `reply_in_thread` 和完整 response；
+- [x] completion job 接受旧/新 payload；
+- [x] 增加 client、payload、callback 和 queue compatibility tests。
+
+阶段门：旧 fixture、旧 KV record、旧 completion job 仍能解析；feature
+flag 关闭时出站 body 与当前生产等价。
+
+### 阶段 B：统一 delivery 和路由
+
+- [x] 新增 session delivery facade；
+- [x] 替换 dispatcher、card actions、completion、media 的所有 session-scoped send/reply；
+- [x] 调整 mention gate 顺序；
+- [x] 增加 V2 mapping 和 starting/active/completed/failed 状态；
+- [x] 增加两个并行 root key 的隔离测试；
+- [x] 增加错误、跨用户、stale 和 runtime mismatch 测试。
+
+阶段门：代码审计中除明确的 chat-level 通知外，不再有 session 错误通过 `sendFeishuText/Card(chatId)`
+发出。
+
+### 阶段 C：卡片和私聊降级
+
+- [x] 工作/完成/会话列表卡显示短编号、repo、branch、Harness、模型和状态；
+- [x] 私聊卡提示“引用回复此任务继续；发送新顶层消息创建新任务”；
+- [x] 群话题卡提示“在本话题继续即可”；
+- [ ] 第二阶段可增加 `#短编号` 显式续办，但不得引入 chat-level active session；
+- [x] 手机端保留当前按钮分页，不恢复会被输入法遮挡的下拉选择器。
+
+阶段门：仅看任意一张截图也能判断它属于哪个 repo、branch 和 session。
+
+### 阶段 D：部署、权限和真实 E2E
+
+- [ ] 先部署代码，两个开关保持 false；
+- [ ] 在测试群开启 thread replies，bound follow-up 保持 false；
+- [ ] 验证带 @ 的话题并行 E2E；
+- [ ] 申请/发布群全部消息权限；
+- [ ] 开启 bound follow-up，验证话题内不 @ 续办和未绑定消息忽略；
+- [ ] 完成 Web、飞书桌面/网页、飞书手机端验收；
+- [ ] 观察错误率后再扩大应用可见范围。
+
+## 8. 自动测试矩阵
+
+### 8.1 Unit
+
+| 场景                | 必须断言                                      |
+| ------------------- | --------------------------------------------- |
+| 新群顶层消息        | root=message ID，mode=thread                  |
+| 已有话题消息        | root 保持原 root，保留 thread ID，mode=thread |
+| P2P 顶层消息        | mode=flat                                     |
+| 旧 callback/job/KV  | 解析成功并默认 flat                           |
+| reply client        | body 包含正确 `reply_in_thread` 和 `uuid`     |
+| 线程 API 返回       | message/root/parent/thread ID 均被解析        |
+| 两个根消息          | 分别命中两个不同 session                      |
+| 同一话题 follow-up  | 只调用绑定 session 的 prompt endpoint         |
+| 未绑定、未 @ 群消息 | 不查 catalog、不建 session、不发消息          |
+| 已绑定、未 @ 群消息 | 开关开启且 actor 匹配时续办                   |
+| 跨用户 follow-up    | 在原话题拒绝，不泄漏 session 细节             |
+| 仓库选择分页/错误   | 回复原 root，并保留 thread mode               |
+| completion/media    | 卡、截图和警告均回复原 thread                 |
+| 重复 callback       | completion/media 幂等规则保持有效             |
+
+### 8.2 本地和 CI 命令
+
+```bash
+npm run build -w @open-inspect/shared
+npm test -w @open-inspect/feishu-bot
+npm test -w @open-inspect/control-plane
+npm run typecheck
+npm run lint
+terraform -chdir=terraform/environments/production fmt -check -recursive
+```
+
+若改动 control-plane D1/DO 行为，再额外执行：
+
+```bash
+npm run test:integration -w @open-inspect/control-plane
+```
+
+本方案不改 Python sandbox；如果实施时发现必须修改
+`packages/modal-infra`，需停止并重新审查边界，而不是顺手扩大变更。
+
+## 9. 真实飞书 E2E Runbook
+
+浏览器 Web E2E 不能替代飞书 E2E。每次验证保存：部署 commit、时间、飞书 event ID、chat/root/thread
+ID、Open-Inspect session ID、sandbox ID、repo/branch、Web session URL、PR
+URL 和桌面/手机截图；日志中不得保存 prompt 正文或 token。
+
+### 场景 1：两个并行 session
+
+1. 在测试工作群发送顶层任务 A，明确选择 GitHub repo 和 branch A；
+2. 在主 timeline 发送顶层任务 B，明确选择 Gitea repo 和 branch B；
+3. 确认出现两个独立飞书话题；
+4. 在 Web session 验证 A/B 分别有不同 session ID、sandbox ID 和 pinned repository/branch；
+5. 在 A 话题发送“只修改 README 标题 A”，在 B 话题发送“只修改 README 标题 B”；
+6. 验证两条 follow-up 投递到正确 session，文件、git branch 和 commit 不交叉；
+7. 同时等待完成，确认完成卡分别回到对应话题。
+
+### 场景 2：截图、预览和 PR 归属
+
+1. A 请求视觉验证并启动预览；
+2. B 创建 PR；
+3. 确认 A 的截图与 preview URL 只在 A 话题；
+4. 确认 B 的 PR 卡只在 B 话题；
+5. 重放一个 completion callback，确认媒体不重复发送。
+
+### 场景 3：权限和负向路由
+
+1. 第二个测试用户在 A 话题续办，确认被拒绝且不投递 prompt；
+2. 在群主 timeline 发送未 @ 的普通消息，确认无回复、无 catalog 和 session 调用；
+3. 关闭 bound-follow-up 时，在话题不 @，确认不触发；加 @ 后可触发；
+4. 开启并授权 bound-follow-up 后，在已绑定话题不 @，确认可触发；
+5. 点击过期/重放的仓库卡，确认 actor/action/pending 校验拒绝；
+6. 让一个旧 V1 session 完成，确认仍收到 flat completion，不丢消息。
+
+### 场景 4：私聊和手机端
+
+1. 私聊创建两个顶层 session，确认会话列表同时显示两者；
+2. 引用回复各自任务继续，确认不会串 session；
+3. 普通顶层消息始终创建新任务或进入仓库选择，不续办“最近任务”；
+4. 手机端完成代码源、仓库分页选择和两个话题切换；
+5. 确认输入法不会遮挡按钮，工作卡能辨认 repo/branch/session。
+
+## 10. 可观测性和故障诊断
+
+新增结构化字段，值均为 opaque ID 或枚举：
+
+```text
+chat_type
+root_message_id
+thread_id
+reply_mode
+session_id
+session_state
+mention_present
+mapping_found
+delivery_surface=thread|flat
+fallback_reason
+feishu_error_code
+```
+
+禁止记录完整消息正文、卡片 content、tenant token、App Secret、SCM PAT、sandbox capability。
+
+上线观察：
+
+- thread reply API 4xx/429/5xx 和 ambiguous outcome；
+- mapping miss、stale session、cross-actor reject；
+- session-scoped top-level send 计数，目标应为 0；
+- completion queue retry/DLQ；
+- 同 root 同时创建多个 session 的异常计数；
+- 飞书 completion 到达时间与 Control Plane completion 时间差。
+
+## 11. 灰度和回滚
+
+### 灰度
+
+1. 代码先向后兼容部署，两个 flag=false；
+2. 测试群开启 `FEISHU_THREAD_REPLIES_ENABLED=true`，验证 mention 模式；
+3. 飞书后台申请群全部消息权限、发布新应用版本并限制可见范围；
+4. 开启 `FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED=true`；
+5. 观察至少一次完整双 session、截图和 PR E2E 后再扩大范围。
+
+### 回滚
+
+- 首选关闭“新线程创建”开关，停止把新的根消息提升为话题；
+- 已经存储 `replyMode=thread` 的 session 仍按原话题完成，避免结果突然跑到主 timeline；
+- bound follow-up 有异常时单独关闭，不需要撤销整个飞书入口；
+- 不清空 KV、不停止正在运行的 sandbox；用户仍可从 Web 继续 session；
+- 若必须回退 Worker 版本，旧代码会忽略可选 callback 字段并 flat 回复，功能降级但不破坏 Control Plane
+  session。
+
+## 12. 完成定义
+
+只有以下证据全部存在才能称为完成：
+
+- [x] 自动测试覆盖新旧 payload、两个并行 session、completion/media 和负向授权；
+- [x] shared 先构建，Feishu、Control Plane、全局 typecheck/lint、Terraform fmt 全部通过；
+- [ ] 生产/测试部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
+- [ ] 一个 GitHub session 与一个 Gitea
+      session 在两个飞书话题并行运行，session/sandbox/branch 不交叉；
+- [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题；
+- [ ] 未绑定群消息不触发，跨用户和旧卡片不能控制 session；
+- [ ] 私聊两个 session 不依赖隐式当前会话且可以显式续办；
+- [ ] 飞书 Web/桌面与手机端截图验证通过；
+- [ ] 关闭 rollout flag 的回滚演练不停止既有 sandbox，Web 仍可接管；
+- [x] `docs/integrations/FEISHU.md` 与飞书后台权限说明已更新。
+
+## 13. 明确不改的边界
+
+- 不修改 sandbox 镜像、E2B/Modal provider、Harness provider 或 Git credential broker；
+- 不把飞书 tenant token、SCM PAT、LLM key 或 `SANDBOX_AUTH_TOKEN` 发送给 Harness；
+- 不允许已运行 session 更换 repo/branch/Harness；
+- 不为聊天平台建立新的 agent 协议；
+- 不把 Slack 和 Feishu 适配器强行合并，只共享 Control Plane 合约和可证明稳定的纯类型/工具。

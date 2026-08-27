@@ -324,6 +324,18 @@ variable "feishu_media_delivery_enabled" {
   default     = false
 }
 
+variable "feishu_thread_replies_enabled" {
+  description = "Promote new Feishu group root requests to native message topics. Existing topic callbacks continue using their stored reply mode."
+  type        = bool
+  default     = false
+}
+
+variable "feishu_bound_thread_followups_enabled" {
+  description = "Allow the owner to continue an already-bound Feishu group topic without another @mention. Requires the app's group-all-messages permission."
+  type        = bool
+  default     = false
+}
+
 variable "feishu_app_id" {
   description = "Feishu self-built app ID (cli_...)"
   type        = string
@@ -353,7 +365,7 @@ variable "feishu_encrypt_key" {
 }
 
 variable "feishu_bot_open_id" {
-  description = "Open ID of the Open-Inspect Feishu bot. Required before group @mention triggers can be enabled."
+  description = "Optional Open ID override for the Open-Inspect Feishu bot. When empty the Worker resolves it from bot/v3/info."
   type        = string
   sensitive   = true
   default     = ""

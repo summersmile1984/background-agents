@@ -15,13 +15,26 @@ const tenantTokenResponseSchema = z.object({
 const createMessageResponseSchema = z.object({
   code: z.number(),
   msg: z.string().optional(),
-  data: z.object({ message_id: z.string().optional() }).optional(),
+  data: z
+    .object({
+      message_id: z.string().optional(),
+      root_id: z.string().optional(),
+      parent_id: z.string().optional(),
+      thread_id: z.string().optional(),
+    })
+    .optional(),
 });
 
 const uploadImageResponseSchema = z.object({
   code: z.number(),
   msg: z.string().optional(),
   data: z.object({ image_key: z.string().min(1).optional() }).optional(),
+});
+
+const botInfoResponseSchema = z.object({
+  code: z.number(),
+  msg: z.string().optional(),
+  bot: z.object({ open_id: z.string().min(1).optional() }).optional(),
 });
 
 const MESSAGE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -51,6 +64,7 @@ interface CachedTenantToken {
 }
 
 let cachedTenantToken: CachedTenantToken | null = null;
+let cachedBotOpenId: string | null = null;
 
 function apiBase(env: Pick<Env, "FEISHU_API_BASE">): string {
   const value = (env.FEISHU_API_BASE || DEFAULT_FEISHU_API_BASE).replace(/\/$/, "");
@@ -86,7 +100,45 @@ async function tenantAccessToken(
 
 export type FeishuCard = Record<string, unknown>;
 
+export interface FeishuSentMessage {
+  messageId: string;
+  rootMessageId?: string;
+  parentMessageId?: string;
+  threadId?: string;
+}
+
+export interface FeishuReplyOptions {
+  replyInThread?: boolean;
+  /** Feishu deduplicates identical UUIDs for one hour. */
+  idempotencyKey?: string;
+}
+
 type FeishuAuthEnv = Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">;
+
+/** Resolve the app bot identity without requiring a copied deployment value. */
+export async function resolveFeishuBotOpenId(
+  env: FeishuAuthEnv & Pick<Env, "FEISHU_BOT_OPEN_ID">
+): Promise<string> {
+  const configured = env.FEISHU_BOT_OPEN_ID?.trim();
+  if (configured) return configured;
+  if (cachedBotOpenId) return cachedBotOpenId;
+  const token = await tenantAccessToken(env);
+  const response = await fetch(`${apiBase(env)}/open-apis/bot/v3/info`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+  });
+  const parsed = botInfoResponseSchema.safeParse(await response.json().catch(() => null));
+  const openId = parsed.success ? parsed.data.bot?.open_id : undefined;
+  if (!response.ok || !parsed.success || parsed.data.code !== 0 || !openId) {
+    throw new FeishuApiError(
+      classifyFeishuFailure(response, "reply"),
+      "Feishu bot identity request failed",
+      response.status
+    );
+  }
+  cachedBotOpenId = openId;
+  return openId;
+}
 
 function classifyFeishuFailure(
   response: Response,
@@ -102,9 +154,10 @@ function classifyFeishuFailure(
 async function replyFeishuMessage(
   env: FeishuAuthEnv,
   messageId: string,
-  msgType: "image" | "text",
-  content: Record<string, unknown>
-): Promise<string | undefined> {
+  msgType: "image" | "interactive" | "text",
+  content: Record<string, unknown>,
+  options: FeishuReplyOptions = {}
+): Promise<FeishuSentMessage | undefined> {
   let token: string;
   try {
     token = await tenantAccessToken(env);
@@ -120,7 +173,14 @@ async function replyFeishuMessage(
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ msg_type: msgType, content: JSON.stringify(content) }),
+        body: JSON.stringify({
+          msg_type: msgType,
+          content: JSON.stringify(content),
+          ...(options.replyInThread !== undefined
+            ? { reply_in_thread: options.replyInThread }
+            : {}),
+          ...(options.idempotencyKey ? { uuid: options.idempotencyKey } : {}),
+        }),
         signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
       }
     );
@@ -139,14 +199,26 @@ async function replyFeishuMessage(
       response.status
     );
   }
-  return parsed.data.data?.message_id;
+  return sentMessage(parsed.data.data);
+}
+
+function sentMessage(
+  data: z.infer<typeof createMessageResponseSchema>["data"]
+): FeishuSentMessage | undefined {
+  if (!data?.message_id) return undefined;
+  return {
+    messageId: data.message_id,
+    ...(data.root_id ? { rootMessageId: data.root_id } : {}),
+    ...(data.parent_id ? { parentMessageId: data.parent_id } : {}),
+    ...(data.thread_id ? { threadId: data.thread_id } : {}),
+  };
 }
 
 async function sendAuthenticated(
   env: Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">,
   path: string,
   body: Record<string, unknown>
-): Promise<string | undefined> {
+): Promise<FeishuSentMessage | undefined> {
   const token = await tenantAccessToken(env);
   const response = await fetch(`${apiBase(env)}${path}`, {
     method: "POST",
@@ -161,14 +233,14 @@ async function sendAuthenticated(
       : "invalid_response";
     throw new Error(`Feishu message request failed (http_status=${response.status}, ${apiDetail})`);
   }
-  return parsed.data.data?.message_id;
+  return sentMessage(parsed.data.data);
 }
 
 export async function sendFeishuText(
   env: Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">,
   chatId: string,
   text: string
-): Promise<string | undefined> {
+): Promise<FeishuSentMessage | undefined> {
   return sendAuthenticated(env, "/open-apis/im/v1/messages?receive_id_type=chat_id", {
     receive_id: chatId,
     msg_type: "text",
@@ -180,7 +252,7 @@ export async function sendFeishuCard(
   env: Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">,
   chatId: string,
   card: FeishuCard
-): Promise<string | undefined> {
+): Promise<FeishuSentMessage | undefined> {
   return sendAuthenticated(env, "/open-apis/im/v1/messages?receive_id_type=chat_id", {
     receive_id: chatId,
     msg_type: "interactive",
@@ -191,16 +263,10 @@ export async function sendFeishuCard(
 export async function replyFeishuCard(
   env: Pick<Env, "FEISHU_APP_ID" | "FEISHU_APP_SECRET" | "FEISHU_API_BASE">,
   messageId: string,
-  card: FeishuCard
-): Promise<string | undefined> {
-  return sendAuthenticated(
-    env,
-    `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
-    {
-      msg_type: "interactive",
-      content: JSON.stringify(card),
-    }
-  );
+  card: FeishuCard,
+  options: FeishuReplyOptions = {}
+): Promise<FeishuSentMessage | undefined> {
+  return replyFeishuMessage(env, messageId, "interactive", card, options);
 }
 
 export async function uploadFeishuMessageImage(
@@ -253,21 +319,24 @@ export async function uploadFeishuMessageImage(
 export function replyFeishuImage(
   env: FeishuAuthEnv,
   messageId: string,
-  imageKey: string
-): Promise<string | undefined> {
+  imageKey: string,
+  options: FeishuReplyOptions = {}
+): Promise<FeishuSentMessage | undefined> {
   if (!imageKey.trim()) throw new FeishuApiError("invalid_media", "Image key is required");
-  return replyFeishuMessage(env, messageId, "image", { image_key: imageKey });
+  return replyFeishuMessage(env, messageId, "image", { image_key: imageKey }, options);
 }
 
 export function replyFeishuText(
   env: FeishuAuthEnv,
   messageId: string,
-  text: string
-): Promise<string | undefined> {
-  return replyFeishuMessage(env, messageId, "text", { text });
+  text: string,
+  options: FeishuReplyOptions = {}
+): Promise<FeishuSentMessage | undefined> {
+  return replyFeishuMessage(env, messageId, "text", { text }, options);
 }
 
-/** Reset only for deterministic tests; production token cache remains isolate-local. */
+/** Reset only for deterministic tests; production caches remain isolate-local. */
 export function clearTenantAccessTokenCache(): void {
   cachedTenantToken = null;
+  cachedBotOpenId = null;
 }

@@ -8,6 +8,36 @@ import type { FeishuRepositoryConnection, FeishuRepositoryTarget } from "./targe
 export const REPOSITORIES_PER_PAGE = 6;
 const SESSION_LIST_LIMIT = 12;
 
+export function sessionShortId(sessionId: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < sessionId.length; index += 1) {
+    hash ^= sessionId.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0").slice(0, 6).toUpperCase();
+}
+
+function stateLabel(
+  state: "starting" | "active" | "delivery_failed" | "completed" | "failed" | "stale" | undefined
+): string {
+  switch (state) {
+    case "starting":
+      return "正在启动";
+    case "active":
+      return "工作中";
+    case "completed":
+      return "已完成";
+    case "delivery_failed":
+      return "请求未送达";
+    case "failed":
+      return "失败";
+    case "stale":
+      return "已失效";
+    default:
+      return "状态未知";
+  }
+}
+
 function text(content: string): { tag: "plain_text"; content: string } {
   return { tag: "plain_text", content };
 }
@@ -141,13 +171,39 @@ export function buildRepositoryPickerCard(input: {
 export function buildWorkingCard(input: {
   targetLabel: string;
   model: string;
+  branch?: string;
+  harness?: string;
+  reasoningEffort?: string;
+  chatType?: "p2p" | "group";
+  replyMode?: "thread" | "flat";
   sessionId?: string;
   webAppUrl: string;
 }): FeishuCard {
-  const card = title("Open-Inspect 正在工作");
+  const shortId = input.sessionId ? sessionShortId(input.sessionId) : undefined;
+  const card = title(`Open-Inspect 正在工作${shortId ? ` · #${shortId}` : ""}`);
+  const runtime = [
+    input.harness ? `Harness：\`${input.harness}\`` : undefined,
+    `模型：\`${input.model}\``,
+    input.reasoningEffort ? `Effort：\`${input.reasoningEffort}\`` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   elements(card).push({
     tag: "div",
-    text: { tag: "lark_md", content: `目标：**${input.targetLabel}**\n模型：\`${input.model}\`` },
+    text: {
+      tag: "lark_md",
+      content: `目标：**${input.targetLabel}**${input.branch ? `\n分支：\`${input.branch}\`` : ""}\n状态：**工作中**\n${runtime}`,
+    },
+  });
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content:
+        input.chatType === "group" && input.replyMode === "thread"
+          ? "后续：请在本话题继续发送消息；新的顶层任务会创建独立会话。"
+          : "后续：请引用回复本任务继续；新的顶层消息会创建独立会话。",
+    },
   });
   if (input.sessionId) {
     elements(card).push({
@@ -175,9 +231,16 @@ export function buildCompletionCard(input: {
   pullRequestUrl?: string;
   previewUrl?: string;
   visualVerification?: VisualVerificationReport;
+  branch?: string;
+  harness?: string;
+  model?: string;
+  reasoningEffort?: string;
+  chatType?: "p2p" | "group";
+  replyMode?: "thread" | "flat";
 }): FeishuCard {
+  const shortId = sessionShortId(input.sessionId);
   const card = title(
-    input.success ? "Open-Inspect 已完成" : "Open-Inspect 运行失败",
+    `${input.success ? "Open-Inspect 已完成" : "Open-Inspect 运行失败"} · #${shortId}`,
     input.success ? "green" : "red"
   );
   const body = input.success
@@ -185,7 +248,20 @@ export function buildCompletionCard(input: {
     : `运行失败：${input.error || "未知错误"}`;
   elements(card).push({
     tag: "div",
-    text: { tag: "lark_md", content: `目标：**${input.targetLabel}**\n\n${body.slice(0, 3000)}` },
+    text: {
+      tag: "lark_md",
+      content: [
+        `目标：**${input.targetLabel}**`,
+        input.branch ? `分支：\`${input.branch}\`` : undefined,
+        input.harness ? `Harness：\`${input.harness}\`` : undefined,
+        input.model ? `模型：\`${input.model}\`` : undefined,
+        input.reasoningEffort ? `Effort：\`${input.reasoningEffort}\`` : undefined,
+        "",
+        body.slice(0, 3000),
+      ]
+        .filter((line) => line !== undefined)
+        .join("\n"),
+    },
   });
   const verificationLine = formatVisualVerification(input.visualVerification);
   if (verificationLine) {
@@ -194,6 +270,16 @@ export function buildCompletionCard(input: {
       text: { tag: "lark_md", content: verificationLine },
     });
   }
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content:
+        input.chatType === "group" && input.replyMode === "thread"
+          ? "要继续修改，请直接在本话题发送消息。"
+          : "要继续修改，请引用回复本任务；不要用普通顶层消息隐式续办。",
+    },
+  });
   const actions: Record<string, unknown>[] = [
     {
       tag: "button",
@@ -226,7 +312,16 @@ function formatVisualVerification(report: VisualVerificationReport | undefined):
 }
 
 export function buildSessionListCard(input: {
-  sessions: Array<{ sessionId: string; targetLabel: string; model: string; createdAt: number }>;
+  sessions: Array<{
+    sessionId: string;
+    targetLabel: string;
+    branch?: string;
+    harness?: string;
+    model: string;
+    reasoningEffort?: string;
+    state?: "starting" | "active" | "delivery_failed" | "completed" | "failed" | "stale";
+    createdAt: number;
+  }>;
   webAppUrl: string;
 }): FeishuCard {
   const card = title("近期 Open-Inspect 会话");
@@ -236,7 +331,10 @@ export function buildSessionListCard(input: {
     ? sessions
         .map((session, index) => {
           const url = `${baseUrl}/session/${encodeURIComponent(session.sessionId)}`;
-          return `${index + 1}. **${session.targetLabel}** · \`${session.model}\` · [打开会话](${url})`;
+          const runtime = [session.harness, session.model, session.reasoningEffort]
+            .filter(Boolean)
+            .join(" · ");
+          return `${index + 1}. **#${sessionShortId(session.sessionId)} · ${session.targetLabel}**${session.branch ? ` · \`${session.branch}\`` : ""}\n   ${stateLabel(session.state)} · ${runtime} · [打开会话](${url})`;
         })
         .join("\n")
     : "尚无近期会话。发送一条新的顶层任务即可创建会话。";

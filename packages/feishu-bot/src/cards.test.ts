@@ -3,7 +3,10 @@ import {
   buildCompletionCard,
   buildConnectionPickerCard,
   buildRepositoryPickerCard,
+  buildSessionListCard,
+  buildWorkingCard,
   REPOSITORIES_PER_PAGE,
+  sessionShortId,
 } from "./cards";
 import type { FeishuRepositoryTarget } from "./targets";
 import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
@@ -185,4 +188,63 @@ describe("Feishu completion cards", () => {
       expect(serialized).not.toContain("视觉验证已通过");
     }
   );
+
+  it("shows the pinned branch, harness, model, effort, and stable short id", () => {
+    const sessionId = "session-runtime-metadata";
+    const serialized = JSON.stringify(
+      buildWorkingCard({
+        sessionId,
+        targetLabel: "Gitea · huangdong/chatbi",
+        branch: "codex/topic-a",
+        harness: "codex",
+        model: "openai/gpt-5.6-luna",
+        reasoningEffort: "high",
+        chatType: "group",
+        replyMode: "thread",
+        webAppUrl: "https://inspect.example.com",
+      })
+    );
+
+    expect(serialized).toContain(`#${sessionShortId(sessionId)}`);
+    expect(serialized).toContain("codex/topic-a");
+    expect(serialized).toContain("codex");
+    expect(serialized).toContain("openai/gpt-5.6-luna");
+    expect(serialized).toContain("high");
+    expect(serialized).toContain("请在本话题继续发送消息");
+  });
+
+  it("makes multiple sessions distinguishable in the chat-level session list", () => {
+    const serialized = JSON.stringify(
+      buildSessionListCard({
+        sessions: [
+          {
+            sessionId: "session-a",
+            targetLabel: "GitHub · owner/repo-a",
+            branch: "codex/a",
+            harness: "codex",
+            model: "openai/gpt-5.6-luna",
+            state: "active",
+            createdAt: 1,
+          },
+          {
+            sessionId: "session-b",
+            targetLabel: "Gitea · owner/repo-b",
+            branch: "codex/b",
+            harness: "claude",
+            model: "anthropic/claude-sonnet-4-5",
+            state: "completed",
+            createdAt: 2,
+          },
+        ],
+        webAppUrl: "https://inspect.example.com",
+      })
+    );
+
+    expect(serialized).toContain(`#${sessionShortId("session-a")}`);
+    expect(serialized).toContain(`#${sessionShortId("session-b")}`);
+    expect(serialized).toContain("codex/a");
+    expect(serialized).toContain("codex/b");
+    expect(serialized).toContain("工作中");
+    expect(serialized).toContain("已完成");
+  });
 });
