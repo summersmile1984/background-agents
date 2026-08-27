@@ -81,4 +81,30 @@ describe("session prompt API route", () => {
       attachments: [{ name: "shot.png", attachmentId: "attachment-1" }],
     });
   });
+
+  it("proxies a visual-verification selection from the new-session composer", async () => {
+    vi.mocked(controlPlaneUserFetch).mockResolvedValue(
+      Response.json({ messageId: "message-visual", status: "queued" })
+    );
+
+    const response = await POST(
+      new Request("http://localhost/api/sessions/session-1/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: "Verify the UI",
+          visualVerification: { scenarioIds: ["home-desktop"] },
+        }),
+      }) as never,
+      { params: Promise.resolve({ id: "session-1" }) }
+    );
+
+    expect(response.status).toBe(200);
+    const requestBody = vi.mocked(controlPlaneUserFetch).mock.calls[0][1]?.body;
+    expect(JSON.parse(requestBody as string)).toEqual({
+      content: "Verify the UI",
+      source: "web",
+      visualVerification: { scenarioIds: ["home-desktop"] },
+    });
+  });
 });
