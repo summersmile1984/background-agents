@@ -188,3 +188,17 @@ export function inferRepositoryTarget(
   const matches = targets.filter((target) => normalized.includes(target.fullName.toLowerCase()));
   return matches.length === 1 ? matches[0]! : null;
 }
+
+/**
+ * Resolve the optional branch suffix from an explicit `owner/repo@branch`
+ * reference. Branches may contain slashes, so the suffix ends at whitespace.
+ * The control plane remains the authority that validates the resulting ref.
+ */
+export function inferRepositoryBranch(
+  target: FeishuRepositoryTarget,
+  prompt: string
+): string | undefined {
+  const escapedFullName = target.fullName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = prompt.match(new RegExp(`(?:^|\\s)${escapedFullName}@([^\\s]+)(?=\\s|$)`, "i"));
+  return match?.[1];
+}

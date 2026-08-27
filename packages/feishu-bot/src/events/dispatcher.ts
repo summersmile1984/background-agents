@@ -19,6 +19,7 @@ import {
 } from "../sessions/control-plane-client";
 import {
   findRepositoryTarget,
+  inferRepositoryBranch,
   inferRepositoryTarget,
   listRepositoryCatalog,
   listRepositoryTargets,
@@ -271,9 +272,11 @@ export async function startNewSession(input: {
     return;
   }
   const model = input.env.DEFAULT_MODEL;
+  const branch = inferRepositoryBranch(target, input.content);
   const session = await createSession({
     env: input.env,
     target,
+    branch,
     model,
     actorId: input.actor,
     traceId: input.traceId,

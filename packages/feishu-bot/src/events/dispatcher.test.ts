@@ -36,6 +36,7 @@ vi.mock("../sessions/control-plane-client", () => ({
 
 vi.mock("../targets", () => ({
   findRepositoryTarget: vi.fn(),
+  inferRepositoryBranch: vi.fn(() => undefined),
   inferRepositoryTarget: vi.fn(() => undefined),
   listRepositoryCatalog: mocks.listRepositoryCatalog,
   listRepositoryTargets: vi.fn(),
