@@ -41,7 +41,11 @@ vi.mock("../targets", () => ({
   listRepositoryTargets: vi.fn(),
 }));
 
-import { canReuseThreadSession, handleFeishuEvent } from "./dispatcher";
+import {
+  canReuseThreadSession,
+  handleFeishuEvent,
+  visualVerificationForPrompt,
+} from "./dispatcher";
 
 const thread = {
   sessionId: "session-1",
@@ -67,6 +71,19 @@ describe("canReuseThreadSession", () => {
     expect(canReuseThreadSession({ ...thread, harness: "codex" }, "openai/gpt-5.6-sol")).toBe(
       false
     );
+  });
+});
+
+describe("visualVerificationForPrompt", () => {
+  it.each(["生产视觉验证", "请截图验证这个页面", "请验证 UI", "verify ui after the change"])(
+    "enables verification for an explicit request: %s",
+    (prompt) => {
+      expect(visualVerificationForPrompt(prompt)).toEqual({});
+    }
+  );
+
+  it("keeps ordinary coding prompts free of browser work", () => {
+    expect(visualVerificationForPrompt("修复登录页面的按钮样式")).toBeUndefined();
   });
 });
 

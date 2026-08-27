@@ -1,4 +1,5 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
+import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import { buildConnectionPickerCard, buildSessionListCard, buildWorkingCard } from "../cards";
 import {
   clearThreadSession,
@@ -56,6 +57,21 @@ function isSessionListRequest(content: string): boolean {
 }
 
 /**
+ * Keep visual verification opt-in for chat entrypoints while allowing users to
+ * request it in ordinary language instead of relying on a slash command.
+ */
+export function visualVerificationForPrompt(
+  content: string
+): VisualVerificationSelection | undefined {
+  const normalized = content.trim().toLowerCase();
+  return normalized.includes("视觉验证") ||
+    normalized.includes("截图验证") ||
+    /(?:验证|verify)\s*ui\b/i.test(normalized)
+    ? {}
+    : undefined;
+}
+
+/**
  * A Feishu root message identifies the conversation, not a stable runtime
  * configuration. Reusing a session after the deployment model or harness has
  * changed can send a native model to the old harness. Missing `harness` means
@@ -102,6 +118,7 @@ async function deliverFollowUp(input: {
     content: input.content,
     actorId: input.actor,
     callbackContext,
+    visualVerification: visualVerificationForPrompt(input.content),
     traceId: input.traceId,
   });
   if (!result.ok) {
@@ -290,6 +307,7 @@ export async function startNewSession(input: {
     content: input.content,
     actorId: input.actor,
     callbackContext,
+    visualVerification: visualVerificationForPrompt(input.content),
     traceId: input.traceId,
   });
   if (!delivered.ok) {
