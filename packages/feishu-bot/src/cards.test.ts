@@ -151,6 +151,22 @@ describe("Feishu completion cards", () => {
     expect(JSON.stringify(card)).toContain("视觉验证已通过：1 个场景，1 张截图");
   });
 
+  it("links to the live sandbox preview when one is available", () => {
+    const serialized = JSON.stringify(
+      buildCompletionCard({
+        sessionId: "session-1",
+        targetLabel: "GitHub · summersmile1984/background-agents",
+        textContent: "完成",
+        success: true,
+        webAppUrl: "https://inspect.example.com",
+        previewUrl: "https://4173-sandbox.example/",
+      })
+    );
+
+    expect(serialized).toContain("打开预览");
+    expect(serialized).toContain("https://4173-sandbox.example/");
+  });
+
   it.each(["failed", "blocked"] as const)(
     "does not claim verification passed when the result is %s",
     (status) => {

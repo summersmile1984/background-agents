@@ -2,12 +2,61 @@ import { extractAgentResponse } from "@open-inspect/shared/completion/extractor"
 import { resolveOutboundCredential } from "@open-inspect/shared/service-auth";
 import { buildCompletionCard } from "../cards";
 import { replyFeishuCard } from "../feishu/client";
+import { signedControlPlaneFetch } from "../internal-auth";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 import type { FeishuCompletionJob } from "./job";
 import { deliverFeishuMediaArtifacts } from "./media-upload";
 
 const log = createLogger("completion-delivery");
+const TUNNEL_URL_FETCH_TIMEOUT_MS = 5_000;
+
+function selectPreviewUrl(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const tunnelUrls = (value as { tunnelUrls?: unknown }).tunnelUrls;
+  if (!tunnelUrls || typeof tunnelUrls !== "object" || Array.isArray(tunnelUrls)) return undefined;
+
+  const entries = Object.entries(tunnelUrls).sort(([left], [right]) => {
+    if (left === "4173") return -1;
+    if (right === "4173") return 1;
+    return Number(left) - Number(right);
+  });
+  for (const [, candidate] of entries) {
+    if (typeof candidate !== "string") continue;
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === "https:" && !url.username && !url.password) return url.href;
+    } catch {
+      // Ignore malformed provider output and keep looking for a safe URL.
+    }
+  }
+  return undefined;
+}
+
+async function fetchPreviewUrl(
+  env: Env,
+  sessionId: string,
+  traceId: string | undefined
+): Promise<string | undefined> {
+  try {
+    const response = await signedControlPlaneFetch(
+      env,
+      {
+        method: "GET",
+        url: `https://internal/sessions/${encodeURIComponent(sessionId)}/tunnel-urls`,
+        traceId,
+      },
+      { signal: AbortSignal.timeout(TUNNEL_URL_FETCH_TIMEOUT_MS) }
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      return undefined;
+    }
+    return selectPreviewUrl(await response.json());
+  } catch {
+    return undefined;
+  }
+}
 
 function pullRequestUrl(
   artifacts: Awaited<ReturnType<typeof extractAgentResponse>>["artifacts"]
@@ -30,6 +79,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       job.messageId,
       job.traceId
     );
+    const previewUrl = await fetchPreviewUrl(env, job.sessionId, job.traceId);
     await replyFeishuCard(
       env,
       job.rootMessageId,
@@ -41,6 +91,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
         error: response.error || job.error,
         webAppUrl: env.WEB_APP_URL,
         pullRequestUrl: pullRequestUrl(response.artifacts),
+        previewUrl,
         visualVerification: response.visualVerification,
       })
     );
