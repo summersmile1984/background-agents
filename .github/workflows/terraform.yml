@@ -238,8 +238,6 @@ jobs:
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
           TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
           TF_VAR_deployment_admin_identities: ${{ secrets.DEPLOYMENT_ADMIN_IDENTITIES }}
-
-          
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
           TF_VAR_enable_github_bot: "${{ secrets.ENABLE_GITHUB_BOT || 'false' }}"
           TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
@@ -279,7 +277,8 @@ jobs:
           TF_VAR_opencomputer_target: ${{ secrets.OPENCOMPUTER_TARGET }}
           TF_VAR_e2b_api_key: ${{ secrets.E2B_API_KEY }}
           TF_VAR_e2b_template_id: ${{ secrets.E2B_TEMPLATE_ID }}
-          TF_VAR_e2b_api_url: "${{ secrets.E2B_API_URL || 'https://api.e2bTF_VAR_e2b_preview_base_url: ${{ secrets.E2B_PREVIEW_BASE_URL }}
+          TF_VAR_e2b_api_url: "${{ secrets.E2B_API_URL || 'https://api.e2b.app' }}"
+          TF_VAR_e2b_preview_base_url: ${{ secrets.E2B_PREVIEW_BASE_URL }}
           TF_VAR_e2b_build_template: "${{ secrets.E2B_BUILD_TEMPLATE || 'true' }}"
           TF_VAR_e2b_sandbox_timeout_seconds: "${{ secrets.E2B_SANDBOX_TIMEOUT_SECONDS || '7200' }}"
           TF_VAR_e2b_auto_pause: "${{ secrets.E2B_AUTO_PAUSE || 'true' }}"
@@ -461,7 +460,7 @@ jobs:
           TF_VAR_e2b_api_key: ${{ secrets.E2B_API_KEY }}
           TF_VAR_e2b_template_id: ${{ secrets.E2B_TEMPLATE_ID }}
           TF_VAR_e2b_api_url: "${{ secrets.E2B_API_URL || 'https://api.e2b.app' }}"
-                    TF_VAR_e2b_preview_base_url: ${{ secrets.E2B_PREVIEW_BASE_URL }}
+          TF_VAR_e2b_preview_base_url: ${{ secrets.E2B_PREVIEW_BASE_URL }}
           TF_VAR_e2b_build_template: "${{ secrets.E2B_BUILD_TEMPLATE || 'true' }}"
           TF_VAR_e2b_sandbox_timeout_seconds: "${{ secrets.E2B_SANDBOX_TIMEOUT_SECONDS || '7200' }}"
           TF_VAR_e2b_auto_pause: "${{ secrets.E2B_AUTO_PAUSE || 'true' }}"
