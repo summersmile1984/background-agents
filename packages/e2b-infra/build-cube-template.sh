@@ -41,4 +41,5 @@ cubemastercli tpl create-from-image \
   --memory "$template_memory_mb" \
   --expose-port 49999 \
   --expose-port 49983 \
+  --expose-port 4173 \
   --probe 49999

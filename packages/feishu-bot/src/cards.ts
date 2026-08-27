@@ -173,6 +173,7 @@ export function buildCompletionCard(input: {
   error?: string;
   webAppUrl: string;
   pullRequestUrl?: string;
+  previewUrl?: string;
   visualVerification?: VisualVerificationReport;
 }): FeishuCard {
   const card = title(
@@ -203,6 +204,9 @@ export function buildCompletionCard(input: {
   ];
   if (input.pullRequestUrl) {
     actions.push({ tag: "button", text: text("查看 PR"), url: input.pullRequestUrl });
+  }
+  if (input.previewUrl) {
+    actions.push({ tag: "button", text: text("打开预览"), url: input.previewUrl });
   }
   elements(card).push({ tag: "action", actions });
   return card;

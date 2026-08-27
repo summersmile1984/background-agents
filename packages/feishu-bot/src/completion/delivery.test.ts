@@ -28,6 +28,9 @@ const env = {
   FEISHU_MEDIA_DELIVERY_ENABLED: "true",
   WEB_APP_URL: "https://open-inspect.example",
   SERVICE_AUTH_SECRET: "service-secret-at-least-32-characters",
+  CONTROL_PLANE: {
+    fetch: vi.fn().mockResolvedValue(Response.json({ tunnelUrls: {} })),
+  },
 } as unknown as Env;
 
 describe("Feishu completion delivery", () => {
@@ -40,6 +43,7 @@ describe("Feishu completion delivery", () => {
       omitted: 0,
       suppressed: 0,
     });
+    vi.mocked(env.CONTROL_PLANE.fetch).mockResolvedValue(Response.json({ tunnelUrls: {} }));
   });
 
   it("posts the completion card before delivering prompt-scoped media", async () => {
@@ -91,5 +95,29 @@ describe("Feishu completion delivery", () => {
 
     expect(replyFeishuCard).toHaveBeenCalledOnce();
     expect(deliverFeishuMediaArtifacts).not.toHaveBeenCalled();
+  });
+
+  it("adds the preferred sandbox preview URL to the completion card", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    vi.mocked(env.CONTROL_PLANE.fetch).mockResolvedValue(
+      Response.json({
+        tunnelUrls: {
+          "3000": "https://3000-sandbox.example/",
+          "4173": "https://4173-sandbox.example/",
+        },
+      })
+    );
+
+    await processFeishuCompletion(job, env);
+
+    expect(JSON.stringify(vi.mocked(replyFeishuCard).mock.calls[0]?.[2])).toContain(
+      "https://4173-sandbox.example/"
+    );
   });
 });
