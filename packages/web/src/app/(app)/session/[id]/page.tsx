@@ -30,7 +30,7 @@ import {
 } from "@/lib/session-list";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { DEFAULT_MODEL, getDefaultReasoningEffort } from "@open-inspect/shared/models";
-import { resolveModelPreference, type ModelPreference } from "@/lib/model-selection";
+import { resolveSessionModelPreference, type ModelPreference } from "@/lib/model-selection";
 import { useEnabledModels } from "@/hooks/use-enabled-models";
 import type { ComboboxGroup } from "@/components/ui/combobox";
 import { useSessionDiffs } from "@/hooks/use-session-diffs";
@@ -707,14 +707,26 @@ function useModelSelection(
     () => harnessModelOptions.flatMap((group) => group.models.map((model) => model.id)),
     [harnessModelOptions]
   );
-  const { model: selectedModel, reasoningEffort } = resolveModelPreference(
+  const pinnedRuntimePreference =
+    runtimeView &&
+    !runtimeView.legacy &&
+    runtimeView.launchSpec &&
+    !runtimeView.liveMutation.model &&
+    !runtimeView.liveMutation.effort
+      ? {
+          model: runtimeView.launchSpec.runtime.model.value,
+          reasoningEffort: runtimeView.launchSpec.runtime.effort.value ?? undefined,
+        }
+      : null;
+  const { model: selectedModel, reasoningEffort } = resolveSessionModelPreference(
     modelPreferenceDraft ?? {
       model: sessionState?.model ?? DEFAULT_MODEL,
       reasoningEffort:
         sessionState?.reasoningEffort ??
         getDefaultReasoningEffort(sessionState?.model ?? DEFAULT_MODEL),
     },
-    loadingEnabledModels ? undefined : harnessModelIds
+    loadingEnabledModels ? undefined : harnessModelIds,
+    pinnedRuntimePreference
   );
   const modelItems = useMemo<ComboboxGroup[]>(
     () =>

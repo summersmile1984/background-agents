@@ -11,6 +11,21 @@ export interface ModelPreference {
   reasoningEffort?: string;
 }
 
+/**
+ * Locked native-harness sessions must keep the exact runtime selected by their
+ * immutable LaunchSpec. Runtime readiness can temporarily make the live option
+ * list empty; treating that as an ordinary enabled-model list would silently
+ * fall back to DEFAULT_MODEL and make the control plane reject the prompt as a
+ * forbidden live runtime change.
+ */
+export function resolveSessionModelPreference(
+  preference: ModelPreference,
+  enabledModels: string[] | undefined,
+  pinnedPreference?: ModelPreference | null
+): ModelPreference {
+  return pinnedPreference ?? resolveModelPreference(preference, enabledModels);
+}
+
 export function resolveModelPreference(
   preference: ModelPreference,
   enabledModels: string[] | undefined
