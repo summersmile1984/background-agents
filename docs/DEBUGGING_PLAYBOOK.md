@@ -2,6 +2,10 @@
 
 Reference for querying structured logs across all Open-Inspect services.
 
+For the complete web/chat -> sandbox -> SCM -> PR -> media -> callback validation path and the
+failure modes found in production, see
+[Session E2E Troubleshooting](./SESSION_E2E_TROUBLESHOOTING.md).
+
 All services emit flat JSON lines with a common envelope. Use the `msg` field (stable event
 identifier) for filtering, and correlation fields (`trace_id`, `session_id`, `message_id`) for
 joining across service boundaries.

@@ -158,6 +158,10 @@ To set up recurring scheduled tasks, see **[docs/AUTOMATIONS.md](docs/AUTOMATION
 To create and use reusable agent instructions, see
 **[docs/MANAGED_SKILLS.md](docs/MANAGED_SKILLS.md)**.
 
+For end-to-end session validation and known failure modes across chat channels, Harnesses,
+sandboxes, source control, media uploads, and callbacks, see
+**[docs/SESSION_E2E_TROUBLESHOOTING.md](docs/SESSION_E2E_TROUBLESHOOTING.md)**.
+
 ## Key Features
 
 ### Fast Startup
