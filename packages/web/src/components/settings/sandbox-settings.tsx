@@ -837,7 +837,8 @@ export function SandboxSettingsEditor({
           </Button>
         </div>
         <p className="text-xs text-muted-foreground mb-2">
-          Expose additional ports from sandboxes via public tunnel URLs (e.g., dev server ports).
+          Expose additional ports through public tunnel URLs. The service must listen on 0.0.0.0,
+          not only 127.0.0.1, to accept tunnel traffic.
         </p>
         <div className="space-y-2 max-w-sm">
           {rows.length === 0 ? (
