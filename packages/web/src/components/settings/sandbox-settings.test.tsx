@@ -82,6 +82,7 @@ describe("SandboxSettingsPage — tunnel ports editor", () => {
   it("shows empty state when no ports configured", () => {
     renderWithSWR({ integrationId: "sandbox", settings: null });
     expect(screen.getByText("No tunnel ports configured.")).toBeInTheDocument();
+    expect(screen.getByText(/service must listen on 0\.0\.0\.0/i)).toBeInTheDocument();
   });
 
   it("groups related sandbox controls under accessible names", () => {
