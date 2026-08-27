@@ -4,9 +4,10 @@ set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo_root=$(cd "$script_dir/../.." && pwd)
 image=${CUBE_IMAGE:-localhost:5000/oi-e2b:latest}
+image_build_label=${CUBE_IMAGE_BUILD_LABEL:-}
 template_alias=${CUBE_TEMPLATE_ALIAS:-oi-e2b-multi-harness}
 writable_layer_size=${CUBE_WRITABLE_LAYER_SIZE:-4G}
-dns_server=${CUBE_DNS_SERVER:-119.29.29.29}
+dns_server=${CUBE_DNS_SERVER:-223.5.5.5}
 template_cpu_millicores=${CUBE_TEMPLATE_CPU_MILLICORES:-4000}
 template_memory_mb=${CUBE_TEMPLATE_MEMORY_MB:-8192}
 build_dir=$(mktemp -d /tmp/open-inspect-cube-build.XXXXXX)
@@ -25,7 +26,11 @@ cp -R "$repo_root/packages/sandbox-runtime/src/sandbox_runtime" "$build_dir/sand
 find "$build_dir/sandbox_runtime" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 find "$build_dir/sandbox_runtime" -type f -name '*.pyc' -delete
 
-docker build --pull -t "$image" "$build_dir"
+docker_build_args=(--pull -t "$image")
+if [[ -n "$image_build_label" ]]; then
+  docker_build_args+=(--label "org.openinspect.cube-build=$image_build_label")
+fi
+docker build "${docker_build_args[@]}" "$build_dir"
 docker push "$image"
 cubemastercli tpl create-from-image \
   --image "$image" \
