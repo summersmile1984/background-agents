@@ -8,8 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sandbox_runtime.browser_desktop import BrowserDesktop
-from sandbox_runtime.constants import NOVNC_PORT, VNC_DISPLAY, VNC_PORT
+from sandbox_runtime.browser_desktop import AioBrowserRuntimeConfig, BrowserDesktop
+from sandbox_runtime.constants import (
+    AIO_BROWSER_CDP_ENDPOINT_ENV_VAR,
+    AIO_BROWSER_MCP_URL_ENV_VAR,
+    NOVNC_PORT,
+    VNC_DISPLAY,
+    VNC_PORT,
+)
 from sandbox_runtime.entrypoint import build_supervisor
 from tests.runtime_helpers import make_browser_desktop, make_supervisor
 
@@ -65,6 +71,72 @@ class TestStartVnc:
             assert "VNC_PASSWORD" not in os.environ
             assert supervisor.browser_desktop._password == "secret"
             assert not hasattr(supervisor.config, "vnc_password")
+
+    def test_configures_aio_browser_without_requiring_vnc(self):
+        with patch.dict(
+            os.environ,
+            {
+                "AIO_BROWSER_ENABLED": "1",
+                "SANDBOX_ID": "test-sandbox",
+                "CONTROL_PLANE_URL": "https://cp.example.com",
+                "SANDBOX_AUTH_TOKEN": "tok",
+            },
+            clear=True,
+        ):
+            supervisor = build_supervisor(asyncio.Event())
+
+            assert os.environ["DISPLAY"] == VNC_DISPLAY
+            assert supervisor.browser_desktop._password is None
+            assert supervisor.browser_desktop._aio_browser is not None
+
+    @pytest.mark.asyncio
+    async def test_starts_aio_browser_and_mcp_on_loopback_without_vnc(self, tmp_path):
+        chromium = tmp_path / "chrome"
+        mcp_server = tmp_path / "mcp-server"
+        for executable in (chromium, mcp_server):
+            executable.write_text("#!/bin/sh\n")
+            executable.chmod(0o755)
+        config = AioBrowserRuntimeConfig(
+            executable_path=str(chromium),
+            mcp_executable_path=str(mcp_server),
+            cdp_port=9322,
+            mcp_port=8200,
+            runtime_root=tmp_path / "runtime",
+        )
+        desktop = BrowserDesktop(MagicMock(), password=None, aio_browser=config)
+        processes = [_process() for _ in range(4)]
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(desktop, "_wait_for_path", new_callable=AsyncMock, return_value=True),
+            patch.object(desktop, "_wait_for_cdp", new_callable=AsyncMock, return_value=True),
+            patch.object(desktop, "_wait_for_port", new_callable=AsyncMock, return_value=True),
+            patch(
+                "sandbox_runtime.browser_desktop.asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+                side_effect=processes,
+            ) as create_process,
+        ):
+            await desktop.start()
+
+            assert os.environ[AIO_BROWSER_CDP_ENDPOINT_ENV_VAR] == (
+                "http://127.0.0.1:9322/json/version"
+            )
+            assert os.environ[AIO_BROWSER_MCP_URL_ENV_VAR] == "http://127.0.0.1:8200/mcp"
+
+        assert [call.args[0] for call in create_process.call_args_list] == [
+            "Xvfb",
+            "fluxbox",
+            str(chromium),
+            str(mcp_server),
+        ]
+        chromium_call = create_process.call_args_list[2]
+        assert "--remote-debugging-address=127.0.0.1" in chromium_call.args
+        assert "--remote-debugging-port=9322" in chromium_call.args
+        assert chromium_call.kwargs["user"] == 1000
+        mcp_call = create_process.call_args_list[3]
+        assert "127.0.0.1" in mcp_call.args
+        assert "http://127.0.0.1:9322/json/version" in mcp_call.args
 
     @pytest.mark.asyncio
     async def test_skips_entire_stack_without_password(self, tmp_path):

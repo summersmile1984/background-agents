@@ -6,9 +6,12 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 BUILTIN_MCP_NAME = "open_inspect"
 BUILTIN_MCP_COMMAND = ["python", "-m", "sandbox_runtime.native_mcp"]
+AIO_BROWSER_MCP_NAME = "aio_browser"
+AIO_BROWSER_MCP_URL_ENV_VAR = "AIO_BROWSER_MCP_URL"
 CODEWHALE_MCP_ENV_PREFIX = [
     "env",
     "-u",
@@ -36,6 +39,7 @@ def load_session_mcp_servers(environment: Mapping[str, str]) -> tuple[Mapping[st
 def codex_mcp_config(
     servers: Sequence[Mapping[str, Any]],
     builtin_environment: Mapping[str, str] | None = None,
+    runtime_environment: Mapping[str, str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     config = {
         BUILTIN_MCP_NAME: _codex_local(
@@ -43,6 +47,8 @@ def codex_mcp_config(
             _string_map(builtin_environment),
         )
     }
+    if url := aio_browser_mcp_url(runtime_environment):
+        config[AIO_BROWSER_MCP_NAME] = {"url": url}
     for index, server in enumerate(servers):
         if server.get("enabled") is False:
             continue
@@ -63,7 +69,10 @@ def codex_mcp_config(
     return config
 
 
-def claude_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+def claude_mcp_config(
+    servers: Sequence[Mapping[str, Any]],
+    runtime_environment: Mapping[str, str] | None = None,
+) -> dict[str, dict[str, Any]]:
     config = {
         BUILTIN_MCP_NAME: {
             "type": "stdio",
@@ -71,6 +80,8 @@ def claude_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, dict[st
             "args": BUILTIN_MCP_COMMAND[1:],
         }
     }
+    if url := aio_browser_mcp_url(runtime_environment):
+        config[AIO_BROWSER_MCP_NAME] = {"type": "http", "url": url}
     for index, server in enumerate(servers):
         if server.get("enabled") is False:
             continue
@@ -96,11 +107,16 @@ def claude_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, dict[st
     return config
 
 
-def codewhale_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def codewhale_mcp_config(
+    servers: Sequence[Mapping[str, Any]],
+    runtime_environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Build CodeWhale's ~/.codewhale/mcp.json document."""
     config: dict[str, dict[str, Any]] = {
         BUILTIN_MCP_NAME: _codewhale_local(BUILTIN_MCP_COMMAND, {})
     }
+    if url := aio_browser_mcp_url(runtime_environment):
+        config[AIO_BROWSER_MCP_NAME] = {"url": url}
     for index, server in enumerate(servers):
         if server.get("enabled") is False:
             continue
@@ -121,6 +137,31 @@ def codewhale_mcp_config(servers: Sequence[Mapping[str, Any]]) -> dict[str, Any]
         env = _string_map(server.get("env"))
         config[name] = _codewhale_local(command, env)
     return {"servers": config}
+
+
+def aio_browser_mcp_url(environment: Mapping[str, str] | None) -> str | None:
+    """Return only the runtime-owned loopback AIO MCP endpoint."""
+    if not environment:
+        return None
+    value = environment.get(AIO_BROWSER_MCP_URL_ENV_VAR, "").strip()
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != "/mcp"
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    return value if port is not None else None
 
 
 def _codewhale_local(command: list[str], environment: dict[str, str]) -> dict[str, Any]:

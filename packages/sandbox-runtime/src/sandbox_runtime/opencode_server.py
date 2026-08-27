@@ -16,6 +16,7 @@ import httpx
 from .constants import OPENCODE_PORT
 from .deepseek_relay import deepseek_relay_url
 from .git_excludes import install_runtime_git_excludes
+from .harness.mcp_config import AIO_BROWSER_MCP_NAME, aio_browser_mcp_url
 from .process_output import iter_process_lines
 
 if TYPE_CHECKING:
@@ -431,10 +432,17 @@ class OpenCodeServer:
     def _build_mcp_config(self, servers: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
         """Convert MCP server list to OpenCode mcp config format."""
         config: dict[str, dict[str, Any]] = {}
+        if url := aio_browser_mcp_url(os.environ):
+            config[AIO_BROWSER_MCP_NAME] = {"type": "remote", "url": url}
         for server in servers:
-            name = server.get("name", "")
-            if not name:
+            raw_name = server.get("name", "")
+            if not isinstance(raw_name, str) or not raw_name:
                 continue
+            name = raw_name
+            suffix = 2
+            while name in config:
+                name = f"{raw_name}_{suffix}"
+                suffix += 1
             if server.get("type") == "remote":
                 entry: dict[str, Any] = {"type": "remote", "url": server.get("url", "")}
                 auth_headers = server.get("headers") or server.get("env") or {}
@@ -509,10 +517,10 @@ class OpenCodeServer:
         mcp_servers = self._resolve_mcp_servers()
         if mcp_servers:
             await self._install_mcp_packages(mcp_servers)
-            mcp_config = self._build_mcp_config(mcp_servers)
-            if mcp_config:
-                opencode_config["mcp"] = mcp_config
-                self.log.info("mcp.configured", count=len(mcp_config))
+        mcp_config = self._build_mcp_config(mcp_servers)
+        if mcp_config:
+            opencode_config["mcp"] = mcp_config
+            self.log.info("mcp.configured", count=len(mcp_config))
 
         # Working directory: the repo for single-repo sessions, /workspace
         # for multi-repo (every member visible) and repo-less sessions.
