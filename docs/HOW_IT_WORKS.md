@@ -44,6 +44,8 @@ A **session** is the core unit of work in Open-Inspect. Each session is:
 - **Persistent**: State survives across connections—close the browser, come back later
 - **Multiplayer**: Multiple users can join, send prompts, and see events in real-time
 - **Stateful**: Contains messages, events, artifacts, and sandbox state
+- **Pinned**: Repository IDs, SCM connection, Harness, and launch settings do not follow later
+  deployment-default changes
 
 ### Session Targets
 
@@ -60,7 +62,9 @@ In multi-repository sessions each repository is cloned into its own directory un
 (named after the repository), and the **first repository is the primary** — it drives defaults like
 which settings apply. The agent sees all clones side by side and can make coordinated changes across
 them; pushes and pull requests are per-repository, so one session can produce PRs in several
-repositories. The session sidebar lists every repository with its branch and any PR created for it.
+repositories. All repositories in one session must belong to the same SCM connection; mixed-forge
+workspaces are rejected. The session sidebar lists every repository with its branch and any PR
+created for it.
 
 GitHub-bot sessions open the webhook's repository, unless that repository's metadata names a default
 environment (`defaultEnvironmentId` via the repo-metadata API) — then a PR review or @mention opens
@@ -81,9 +85,9 @@ Created → Active → Archived
             └── Can be restored from archive
 ```
 
-Sessions start when you create one (via web or Slack). They remain active as long as there's work
-happening or recent activity. You can archive sessions to clean up your list, and restore them later
-if needed.
+Sessions start when you create one through Web, Slack, Feishu, GitHub, Linear, an automation, or a
+service-authenticated API. They remain active as long as there's work happening or recent activity.
+You can archive sessions to clean up your list, and restore them later if needed.
 
 ### What's Stored in a Session
 
@@ -92,7 +96,7 @@ if needed.
 | Messages           | Prompts you've sent and their metadata            |
 | Prompt attachments | Images uploaded with web or Slack prompts         |
 | Events             | Tool calls, token streams, status updates         |
-| Artifacts          | PRs created, screenshots captured                 |
+| Artifacts          | PRs, screenshots, videos, and visual reports      |
 | Participants       | Users who have joined the session                 |
 | Sandbox state      | Reference to the current sandbox and its snapshot |
 
@@ -127,50 +131,56 @@ but no environment-scoped secrets or prebuilds; the picker offers to save the se
 
 ## Architecture
 
-Open-Inspect uses a three-tier architecture spanning multiple cloud providers:
+Open-Inspect uses three logical tiers plus explicit source-control, model-relay, preview, and media
+boundaries. A session's durable state belongs to the control plane; code, browser processes, and
+development services belong to its sandbox.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              Clients                                     │
-│                    ┌───────────┬───────────┐                            │
-│                    │    Web    │   Slack   │                            │
-│                    └─────┬─────┴─────┬─────┘                            │
-│                          │           │                                   │
-└──────────────────────────┼───────────┼───────────────────────────────────┘
-                           │           │
-                           ▼           ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    Control Plane (Cloudflare)                            │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    Durable Objects (per session)                    │ │
-│  │  ┌──────────┐  ┌───────────┐  ┌────────────┐  ┌────────────────┐  │ │
-│  │  │  SQLite  │  │ WebSocket │  │   Event    │  │    Sandbox     │  │ │
-│  │  │   State  │  │    Hub    │  │   Stream   │  │   Lifecycle    │  │ │
-│  │  └──────────┘  └───────────┘  └────────────┘  └────────────────┘  │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                   D1 Database (shared state)                        │ │
-│  │           Sessions index, repo metadata, encrypted secrets          │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└───────────────────────────────────┬─────────────────────────────────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                 Data Plane (Sandbox Backend)                              │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                        Session Sandbox                              │ │
-│  │  ┌────────────┐    ┌─────────────────┐                            │ │
-│  │  │ Supervisor │───▶│ Provider Bridge │────────────────────────────┼─┼──▶ Control Plane
-│  │  └────────────┘    └────────┬────────┘                            │ │
-│  │                             ▼                                     │ │
-│  │                    ┌─────────────────┐                            │ │
-│  │                    │  Agent Harness  │                            │ │
-│  │                    └─────────────────┘                            │ │
-│  │                             │                                     │ │
-│  │                    Full Dev Environment                            │ │
-│  │              (Node.js, Python, git, Playwright)                    │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph clients["Clients"]
+    web["Web"]
+    slack["Slack"]
+    feishu["Feishu"]
+    githubBot["GitHub bot"]
+    linear["Linear and webhooks"]
+  end
+
+  subgraph cp["Control plane · Cloudflare"]
+    edge["Web BFF and bot Workers"]
+    session["Session Durable Object<br/>SQLite · prompt queue · WebSocket hub"]
+    d1["D1<br/>session index · repository catalog · SCM connections<br/>settings · encrypted secrets"]
+    r2["Object storage<br/>screenshots and videos"]
+  end
+
+  subgraph sb["One isolated session sandbox"]
+    supervisor["Supervisor"]
+    bridge["Provider-neutral bridge"]
+    harness["Pinned harness<br/>OpenCode · Codex · Claude Code · DeepSeek"]
+    dev["Repositories and dev services<br/>git · PostgreSQL · Redis · app ports"]
+    subgraph cubeBrowser["Cube backend only"]
+      chromium["Shared Chromium<br/>CDP 127.0.0.1:9222"]
+      browserMcp["aio_browser MCP<br/>127.0.0.1:8100/mcp"]
+    end
+  end
+
+  scm["Pinned SCM connection<br/>GitHub App or self-hosted Gitea"]
+  relay["Host model relay<br/>provider key stays outside sandbox"]
+  preview["Trusted HTTPS preview gateway"]
+
+  clients --> edge --> session
+  session <--> d1
+  session <--> bridge
+  supervisor --> bridge
+  supervisor --> dev
+  supervisor --> chromium
+  bridge <--> harness
+  harness --> browserMcp --> chromium
+  harness -->|agent-browser| chromium
+  session <--> scm
+  harness -->|session capability| relay
+  harness -->|upload_media| session
+  session --> r2
+  dev -->|configured tunnel port| preview --> clients
 ```
 
 ### Control Plane (Cloudflare Workers)
@@ -182,7 +192,8 @@ The control plane is the coordinator. It doesn't execute code—it manages state
 - Session state management (SQLite in Durable Objects)
 - WebSocket connections for real-time streaming
 - Sandbox lifecycle orchestration (spawn, snapshot, restore)
-- GitHub integration (repo listing, PR creation)
+- Connection-pinned source control (repository catalog, clone/push authorization, PR creation)
+- Screenshot/video metadata and authenticated object-storage streaming
 - Authentication and access control
 
 **Why Cloudflare?** Durable Objects provide per-session isolation with SQLite storage. Each session
@@ -195,6 +206,22 @@ does not stop the sandbox: the bridge reconnects while the control plane schedul
 in case the process is actually gone. Explicit lifecycle paths such as inactivity and stale
 heartbeat persist `stopped` or `stale` before closing the connection, which prevents reconnection.
 
+### Source-Control Connections
+
+A **provider** implements forge behavior; a **connection** identifies one configured forge origin
+and credential authority. Repositories have stable internal IDs, while owner/name and web/clone URLs
+are mutable location snapshots. Sessions, Environments, Automations, images, and PRs pin the
+connection and internal repository ID that resolved at creation time.
+
+| Connection | Server-side authority                   | Sandbox Git path                                                        |
+| ---------- | --------------------------------------- | ----------------------------------------------------------------------- |
+| GitHub     | Shared App plus optional user OAuth     | Short-lived App authorization and credential-helper/proxy paths         |
+| Gitea      | Dedicated encrypted service-account PAT | Repository- and session-authorized smart-HTTP proxy; PAT never released |
+
+Generic features gate on connection capabilities rather than provider-name conditionals. Truly
+GitHub-specific login, commit-signing, and webhook behavior stays inside GitHub boundaries. See
+[ADR 0004](./adr/0004-multi-connection-source-control.md).
+
 ### Data Plane (Sandbox Backends)
 
 The data plane is where code actually runs. Each session gets an isolated sandbox with a full
@@ -205,9 +232,11 @@ development environment.
 - Debian Linux with common dev tools
 - Node.js 22, Python 3.12, git, curl
 - Package managers: npm, pnpm, pip, uv
-- agent-browser CLI plus Chromium/CDP/Browser MCP (for browser automation; Cube images reuse the
-  pinned browser-only slice from ByteDance Agent Infra AIO Sandbox)
+- a provider-neutral Python bridge that normalizes all harness events into the session protocol
+- agent-browser CLI and, on the maintained Cube image, one supervisor-owned Chromium/CDP/Browser-MCP
+  process tree
 - OpenCode, Codex, Claude Code, and DeepSeek CodeWhale harness runtimes
+- optional PostgreSQL, Redis, repository processes, code-server, web terminal, and noVNC desktop
 
 Open-Inspect supports these sandbox backends:
 
@@ -218,6 +247,15 @@ Open-Inspect supports these sandbox backends:
 - **OpenComputer**: template-based sandboxes with checkpoint-backed prebuilt-image builds via the
   OpenComputer REST API
 - **E2B**: template-based sandboxes with persistent pause/resume via direct E2B REST API calls
+- **Self-hosted CubeSandbox**: selected through the E2B-compatible provider; Cube supplies the VM,
+  envd, code-interpreter compatibility, networking, and template lifecycle
+
+The Cube template copies only the browser runtime from the pinned ByteDance Agent Infra AIO Sandbox
+image. It does **not** replace Cube with AIO or copy AIO's Jupyter, terminal, code-server, or
+language stacks. Chromium listens on loopback CDP port `9222`; the Browser MCP listens on loopback
+port `8100`. The runtime injects that MCP as `aio_browser` into every supported harness and
+configures agent-browser to reuse the same Chromium instead of launching a second browser tree. See
+[ADR 0005](./adr/0005-cube-aio-browser-runtime.md).
 
 Prebuilt-image builds are supported on Modal, Vercel, and OpenComputer. Saved filesystem state can
 be restored on those same providers for session resumes; Daytona and E2B use persistent sandboxes
@@ -234,6 +272,8 @@ can make HTTP requests and maintain WebSocket connections can participate.
 - **Web**: Next.js app with real-time streaming, session management, and settings
 - **Slack**: Bot that responds to @mentions and direct messages, forwards supported image
   attachments, classifies repos, and posts results
+- **Feishu**: Bot with mobile-safe GitHub/Gitea repository cards, thread-bound sessions, completion
+  receipts, preview links, visual-verification status, and screenshot delivery
 - **GitHub**: Bot that reviews PRs and responds to PR `@mentions`
 - **Linear**: Agent workflow that starts sessions from Linear issue activity
 
@@ -251,14 +291,14 @@ cloud.
 
 When you create a session for a repo without an existing snapshot:
 
-```
-┌─────────┐    ┌──────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌───────┐
-│ Sandbox │───▶│ Git Sync │───▶│ Setup Script│───▶│ Start Script│───▶│ Agent Start │───▶│ Ready │
-│ Created │    │ (clone)  │    │ (optional)  │    │ (optional)  │    │ (OpenCode)  │    │       │
-└─────────┘    └──────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └───────┘
-                                     │                    │
-                                     ▼                    ▼
-                            .openinspect/setup.sh   .openinspect/start.sh
+```mermaid
+flowchart LR
+  create["Create sandbox"] --> runtime["Start supervisor<br/>bridge · browser · dev services"]
+  runtime --> sync["Git sync"]
+  sync --> setup["setup.sh<br/>optional"]
+  setup --> start["start.sh<br/>optional"]
+  start --> harness["Start selected harness"]
+  harness --> ready["Ready"]
 ```
 
 1. **Sandbox created**: The selected backend creates a fresh sandbox from its base runtime
@@ -266,7 +306,8 @@ When you create a session for a repo without an existing snapshot:
    helper
 3. **Setup script**: Runs `.openinspect/setup.sh` for provisioning (if present)
 4. **Start script**: Runs `.openinspect/start.sh` for runtime startup (if present)
-5. **Agent start**: OpenCode server starts and connects back to the control plane
+5. **Agent start**: The bridge starts the session-pinned OpenCode, Codex, Claude Code, or DeepSeek
+   adapter and connects back to the control plane
 6. **Ready**: Sandbox accepts prompts
 
 For multi-repository sessions, steps 2–4 run per repository in position order: every repository is
@@ -322,9 +363,11 @@ To minimize perceived latency, sandboxes warm proactively:
 
 ### Tunnel URLs Inside the Sandbox
 
-When a session uses the `tunnelPorts` sandbox setting, the resolved tunnel URLs are written to
-`/workspace/.tunnels.env` so processes started by `.openinspect/start.sh` (or by the agent later)
-can read them locally.
+When a session uses the `tunnelPorts` sandbox setting, its provider resolves a URL for every
+configured port. The control plane stores that map in the session Durable Object and broadcasts it
+to Web and bot clients. Repository-backed boots also wait for `/workspace/.tunnels.env` when the
+provider can materialize the file, so `.openinspect/start.sh` and the agent can read the URLs
+locally.
 
 ```dotenv
 # /workspace/.tunnels.env
@@ -349,7 +392,50 @@ were resolved for; the supervisor uses it to tell a fresh write from a snapshot 
 If the wait times out (for example, because the backend has not resolved tunnel URLs yet),
 `start.sh` proceeds without fresh local URLs and the supervisor logs `tunnel.env_file_wait_timeout`.
 The control plane still receives and broadcasts the URLs to clients on a separate path. The file is
-not written when `tunnelPorts` is empty or in build mode.
+not written when `tunnelPorts` is empty or in build mode. A repo-less session currently skips the
+repository boot phase that waits for this file, so its external URL remains available through the
+session API and clients but `/workspace/.tunnels.env` may be absent. Agents must not infer that a
+missing file means the preview gateway is unavailable.
+
+On the self-hosted Cube path, `E2B_PREVIEW_BASE_URL` identifies a trusted HTTPS gateway. The control
+plane produces URLs in the form `/sandbox/{providerObjectId}/{port}/`; the gateway maps the exact
+sandbox and configured port to Cube's private network. Application servers must listen on `0.0.0.0`.
+CDP `9222` and Browser MCP `8100` are runtime-private services and are never added as user preview
+ports.
+
+### Browser Automation, Preview, and Media
+
+On the maintained Cube runtime, the browser, preview, and screenshot paths are intentionally
+separate:
+
+```mermaid
+flowchart LR
+  harness["Selected harness"] -->|aio_browser tools| mcp["Browser MCP"]
+  harness -->|agent-browser| cdp["CDP"]
+  mcp --> cdp --> chromium["Shared Chromium"]
+  chromium --> app["Local app port"]
+  app --> gateway["Trusted preview gateway"] --> user["Web / bot user"]
+  chromium --> png["PNG/WebP/JPEG in sandbox"]
+  harness --> upload["upload_media"]
+  png --> upload
+  upload -->|sandbox token| cp["Control plane"]
+  cp --> storage["Object storage"]
+  storage -->|authenticated stream| user
+```
+
+- The supervisor owns Xvfb, Fluxbox, Chromium, and Browser MCP lifecycle. When AIO browser support
+  is enabled, failure to reach either private endpoint fails sandbox startup rather than silently
+  advertising a broken browser.
+- Native harnesses receive the loopback MCP as `aio_browser`; OpenCode receives the same endpoint in
+  its server configuration. User-defined MCP entries cannot overwrite the runtime-owned name.
+- `agent-browser` auto-connects to the same CDP browser. This preserves one page/profile/download
+  state and avoids the resource cost and inconsistent results of a second Chromium tree.
+- `upload_media` validates size, MIME type, and file signature, stores the object outside the
+  sandbox, persists artifact metadata in the session, and emits `artifact_created`. The Web client
+  renders the media artifact; Feishu can fetch it through a service-authenticated route, upload it
+  to Feishu, and reply in the originating topic.
+- A preview URL exposes a running application; an uploaded screenshot is a durable session artifact.
+  Neither mechanism exposes the browser's CDP or MCP endpoint.
 
 ---
 
@@ -357,22 +443,26 @@ not written when `tunnelPorts` is empty or in build mode.
 
 Here's what happens when you send a prompt:
 
-```
-┌──────┐   ┌────────┐   ┌───────────────┐   ┌─────────┐   ┌──────────┐
-│ User │──▶│ Client │──▶│ Control Plane │──▶│ Sandbox │──▶│ OpenCode │
-└──────┘   └────────┘   └───────────────┘   └─────────┘   └──────────┘
-              │                 │                              │
-              │                 │         Events stream back   │
-              │◀────────────────┼◀─────────────────────────────┘
-              │                 │
-              ▼                 ▼
-         Display to        Broadcast to
-           user           all clients
+```mermaid
+sequenceDiagram
+  participant U as User / automation
+  participant C as Web or bot client
+  participant DO as Session Durable Object
+  participant B as Sandbox bridge
+  participant H as Selected harness
+  U->>C: Prompt
+  C->>DO: Authenticated enqueue
+  DO->>B: Prompt + runtime selection + author
+  B->>H: Harness-native request
+  H-->>B: Text, tool, usage, and completion events
+  B-->>DO: Provider-neutral events
+  DO-->>C: Persist and broadcast
+  C-->>U: Live timeline / completion card
 ```
 
 ### Step by Step
 
-1. **You send a prompt** via web or Slack
+1. **You send a prompt** via Web, Slack, Feishu, GitHub, Linear, or an automation
 
 2. **Control plane queues it**: The prompt goes to the session's Durable Object and is added to the
    message queue. If a sandbox isn't running, one is spawned or restored.
@@ -380,8 +470,8 @@ Here's what happens when you send a prompt:
 3. **Sandbox receives the prompt**: Via WebSocket, the control plane sends the prompt to the sandbox
    along with author information (for commit attribution).
 
-4. **OpenCode processes it**: The agent reads files, makes edits, runs commands—whatever the task
-   requires. Each action generates events.
+4. **The selected harness processes it**: OpenCode, Codex, Claude Code, or DeepSeek reads files,
+   makes edits, and runs commands. The bridge translates the harness-native event stream.
 
 5. **Events stream back**: Tool calls, token streams, and status updates flow back through the
    WebSocket to the control plane.
@@ -389,8 +479,8 @@ Here's what happens when you send a prompt:
 6. **Control plane broadcasts**: Events are stored in the session database and broadcast to all
    connected clients in real-time.
 
-7. **Artifacts are created**: If the agent creates a PR or captures a screenshot, these are stored
-   as artifacts and announced to clients.
+7. **Artifacts are created**: PRs, screenshots, videos, and visual-verification reports are stored
+   as session artifacts and announced to clients.
 
 ### Prompt Queuing
 
@@ -475,16 +565,21 @@ This ensures your contributions are properly credited in git history.
 
 When you ask the agent to create a PR:
 
-1. Agent pushes the branch using brokered SCM credentials from the sandbox credential helper
-2. Control plane receives the branch name
-3. Control plane creates the PR using _your_ GitHub OAuth token (GitHub logins)
-4. PR appears as created by you, not a bot
+1. The runtime resolves the exact stable repository ID and connection pinned to the session.
+2. The control plane authorizes that repository, constructs a push spec, and asks the sandbox to
+   push the branch. Long-lived forge credentials remain server-side.
+3. The connection adapter creates or updates one open PR per head branch and stores the normalized
+   PR artifact in the session.
+4. For GitHub, a prompting user's OAuth token is preferred when available; otherwise the shared App
+   creates the PR or returns a manual completion URL. Gitea PRs are created by the connection's
+   dedicated service account.
 
-If you signed in another way (e.g. Google) you have no GitHub OAuth token, so the control plane
-pushes the branch with the shared GitHub App credentials and returns a manual `pull/new` URL — the
-PR is attributed to the App bot rather than to you.
+The connection ID, provider, internal repository ID, source branch, base branch, and forge PR ID are
+part of the durable identity. Renaming or transferring a repository therefore does not silently
+retarget an existing session or PR.
 
-This maintains proper code review workflows—you can't approve your own PRs.
+See [ADR 0004](./adr/0004-multi-connection-source-control.md) for source-control boundaries and
+migration rules.
 
 ---
 
@@ -575,11 +670,11 @@ same organization.
 
 ### Why Single-Tenant?
 
-The system uses a shared GitHub App installation for all git operations. This means:
+The installation owns shared GitHub and/or self-hosted Gitea connections. This means:
 
-- Any user can access any repository the GitHub App is installed on
-- There's no per-user repository access validation
-- The trust boundary is your organization, not individual users
+- Any admitted user can access repositories visible to an enabled connection
+- There is no per-user forge permission check at session creation
+- The trust boundary is the organization and its configured connections, not individual users
 
 This follows
 [Ramp's original design](https://builders.ramp.com/post/why-we-built-our-background-agent), which
@@ -587,29 +682,30 @@ was built for internal use where all employees have access to company repositori
 
 ### Token Architecture
 
-| Token              | Purpose                                    | Scope                            |
-| ------------------ | ------------------------------------------ | -------------------------------- |
-| GitHub App Token   | Mint brokered git credentials              | All repos where App is installed |
-| User OAuth Token   | Create PRs, identify users                 | Repos the user has access to     |
-| Sandbox Auth Token | Authenticate sandbox → control plane calls | Single session                   |
-| WebSocket Token    | Authenticate client connections            | Single session                   |
-| Managed LLM Token  | Short-lived OpenAI or xAI model access     | Provider account + secret scope  |
+| Token / credential            | Purpose                                      | Scope                            |
+| ----------------------------- | -------------------------------------------- | -------------------------------- |
+| GitHub App installation token | GitHub API and upstream Git authorization    | App installation, short-lived    |
+| Gitea service-account PAT     | Gitea API and Git proxy upstream             | One connection, server-side only |
+| User OAuth token              | Sign-in, identity, GitHub PR attribution     | User and provider scopes         |
+| Sandbox auth token            | Sandbox → control plane and Host relay calls | One session                      |
+| Sandbox Git proxy capability  | Clone/fetch/push through the SCM proxy       | One repository and session/build |
+| WebSocket token               | Authenticate a client connection             | One session                      |
+| Managed LLM token             | Short-lived OpenAI or xAI model access       | Provider account + secret scope  |
 
-Fresh and prebuilt-image sandboxes fetch git credentials on demand through the control plane instead
-of relying on a token embedded in the environment or remote URL. Snapshot restores may still receive
-env-token fallbacks so legacy snapshots can boot through the credential-helper migration. The helper
-authorizes HTTPS requests for the configured SCM host, preserving existing setup/start hooks that
-clone other private repositories available to the installation. This primarily protects continuously
-running sessions and Daytona persistent resumes from expired embedded credentials; Modal snapshot
-restores still mint a fresh fallback token on restore.
+Fresh and prebuilt-image sandboxes do not rely on a long-lived credential embedded in an environment
+or Git remote. GitHub credentials are minted on demand. Connection-pinned Gitea sessions receive a
+short-lived sandbox proxy capability, while the PAT stays encrypted in D1 and is attached only to
+the upstream request inside the control plane. The credential helper scopes HTTPS matching by host
+and repository path. Legacy snapshots may receive compatibility fallbacks until their migration path
+is retired.
 
 ### Secrets
 
 You can configure environment variables (API keys, credentials) at global, per-repository, or
 per-environment scope. A session receives global secrets plus its **session target's** secrets:
 
-- **Global secrets** apply to all sessions (e.g., `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`,
-  `ZHIPU_API_KEY`)
+- **Global secrets** apply to all sessions (e.g., `ANTHROPIC_API_KEY`, `ZHIPU_API_KEY`); the
+  self-hosted Cube DeepSeek key is a Host-relay credential and is deliberately not a sandbox secret
 - **Repository secrets** apply to sessions launched from that repo (including all bot-created
   sessions) and override global secrets with the same key; ad-hoc multi-repository sessions receive
   each selected repository's secrets, with the primary winning collisions
@@ -648,9 +744,11 @@ Repository-local databases and application processes are described in
 
 ### Deployment Recommendations
 
-1. **Deploy behind SSO/VPN**: Control who can access the web interface
+1. **Deploy behind SSO/VPN**: Control who can access the web and bot entry points
 2. **Limit GitHub App scope**: Only install on repositories you want accessible
-3. **Use "Select repositories"**: Don't give the App access to all org repos
+3. **Use dedicated Gitea accounts**: Grant the minimum repositories and PAT permissions
+4. **Allowlist self-hosted SCM origins**: Keep `SCM_ALLOWED_HOSTS` exact and HTTPS-only
+5. **Keep browser services private**: Never publish CDP `9222` or Browser MCP `8100`
 
 ---
 

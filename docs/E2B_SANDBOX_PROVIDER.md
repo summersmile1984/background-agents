@@ -1,15 +1,23 @@
 # E2B Sandbox Provider
 
-Open-Inspect can use [E2B](https://e2b.dev) as the sandbox provider for coding sessions. The control
-plane talks directly to the E2B REST API from Cloudflare Workers — there is no separate service to
-deploy for this provider; only the sandbox template image is built (by Terraform, or manually).
+Open-Inspect's `e2b` provider targets the E2B REST contract. It can use managed
+[E2B](https://e2b.dev) or a compatible self-hosted backend such as Tencent CubeSandbox. The control
+plane talks to the configured API directly from Cloudflare Workers; the session WebSocket and
+harness protocol do not change when the backend changes.
 
 ## When to Use It
 
-Use `sandbox_provider = "e2b"` when you want sandbox sessions to run in E2B cloud sandboxes while
-keeping the same Open-Inspect control plane, web app, GitHub OAuth, and Slack/GitHub integrations.
-E2B sandboxes support pause/resume, so idle sessions are parked (not destroyed) and resumed on the
-next prompt.
+Use `sandbox_provider = "e2b"` for either of these deployment shapes:
+
+| Shape            | API and template path                                                           | Session environment delivery                     |
+| ---------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Managed E2B      | `api.e2b.app`; Terraform or the E2B Template SDK builds `e2b.Dockerfile`        | Secure envd file upload after create             |
+| Self-hosted Cube | Cube's E2B-compatible API; `build-cube-template.sh` registers `cube.Dockerfile` | Create-time `envs`; Cube starts a fresh launcher |
+
+Both shapes keep the same control plane, Web/bot clients, source-control connections, selected
+harness, and session event stream. Managed E2B pause/resume behavior is described below. Cube's
+exact lifecycle depends on its compatibility API and deployment policy but remains controlled by the
+shared sandbox lifecycle manager.
 
 ## Required Configuration
 
@@ -26,6 +34,8 @@ e2b_template_id = "open-inspect-sandbox" # template name to build/use
 # e2b_sandbox_timeout_seconds = 7200                  # sandbox TTL (default 2h)
 # e2b_preview_base_url = "https://preview.example.com" # optional trusted public preview gateway
 # e2b_auto_pause              = true                   # pause (recoverable), not kill, on TTL lapse
+# e2b_build_template          = true                   # false for a prebuilt self-hosted template
+# e2b_use_create_time_env     = false                  # true for CubeSandbox
 ```
 
 For GitHub Actions-based deployment, configure the matching repository secrets:
@@ -37,11 +47,14 @@ E2B_TEMPLATE_ID
 E2B_API_URL                 # optional
 E2B_SANDBOX_TIMEOUT_SECONDS # optional
 E2B_AUTO_PAUSE              # optional
+E2B_PREVIEW_BASE_URL        # optional trusted HTTPS preview gateway
+E2B_BUILD_TEMPLATE          # false for a prebuilt self-hosted template
+E2B_USE_CREATE_TIME_ENV     # true for CubeSandbox
 ```
 
-The E2B provider also needs the normal Open-Inspect values such as Cloudflare, GitHub App,
-Anthropic, and web app configuration. See [GETTING_STARTED.md](./GETTING_STARTED.md) for the full
-deployment flow.
+The provider also needs the normal Open-Inspect Cloudflare, authentication, source-control, harness,
+model, and web configuration. See [GETTING_STARTED.md](./GETTING_STARTED.md) for the full deployment
+flow.
 
 > On the **Hobby** tier (~1h runtime cap), lower `e2b_sandbox_timeout_seconds` to `3300`.
 
@@ -52,10 +65,11 @@ E2B sandboxes boot from a **template** image that contains:
 - the Open-Inspect sandbox runtime (`packages/sandbox-runtime`, staged into `/app`)
 - OpenCode plus native Codex, Claude Code, and DeepSeek CodeWhale runtimes
 - Python 3.12 and Node 22 runtimes
-- `code-server`, `agent-browser`, and browser/terminal tooling used by the agent runtime
+- `code-server`, `agent-browser`, browser/terminal tooling, PostgreSQL, and Redis
 - GitHub CLI and a Git credential helper
 
-The template is built programmatically with the E2B Template SDK. There are two supported paths.
+Managed E2B templates are built programmatically with the E2B Template SDK and support the two paths
+below. Self-hosted Cube uses the separate image-and-registration path described afterward.
 
 ### Terraform-Managed Template
 
@@ -88,11 +102,30 @@ these apply to **manual** builds. Terraform-managed production templates use `e2
 [`packages/e2b-infra/README.md`](../packages/e2b-infra/README.md) for details on the template
 tooling and the launcher.
 
+### Self-Hosted Cube Template
+
+Cube uses a separate image and registration path:
+
+```bash
+cd packages/e2b-infra
+CUBE_IMAGE_BUILD_LABEL=release-<unique> bash build-cube-template.sh
+```
+
+The script builds `cube.Dockerfile`, pushes the image, and registers a new immutable Cube template.
+The production defaults are 4 vCPU and 8192 MB; override them with `CUBE_TEMPLATE_CPU_MILLICORES`
+and `CUBE_TEMPLATE_MEMORY_MB`. Set the returned template ID as `e2b_template_id`, keep
+`e2b_build_template = false`, and set `e2b_use_create_time_env = true`.
+
+Cube's `sandbox-code` image remains the VM/envd/code-interpreter base. A multi-stage build copies
+only Chromium and `@agent-infra/mcp-server-browser` from the pinned ByteDance Agent Infra AIO
+Sandbox image. The supervisor exposes them only inside the VM at `127.0.0.1:9222` (CDP) and
+`127.0.0.1:8100/mcp` (Browser MCP). See [ADR 0005](./adr/0005-cube-aio-browser-runtime.md).
+
 ## Runtime Behavior
 
-The E2B provider creates fresh sandboxes from the configured template. E2B runs the template's start
-command once at build and resumes it per create, so it never sees per-session env. The launcher
-(`oi-launch`) works around this:
+The provider creates fresh sandboxes from the configured template. Managed E2B runs the template's
+start command once at build and does not pass the later session environment to that process. The
+launcher (`oi-launch`) works around this:
 
 1. waits for the control plane to drop the per-session env file (`/tmp/oi-session.env`) over envd
 2. `exec`s the supervisor (`python -m sandbox_runtime.entrypoint`) with that env
@@ -100,12 +133,31 @@ command once at build and resumes it per create, so it never sees per-session en
    code-server, and connects the Open-Inspect bridge back to the control plane
 4. agent events stream back through the control plane
 
-## Lifecycle: Pause and Resume
+Cube instead passes the session values as `envs` in `POST /sandboxes`; `cube-entry` and `oi-launch`
+start the supervisor from that create-time environment. The control plane deliberately skips its
+secure envd upload path in this mode because Cube does not return an E2B envd access token. The
+session still receives a fresh `SANDBOX_AUTH_TOKEN` and the same normalized launch specification.
 
-E2B's sandbox timeout is **not extended by in-sandbox agent activity** (Open-Inspect only resets it
-when it resumes a sandbox), and E2B has no server-side idle-stop or auto-delete. Open-Inspect
-therefore drives the lifecycle through the shared lifecycle manager, treating E2B stops as a
-**resumable pause**:
+### Runtime-Owned Browser on Cube
+
+When `AIO_BROWSER_ENABLED=1`, browser startup is part of supervisor readiness:
+
+1. start Xvfb and Fluxbox at the fixed 1280×720 display;
+2. start one Chromium process tree as the sandbox user and wait for CDP;
+3. start Browser MCP against that CDP endpoint and wait for port `8100`;
+4. reserve `aio_browser` in OpenCode, Codex, Claude, and DeepSeek MCP configuration;
+5. let `agent-browser` reuse the same Chromium through automatic CDP connection.
+
+CDP and MCP never cross the sandbox boundary. Screenshots cross it only through the `upload_media`
+tool, which uses the session capability and stores the validated object in the control plane's media
+storage.
+
+## Managed E2B Lifecycle: Pause and Resume
+
+Managed E2B's sandbox timeout is **not extended by in-sandbox agent activity** (Open-Inspect only
+resets it when it resumes a sandbox), and E2B has no server-side idle-stop or auto-delete.
+Open-Inspect therefore drives the lifecycle through the shared lifecycle manager, treating E2B stops
+as a **resumable pause**:
 
 - Idle sessions are **paused** after the shared inactivity timeout (default 10 minutes).
 - When the TTL lapses, the sandbox created with `E2B_AUTO_PAUSE=true` **auto-pauses** (recoverable)
@@ -130,11 +182,14 @@ Terraform passes these provider-level values to the control plane:
   authenticate the template build
 - `E2B_TEMPLATE_ID`
 - `E2B_API_URL` (optional)
-- `ANTHROPIC_API_KEY`
+- `E2B_PREVIEW_BASE_URL` (optional, HTTPS only)
+- `E2B_USE_CREATE_TIME_ENV` (`true` only for compatible self-hosted backends such as Cube)
 
-The runtime also receives repository credentials from Open-Inspect for Git operations. If you use
-additional model providers or custom agent tools, add those keys through Open-Inspect's secrets
-settings. See [SECRETS.md](./SECRETS.md).
+Repository credentials and model credentials have separate boundaries. GitHub uses minted App
+credentials; connection-pinned Gitea Git operations use a server-side proxy so the PAT never enters
+the sandbox. Native Codex/Claude credentials are materialized only for their selected harness, and
+the Cube DeepSeek provider key stays on the Host relay. See [SECRETS.md](./SECRETS.md) and
+[HARNESSES.md](./HARNESSES.md).
 
 ## Verify
 
@@ -146,18 +201,31 @@ After `terraform apply`, verify:
    curl https://open-inspect-control-plane-<deployment_name>.<workers-subdomain>.workers.dev/health
    ```
 
-2. The E2B dashboard shows the Open-Inspect template as built.
+2. Managed E2B shows the template as built, or Cube reports the registered template as ready with
+   the intended CPU/memory values.
 
-3. Starting a session in the web app creates an E2B sandbox and reaches `Connected`.
+3. Starting a session in the Web app creates a sandbox from the exact configured template ID and
+   reaches `Connected`.
 
-4. Inside the session, ask a simple repo question such as:
+4. Verify the selected harness, repository connection, clone, commit, push, and PR path.
+
+5. For a Cube template with AIO browser support, verify all browser data paths:
+
+   - `http://127.0.0.1:9222/json/version` returns a Chromium version and `webSocketDebuggerUrl`;
+   - `aio_browser` initializes and can navigate to a local application;
+   - `agent-browser` creates a valid 1280×720 screenshot while reusing the same Chromium tree;
+   - the screenshot appears in the production Web session;
+   - a configured app port opens through the trusted HTTPS preview gateway.
+
+6. Inside the session, ask a simple repository question such as:
 
    ```text
    tell me about this repository
    ```
 
-If a session starts but never produces agent output, check the control-plane Worker logs and the E2B
-sandbox logs for runtime startup, bridge connection, and OpenCode health events.
+If a session starts but never produces agent output, check the control-plane Worker logs and the
+sandbox logs for supervisor startup, bridge connection, selected-harness readiness, browser
+readiness, and model-relay events.
 
 ## Common Issues
 
@@ -175,15 +243,16 @@ enabled the sandbox pauses (recoverable) at the TTL rather than being lost.
 
 ### Missing Repository Access
 
-Repository access still comes from the configured GitHub App installation. If the dashboard shows no
-repositories or a sandbox cannot clone a repo, check the GitHub App installation permissions before
-debugging E2B.
+Repository access comes from the connection pinned to the session. For GitHub, check App
+installation permissions. For Gitea, check the connection health, allowed host, repository catalog,
+service-account permissions, and Git proxy authorization before debugging the sandbox provider.
 
 ### LLM/API Key Problems
 
-The control plane passes `ANTHROPIC_API_KEY` for the default Claude models. If OpenCode reports a
-model or provider error, confirm the required provider key is available through Terraform or
-Open-Inspect secrets and that the selected model is available for that account.
+Confirm that the chosen model is compatible with the session-pinned harness and that its credential
+route is ready. Native Codex and Claude use their deployment credentials; DeepSeek on Cube uses the
+Host relay; other OpenCode providers use their configured secret scope. A model-name or credential
+failure occurs before browser or Cube functionality and should be diagnosed separately.
 
 ## References
 
@@ -191,3 +260,4 @@ Open-Inspect secrets and that the selected model is available for that account.
 - [E2B sandbox persistence (pause/resume)](https://e2b.dev/docs/sandbox/persistence)
 - [E2B billing](https://e2b.dev/docs/billing)
 - [E2B REST API](https://e2b.dev/docs/api-reference)
+- [ByteDance Agent Infra AIO Sandbox](https://github.com/agent-infra/sandbox)

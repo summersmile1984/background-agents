@@ -1,34 +1,41 @@
 # AGENTS.md
 
-Open-Inspect is a background coding agent system that spawns sandboxed dev environments to work on
-GitHub repositories. Single-tenant design. Stack: Cloudflare Workers (TypeScript), Modal (Python),
-Next.js (React), Terraform.
+Open-Inspect is a single-tenant background coding agent system that spawns sandboxed development
+environments for connection-pinned GitHub and self-hosted Gitea repositories. Stack: Cloudflare
+Workers (TypeScript), provider-neutral sandbox runtime (Python), Next.js (React), Terraform.
 
 ## Architecture
 
-Three tiers connected by WebSockets:
+Three logical tiers. Live session data uses WebSockets; bot and API entry points use signed HTTP:
 
-1. **Web Client** (Next.js on Vercel or Cloudflare Workers via OpenNext) — UI with GitHub OAuth,
-   session dashboard, real-time streaming
+1. **Web Client** (Next.js on Vercel or Cloudflare Workers via OpenNext) — UI with configured
+   sign-in providers, session dashboard, real-time streaming
 2. **Control Plane** (Cloudflare Workers + Durable Objects) — session lifecycle, WebSocket hub,
-   GitHub/auth integration. Each session is a Durable Object with SQLite storage. Uses D1 for the
-   session index, repo metadata, environments, and encrypted secrets.
-3. **Data Plane** (Modal, Python) — sandboxed environments running coding agents. Manages sandbox
-   creation, snapshots, and repository/environment image builds.
+   authentication, and SCM connections. Each session is a Durable Object with SQLite storage. Uses
+   D1 for the session index, repo metadata, environments, and encrypted secrets.
+3. **Data Plane** (Modal, Daytona, Vercel, OpenComputer, managed E2B, or self-hosted Cube; Python
+   runtime) — isolated environments running a session-pinned OpenCode, Codex, Claude Code, or
+   DeepSeek harness. The provider-neutral bridge normalizes harness events. On Cube, the supervisor
+   owns one loopback-only AIO Chromium/CDP/Browser-MCP runtime shared by MCP and agent-browser.
 
 **Bot integrations** — all Cloudflare Workers using Hono:
 
 - `slack-bot` — Slack messages → coding sessions
 - `github-bot` — PR review assignments and @mention commands
 - `linear-bot` — Linear agent webhooks → coding sessions
+- `feishu-bot` — Feishu messages/cards → GitHub or Gitea coding sessions; completion media delivery
 
-**Data flow**: User prompt → web client → control plane DO (WebSocket) → Modal sandbox → streaming
-events back through the same WebSocket chain.
+**Prompt flow**: client/bot → control plane DO → sandbox bridge → selected harness → normalized
+events back through the same Durable Object and client channel.
+
+**Visual flow on Cube**: harness → `aio_browser` MCP or agent-browser → shared Chromium → screenshot
+file → `upload_media` → control-plane object storage → Web/Feishu. Live application ports use a
+separate provider tunnel or trusted preview gateway; CDP `9222` and Browser MCP `8100` stay private.
 
 ### Package Dependency Graph
 
 ```
-@open-inspect/shared  ←  control-plane, web, slack-bot, github-bot, linear-bot
+@open-inspect/shared  ←  control-plane, web, slack-bot, feishu-bot, github-bot, linear-bot
 ```
 
 **Build `@open-inspect/shared` first** whenever you change shared types. Other packages import from
@@ -36,15 +43,18 @@ it at build time.
 
 ## Package Overview
 
-| Package         | Lang / Framework                   | Purpose                                                     |
-| --------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `shared`        | TypeScript                         | Shared types, auth utilities, model definitions             |
-| `control-plane` | TypeScript / CF Workers + DO       | Session management, WebSocket streaming, GitHub integration |
-| `web`           | TypeScript / Next.js 16 + React 19 | User-facing dashboard, OAuth, real-time UI                  |
-| `slack-bot`     | TypeScript / CF Workers + Hono     | Slack event handler, session creation                       |
-| `github-bot`    | TypeScript / CF Workers + Hono     | PR review and @mention webhook handler                      |
-| `linear-bot`    | TypeScript / CF Workers + Hono     | Linear agent webhook handler                                |
-| `modal-infra`   | Python 3.12 / Modal + FastAPI      | Sandbox lifecycle, WebSocket bridge to control plane        |
+| Package           | Lang / Framework                   | Purpose                                                             |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------- |
+| `shared`          | TypeScript                         | Shared types, auth utilities, model definitions                     |
+| `control-plane`   | TypeScript / CF Workers + DO       | Session state, streaming, SCM connections, sandbox lifecycle, media |
+| `web`             | TypeScript / Next.js 16 + React 19 | User-facing dashboard, OAuth, real-time UI                          |
+| `slack-bot`       | TypeScript / CF Workers + Hono     | Slack event handler, session creation                               |
+| `github-bot`      | TypeScript / CF Workers + Hono     | PR review and @mention webhook handler                              |
+| `linear-bot`      | TypeScript / CF Workers + Hono     | Linear agent webhook handler                                        |
+| `feishu-bot`      | TypeScript / CF Workers + Hono     | Feishu cards, session routing, completion/media delivery            |
+| `sandbox-runtime` | Python 3.12                        | Provider-neutral bridge, Harness adapters, browser/media tooling    |
+| `modal-infra`     | Python 3.12 / Modal + FastAPI      | Sandbox lifecycle, WebSocket bridge to control plane                |
+| `e2b-infra`       | Docker/Python/Shell                | Managed E2B and self-hosted Cube template tooling                   |
 
 ## Common Commands
 
@@ -66,9 +76,11 @@ npm test -w @open-inspect/web
 npm test -w @open-inspect/github-bot
 npm test -w @open-inspect/slack-bot
 npm test -w @open-inspect/linear-bot
+npm test -w @open-inspect/feishu-bot
 
 # Tests — Python (pytest)
 cd packages/modal-infra && pytest tests/ -v
+cd packages/sandbox-runtime && pytest tests/ -v
 
 # Python linting
 cd packages/modal-infra && ruff check --fix && ruff format
@@ -86,6 +98,7 @@ All TypeScript packages use **Vitest**; Python uses **pytest** + pytest-asyncio.
 - **web, slack-bot, linear-bot**: co-located `src/**/*.test.ts`
 - **github-bot**: separate `test/*.test.ts`
 - **modal-infra**: `tests/test_*.py`
+- **sandbox-runtime**: `tests/test_*.py`
 
 ### Control-plane integration tests
 
@@ -134,6 +147,14 @@ under 72 characters. Use the PR body for details, not the commit message.
   `uv run modal deploy -m src`). Never deploy `src/app.py` directly; it doesn't import function
   modules.
 - **Modal image rebuild**: update `CACHE_BUSTER` in `src/images/base.py` to force a rebuild.
+- **Cube template rebuild**: run `packages/e2b-infra/build-cube-template.sh` with a unique
+  `CUBE_IMAGE_BUILD_LABEL`, wait for `READY`, then change `E2B_TEMPLATE_ID`. Existing sandboxes keep
+  their original template.
+- **AIO browser boundary**: Cube is the VM/isolation base. Only Chromium and
+  `@agent-infra/mcp-server-browser` are copied from the pinned AIO image. Never expose CDP `9222` or
+  Browser MCP `8100`; screenshots leave through `upload_media`.
+- **Repo-less tunnel caveat**: preview URLs remain in control-plane session state, but repo-less
+  sessions currently may not materialize `/workspace/.tunnels.env`.
 - **Web platform choice**: set `web_platform = "cloudflare"` in Terraform variables to deploy the
   web app to Cloudflare Workers via OpenNext instead of Vercel. When using Cloudflare, Vercel
   credentials are not required (dummy defaults are used). `NEXT_PUBLIC_WS_URL` must be available at
