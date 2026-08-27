@@ -150,11 +150,28 @@ function createE2BProviderFromEnv(env: Env): E2BSandboxProvider {
       env.E2B_USE_CREATE_TIME_ENV,
       false
     ),
+    previewBaseUrl: normalizeHttpsBaseUrl("E2B_PREVIEW_BASE_URL", env.E2B_PREVIEW_BASE_URL),
     llmEnvVars: {
       XIAOMI_API_KEY: env.XIAOMI_API_KEY,
       XIAOMI_BASE_URL: env.XIAOMI_BASE_URL,
     },
   });
+}
+
+function normalizeHttpsBaseUrl(name: string, value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error(`${name} must be a valid HTTPS URL`);
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+    throw new Error(`${name} must be an HTTPS URL without credentials, query, or fragment`);
+  }
+
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
 export function createSandboxProviderFromEnv(env: Env, backend: "daytona"): DaytonaSandboxProvider;

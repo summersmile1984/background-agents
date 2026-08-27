@@ -58,6 +58,12 @@ export interface E2BProviderConfig {
    * backends such as CubeSandbox, whose launcher starts fresh on each create.
    */
   useCreateTimeEnv?: boolean;
+  /**
+   * Optional trusted HTTPS gateway used for user-facing service previews.
+   * The gateway must route `/sandbox/:providerObjectId/:port/` to the
+   * corresponding E2B-compatible sandbox service.
+   */
+  previewBaseUrl?: string;
   /** Provider-level LLM environment vars merged into every sandbox (e.g. API keys). */
   llmEnvVars?: Record<string, string | undefined>;
 }
@@ -355,7 +361,9 @@ export class E2BSandboxProvider implements SandboxProvider {
         ? Object.fromEntries(
             tunnelPorts.map((p) => [
               String(p),
-              this.client.getHostnameForPort(e2bSandboxId, p, domain),
+              this.providerConfig.previewBaseUrl
+                ? `${this.providerConfig.previewBaseUrl}/sandbox/${encodeURIComponent(e2bSandboxId)}/${p}/`
+                : this.client.getHostnameForPort(e2bSandboxId, p, domain),
             ])
           )
         : undefined;

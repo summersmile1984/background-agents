@@ -159,6 +159,9 @@ module "control_plane_worker" {
       { name = "E2B_AUTO_PAUSE", value = tostring(var.e2b_auto_pause) },
       { name = "E2B_USE_CREATE_TIME_ENV", value = tostring(var.e2b_use_create_time_env) },
       { name = "XIAOMI_BASE_URL", value = var.xiaomi_base_url },
+    ] : [],
+    local.use_e2b_backend && var.e2b_preview_base_url != "" ? [
+      { name = "E2B_PREVIEW_BASE_URL", value = var.e2b_preview_base_url },
     ] : []
   )
 

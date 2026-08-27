@@ -65,6 +65,28 @@ describe("createSandboxProviderFromEnv", () => {
     );
   });
 
+  it("rejects an insecure E2B preview gateway", () => {
+    const env = createEnv({
+      E2B_API_KEY: "e2b-key",
+      E2B_TEMPLATE_ID: "tmpl",
+      E2B_PREVIEW_BASE_URL: "http://preview.example.test",
+    });
+
+    expect(() => createSandboxProviderFromEnv(env, "e2b")).toThrow(
+      "E2B_PREVIEW_BASE_URL must be an HTTPS URL"
+    );
+  });
+
+  it("accepts a normalized HTTPS E2B preview gateway", () => {
+    const env = createEnv({
+      E2B_API_KEY: "e2b-key",
+      E2B_TEMPLATE_ID: "tmpl",
+      E2B_PREVIEW_BASE_URL: " https://preview.example.test/base/// ",
+    });
+
+    expect(() => createSandboxProviderFromEnv(env, "e2b")).not.toThrow();
+  });
+
   it("requires an OpenComputer template for starts but not existing-session cleanup", () => {
     const env = createEnv({
       OPENCOMPUTER_API_URL: "https://opencomputer.test",

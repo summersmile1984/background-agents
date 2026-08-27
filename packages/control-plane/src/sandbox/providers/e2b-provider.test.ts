@@ -87,6 +87,24 @@ describe("E2BSandboxProvider", () => {
     });
   });
 
+  it("uses a trusted preview gateway for generic tunnels only", async () => {
+    const client = mockClient();
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      previewBaseUrl: "https://preview.example.test/prefix",
+    });
+
+    const result = await provider.createSandbox({
+      ...baseCreateConfig,
+      sandboxSettings: { tunnelPorts: [3000] },
+    });
+
+    expect(result.codeServerUrl).toBe("https://8080-e2b-id.e2b.app");
+    expect(result.tunnelUrls).toEqual({
+      "3000": "https://preview.example.test/prefix/sandbox/e2b-id/3000/",
+    });
+  });
+
   it("system vars override user vars (delivered via writeSessionEnv)", async () => {
     const client = mockClient();
     const provider = new E2BSandboxProvider(client, providerConfig);

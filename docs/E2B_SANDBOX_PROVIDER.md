@@ -24,6 +24,7 @@ e2b_template_id = "open-inspect-sandbox" # template name to build/use
 # Optional
 # e2b_api_url                 = "https://api.e2b.app" # REST API base URL
 # e2b_sandbox_timeout_seconds = 7200                  # sandbox TTL (default 2h)
+# e2b_preview_base_url = "https://preview.example.com" # optional trusted public preview gateway
 # e2b_auto_pause              = true                   # pause (recoverable), not kill, on TTL lapse
 ```
 
