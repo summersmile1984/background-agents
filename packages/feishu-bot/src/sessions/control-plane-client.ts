@@ -6,6 +6,7 @@ import {
   type SendPromptResponse,
 } from "@open-inspect/shared/types/session-api";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "../internal-auth";
 import type { FeishuRepositoryTarget } from "../targets";
 
@@ -62,12 +63,14 @@ export async function sendPrompt(input: {
   content: string;
   actorId: string;
   callbackContext: CallbackContext;
+  visualVerification?: VisualVerificationSelection;
   traceId?: string;
 }): Promise<SendPromptResult> {
   const body = JSON.stringify({
     content: input.content,
     source: "feishu",
     callbackContext: input.callbackContext,
+    ...(input.visualVerification ? { visualVerification: input.visualVerification } : {}),
   });
   const response = await signedControlPlaneFetch(
     input.env,
