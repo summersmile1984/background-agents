@@ -7,6 +7,7 @@ import {
   promptContentSchema,
 } from "@open-inspect/shared/types/prompts";
 import { sessionAttachmentReferencesSchema } from "@open-inspect/shared/types/session-attachments";
+import { visualVerificationSelectionSchema } from "@open-inspect/shared/types/visual-verification";
 import { z } from "zod";
 import { controlPlaneUserFetch } from "@/lib/control-plane";
 
@@ -16,6 +17,7 @@ const promptRequestSchema = z
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
     attachments: sessionAttachmentReferencesSchema.optional(),
+    visualVerification: visualVerificationSelectionSchema.optional(),
   })
   .refine((prompt) => !isBlankPrompt(prompt), {
     message: BLANK_PROMPT_MESSAGE,
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!parsed.success) {
       return NextResponse.json({ error: "Invalid prompt request" }, { status: 400 });
     }
-    const { content, model, reasoningEffort, attachments } = parsed.data;
+    const { content, model, reasoningEffort, attachments, visualVerification } = parsed.data;
 
     // authorId is derived by the control plane from the Bearer principal and
     // is rejected in the body under strict enforcement.
@@ -47,6 +49,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         model,
         reasoningEffort,
         attachments,
+        visualVerification,
       }),
     });
 
