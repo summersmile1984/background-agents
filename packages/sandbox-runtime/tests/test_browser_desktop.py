@@ -111,6 +111,8 @@ class TestStartVnc:
             patch.object(desktop, "_wait_for_path", new_callable=AsyncMock, return_value=True),
             patch.object(desktop, "_wait_for_cdp", new_callable=AsyncMock, return_value=True),
             patch.object(desktop, "_wait_for_port", new_callable=AsyncMock, return_value=True),
+            patch("sandbox_runtime.browser_desktop.os.geteuid", return_value=1001),
+            patch("sandbox_runtime.browser_desktop.os.chown") as chown,
             patch(
                 "sandbox_runtime.browser_desktop.asyncio.create_subprocess_exec",
                 new_callable=AsyncMock,
@@ -124,6 +126,7 @@ class TestStartVnc:
             )
             assert os.environ[AIO_BROWSER_MCP_URL_ENV_VAR] == "http://127.0.0.1:8200/mcp"
 
+        chown.assert_not_called()
         assert [call.args[0] for call in create_process.call_args_list] == [
             "Xvfb",
             "fluxbox",

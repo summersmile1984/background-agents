@@ -219,7 +219,11 @@ class BrowserDesktop:
         output_dir = config.runtime_root / "downloads"
         for directory in (config.runtime_root, profile_dir, output_dir):
             directory.mkdir(parents=True, exist_ok=True)
-            os.chown(directory, 1000, 1000)
+            # Cube starts the supervisor as root and launches Chromium as the
+            # fixed sandbox user. Non-root runtimes already own the directory
+            # they created and cannot change its ownership (including CI).
+            if os.geteuid() == 0:
+                os.chown(directory, 1000, 1000)
         for stale_lock in ("SingletonCookie", "SingletonLock", "SingletonSocket"):
             (profile_dir / stale_lock).unlink(missing_ok=True)
 
@@ -234,7 +238,8 @@ class BrowserDesktop:
             Path(browser_env["XDG_CACHE_HOME"]),
         ):
             directory.mkdir(parents=True, exist_ok=True)
-            os.chown(directory, 1000, 1000)
+            if os.geteuid() == 0:
+                os.chown(directory, 1000, 1000)
         self._aio_chromium_process = await self._launch(
             "aio_chromium",
             config.executable_path,
