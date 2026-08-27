@@ -144,8 +144,8 @@ export const visualVerificationAssertionResultSchema = z
   .object({
     kind: z.enum(["visible", "hidden", "text_contains", "url_path", "no_console_error"]),
     status: z.enum(["passed", "failed"]),
-    selector: z.string().max(512).optional(),
-    message: z.string().max(1024).optional(),
+    selector: z.string().max(512).nullish(),
+    message: z.string().max(1024).nullish(),
   })
   .strict();
 
@@ -168,7 +168,7 @@ export const visualVerificationFailureSchema = z
     scenarioId: z
       .string()
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-      .optional(),
+      .nullish(),
   })
   .strict();
 
