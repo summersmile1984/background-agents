@@ -78,4 +78,31 @@ describe("visual verification contracts", () => {
 
     expect(visualVerificationReportSchema.safeParse(report).success).toBe(false);
   });
+
+  it("accepts null optional fields emitted by the Python runtime", () => {
+    expect(
+      visualVerificationReportSchema.safeParse({
+        version: 1,
+        messageId: "message-1",
+        status: "passed",
+        startedAt: "2026-08-26T00:00:00.000Z",
+        finishedAt: "2026-08-26T00:00:01.000Z",
+        scenarios: [
+          {
+            id: "home",
+            status: "passed",
+            source: "web:/",
+            viewport: { width: 1280, height: 720 },
+            assertions: [
+              { kind: "visible", status: "passed", selector: "main", message: null },
+              { kind: "no_console_error", status: "passed", selector: null, message: null },
+            ],
+            artifactIds: ["artifact-1"],
+            durationMs: 1000,
+          },
+        ],
+        failure: null,
+      }).success
+    ).toBe(true);
+  });
 });
