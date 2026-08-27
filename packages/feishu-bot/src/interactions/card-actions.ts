@@ -5,7 +5,7 @@ import {
   deletePendingRequest,
   getPendingRequest,
 } from "../conversation/store";
-import { replyFeishuCard, sendFeishuText } from "../feishu/client";
+import { replySessionCard, replySessionText } from "../conversation/delivery";
 import { startNewSession } from "../events/dispatcher";
 import { createLogger } from "../logger";
 import { findRepositoryTarget, listRepositoryCatalog } from "../targets";
@@ -134,9 +134,9 @@ export async function handleFeishuCardAction(
       const connection = catalog.connections.find((candidate) => candidate.id === connectionId);
       if (!connection) return { ok: false, content: "代码源已不可用，请重新发起请求。" };
       if (connection.catalogStatus === "refreshing") {
-        await sendFeishuText(
+        await replySessionText(
           env,
-          chatId,
+          pending,
           `${connection.label} 的仓库目录仍在刷新，请稍候几秒后重新选择。`
         );
         return { ok: false, content: "目录仍在刷新。" };
@@ -145,9 +145,9 @@ export async function handleFeishuCardAction(
       const page = value.action === "repository_page" ? value.page : 0;
       const pageCount = Math.max(1, Math.ceil(repositories.length / REPOSITORIES_PER_PAGE));
       if (page >= pageCount) return { ok: false, content: "该页已不存在，请重新选择代码源。" };
-      await replyFeishuCard(
+      await replySessionCard(
         env,
-        pending.rootMessageId,
+        pending,
         buildRepositoryPickerCard({
           pendingId: value.pendingId,
           connection,
@@ -167,7 +167,10 @@ export async function handleFeishuCardAction(
       coordinates: {
         tenantKey: pending.tenantKey,
         chatId: pending.chatId,
+        chatType: pending.chatType,
         rootMessageId: pending.rootMessageId,
+        ...(pending.threadId ? { threadId: pending.threadId } : {}),
+        replyMode: pending.replyMode,
       },
       actor,
       content: pending.content,
@@ -183,7 +186,9 @@ export async function handleFeishuCardAction(
       pending_id: value.pendingId,
       error: error instanceof Error ? error : new Error(String(error)),
     });
-    await sendFeishuText(env, chatId, "暂时无法创建会话，请稍后重试。").catch(() => undefined);
+    if (pending) {
+      await replySessionText(env, pending, "暂时无法创建会话，请稍后重试。").catch(() => undefined);
+    }
     return { ok: false, content: "创建会话失败。" };
   }
 }

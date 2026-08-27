@@ -21,6 +21,10 @@ export interface Env {
   FEISHU_TRIGGERS_ENABLED?: string;
   /** Attach bounded prompt-scoped screenshots to completion topics. */
   FEISHU_MEDIA_DELIVERY_ENABLED?: string;
+  /** Promote new group root messages to native Feishu topics. */
+  FEISHU_THREAD_REPLIES_ENABLED?: string;
+  /** Allow the owner to continue a bound group topic without repeating an @mention. */
+  FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED?: string;
   /** Required to distinguish a bot @mention from an ordinary group mention. */
   FEISHU_BOT_OPEN_ID?: string;
   /** Mainland Feishu by default; Terraform allow-lists the value. */

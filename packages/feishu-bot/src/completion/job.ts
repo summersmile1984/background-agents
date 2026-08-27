@@ -10,8 +10,14 @@ export const feishuCompletionJobSchema = z.object({
   tenantKey: z.string().min(1),
   chatId: z.string().min(1),
   rootMessageId: z.string().min(1),
+  chatType: z.enum(["p2p", "group"]).optional(),
+  threadId: z.string().min(1).optional(),
+  replyMode: z.enum(["thread", "flat"]).optional(),
   targetLabel: z.string().min(1),
+  branch: z.string().min(1).optional(),
+  harness: z.enum(["opencode", "codex", "claude", "deepseek", "inherit"]).optional(),
   model: z.string().min(1),
+  reasoningEffort: z.string().min(1).optional(),
   traceId: z.string().optional(),
 });
 

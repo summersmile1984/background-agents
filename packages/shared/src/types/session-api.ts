@@ -57,6 +57,14 @@ export const feishuCallbackContextSchema = z.object({
   tenantKey: nonEmptyStringSchema,
   chatId: nonEmptyStringSchema,
   rootMessageId: nonEmptyStringSchema,
+  /** Chat surface that created the session. Optional for rolling-upgrade compatibility. */
+  chatType: z.enum(["p2p", "group"]).optional(),
+  /** Feishu topic id used for presentation only; rootMessageId remains the routing key. */
+  threadId: nonEmptyStringSchema.optional(),
+  /** Whether callbacks must be delivered inside the topic or as a flat reply. */
+  replyMode: z.enum(["thread", "flat"]).optional(),
+  branch: nonEmptyStringSchema.optional(),
+  harness: z.union([agentHarnessSchema, z.literal("inherit")]).optional(),
   /** A card sent by Open-Inspect itself, eligible for a later status update. */
   workingMessageId: nonEmptyStringSchema.optional(),
   targetLabel: nonEmptyStringSchema,

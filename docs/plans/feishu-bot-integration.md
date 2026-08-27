@@ -2,13 +2,17 @@
 
 ## 状态
 
-**Proposed — 未实现。**
+**Implemented in part — 通用入口已上线，后续能力分阶段实施。**
+
+生产代码已经包含独立 Feishu
+Worker、私聊/群 @ 入口、GitHub/Gitea 仓库选择、根消息到 session 映射、完成卡、预览和截图投递。原生话题及多个并行沙盒/分支的交互隔离已经实现并受灰度开关控制，以
+[飞书并行线程会话实施方案](./feishu-threaded-sessions.md) 为生产验收依据。
 
 本方案把飞书作为与 Slack 并列的 Open-Inspect 入口：用户可以在飞书私聊或群聊中发起、配置、跟进和控制 coding
 session。它复用既有的 Control Plane、会话、Harness、GitHub/Gitea
 connection 和沙盒能力；它不是另一套 agent、SCM 或沙盒实现。
 
-本文件是实现和验收的依据。实施开始前，应将本方案中标为“待平台联调”的飞书 API字段以目标租户开发者后台的当前版本文档复核一次。
+本文件继续作为飞书通用入口和后续功能的架构依据。实施标为“待平台联调”的飞书 API 字段前，应以目标租户开发者后台的当前版本文档复核一次。
 
 ## 1. 决策摘要
 

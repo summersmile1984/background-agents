@@ -1,7 +1,8 @@
 import { extractAgentResponse } from "@open-inspect/shared/completion/extractor";
 import { resolveOutboundCredential } from "@open-inspect/shared/service-auth";
 import { buildCompletionCard } from "../cards";
-import { replyFeishuCard } from "../feishu/client";
+import { replySessionCard } from "../conversation/delivery";
+import { updateThreadSession, type FeishuConversationCoordinates } from "../conversation/store";
 import { signedControlPlaneFetch } from "../internal-auth";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
@@ -68,6 +69,14 @@ function pullRequestUrl(
 }
 
 export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env): Promise<void> {
+  const coordinates: FeishuConversationCoordinates = {
+    tenantKey: job.tenantKey,
+    chatId: job.chatId,
+    chatType: job.chatType ?? "p2p",
+    rootMessageId: job.rootMessageId,
+    ...(job.threadId ? { threadId: job.threadId } : {}),
+    replyMode: job.replyMode ?? "flat",
+  };
   try {
     const response = await extractAgentResponse(
       {
@@ -80,9 +89,13 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       job.traceId
     );
     const previewUrl = await fetchPreviewUrl(env, job.sessionId, job.traceId);
-    await replyFeishuCard(
+    const completed = job.success && response.success;
+    await updateThreadSession(env, coordinates, {
+      state: completed ? "completed" : "failed",
+    }).catch(() => undefined);
+    await replySessionCard(
       env,
-      job.rootMessageId,
+      coordinates,
       buildCompletionCard({
         sessionId: job.sessionId,
         targetLabel: job.targetLabel,
@@ -93,7 +106,14 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
         pullRequestUrl: pullRequestUrl(response.artifacts),
         previewUrl,
         visualVerification: response.visualVerification,
-      })
+        ...(job.branch ? { branch: job.branch } : {}),
+        ...(job.harness ? { harness: job.harness } : {}),
+        model: job.model,
+        ...(job.reasoningEffort ? { reasoningEffort: job.reasoningEffort } : {}),
+        chatType: coordinates.chatType,
+        replyMode: coordinates.replyMode,
+      }),
+      job.deliveryId
     );
     if (env.FEISHU_MEDIA_DELIVERY_ENABLED === "true" && response.mediaArtifacts.length > 0) {
       await deliverFeishuMediaArtifacts({
@@ -103,6 +123,9 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
         sessionId: job.sessionId,
         messageId: job.messageId,
         rootMessageId: job.rootMessageId,
+        chatType: coordinates.chatType,
+        ...(coordinates.threadId ? { threadId: coordinates.threadId } : {}),
+        replyMode: coordinates.replyMode,
         artifacts: response.mediaArtifacts,
         traceId: job.traceId,
       });
@@ -111,6 +134,9 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       delivery_id: job.deliveryId,
       session_id: job.sessionId,
       message_id: job.messageId,
+      root_message_id: job.rootMessageId,
+      ...(job.threadId ? { thread_id: job.threadId } : {}),
+      reply_mode: job.replyMode ?? "flat",
       outcome: "success",
     });
   } catch (error) {
@@ -118,6 +144,9 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       delivery_id: job.deliveryId,
       session_id: job.sessionId,
       message_id: job.messageId,
+      root_message_id: job.rootMessageId,
+      ...(job.threadId ? { thread_id: job.threadId } : {}),
+      reply_mode: job.replyMode ?? "flat",
       outcome: "error",
       error: error instanceof Error ? error : new Error(String(error)),
     });

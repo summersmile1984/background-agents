@@ -29,6 +29,7 @@ export const feishuEventEnvelopeSchema = z.object({
           message_id: nonEmpty.optional(),
           root_id: nonEmpty.optional(),
           parent_id: nonEmpty.optional(),
+          thread_id: nonEmpty.optional(),
           message_type: z.string().optional(),
           content: z.string().optional(),
           mentions: z

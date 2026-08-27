@@ -4,6 +4,7 @@ import {
   clearTenantAccessTokenCache,
   replyFeishuImage,
   replyFeishuText,
+  resolveFeishuBotOpenId,
   uploadFeishuMessageImage,
 } from "./client";
 
@@ -38,7 +39,9 @@ describe("Feishu message client", () => {
       );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(replyFeishuText(env, "om/message", "已收到，正在处理。")).resolves.toBe("reply-1");
+    await expect(replyFeishuText(env, "om/message", "已收到，正在处理。")).resolves.toEqual({
+      messageId: "reply-1",
+    });
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "https://open.feishu.cn/open-apis/im/v1/messages/om%2Fmessage/reply",
@@ -71,6 +74,80 @@ describe("Feishu message client", () => {
     await expect(replyFeishuText(env, "om_1", "test")).rejects.toThrow(
       "http_status=400, code=230001, msg=invalid message card"
     );
+  });
+
+  it("creates a native topic reply and preserves returned message coordinates", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ code: 0, tenant_access_token: "tenant-token", expire: 3600 }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            code: 0,
+            data: {
+              message_id: "reply-2",
+              root_id: "root-1",
+              parent_id: "root-1",
+              thread_id: "thread-1",
+            },
+          }),
+          { status: 200 }
+        )
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      replyFeishuText(env, "root-1", "开始处理", {
+        replyInThread: true,
+        idempotencyKey: "event-1",
+      })
+    ).resolves.toEqual({
+      messageId: "reply-2",
+      rootMessageId: "root-1",
+      parentMessageId: "root-1",
+      threadId: "thread-1",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      msg_type: "text",
+      content: JSON.stringify({ text: "开始处理" }),
+      reply_in_thread: true,
+      uuid: "event-1",
+    });
+  });
+
+  it("resolves and caches the bot Open ID when no override is configured", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 0, msg: "ok", bot: { open_id: "ou_bot_1" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveFeishuBotOpenId(env)).resolves.toBe("ou_bot_1");
+    await expect(resolveFeishuBotOpenId(env)).resolves.toBe("ou_bot_1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://open.feishu.cn/open-apis/bot/v3/info",
+      expect.objectContaining({ headers: { Authorization: "Bearer tenant-token" } })
+    );
+  });
+
+  it("uses an explicit bot Open ID override without network access", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveFeishuBotOpenId({ ...env, FEISHU_BOT_OPEN_ID: "ou_configured" })
+    ).resolves.toBe("ou_configured");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -125,7 +202,9 @@ describe("Feishu media client", () => {
       .mockResolvedValueOnce(jsonResponse({ code: 0, data: { message_id: "reply-1" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(replyFeishuImage(env, "root/message", "img-key")).resolves.toBe("reply-1");
+    await expect(replyFeishuImage(env, "root/message", "img-key")).resolves.toEqual({
+      messageId: "reply-1",
+    });
 
     const [url, init] = fetchMock.mock.calls[1];
     expect(url).toBe("https://open.feishu.cn/open-apis/im/v1/messages/root%2Fmessage/reply");

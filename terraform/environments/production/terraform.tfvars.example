@@ -229,6 +229,11 @@ feishu_encrypt_key = ""
 # Enable only after FEISHU_BOT_OPEN_ID is known and group @mention E2E passes.
 feishu_triggers_enabled = false
 feishu_media_delivery_enabled = false
+# Native group topics can be enabled with the existing send/@mention scopes.
+feishu_thread_replies_enabled = false
+# Enable only after granting the app's group-all-messages permission and
+# publishing a new Feishu app version. Unbound, unmentioned messages are ignored.
+feishu_bound_thread_followups_enabled = false
 feishu_bot_open_id = ""
 
 # Recommended when workers.dev is unavailable from Feishu or your network.
