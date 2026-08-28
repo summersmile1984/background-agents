@@ -816,6 +816,17 @@ feishu_error_code
   mode。
 - 该契约保证关闭 Feishu 线程 rollout 不会主动停止既有 sandbox，用户仍可从 Web 接管；生产环境实际翻转 flag 的演练仍需单独安排，以免影响当前租户的在线任务。
 
+### 7.12 Gitea 沙盒通知路由修复（2026-08-29）
+
+- 提交 `d0418cb9` 修复了 `POST /sessions/:id/slack-notify` 误用 `GITHUB_SANDBOX_FALLBACK_ROUTE`
+  的问题。此前 Gitea session 会在路由策略层被提前拒绝，即使后续 `handleSlackNotify`
+  已经具备 SCM-agnostic 处理能力；现在该 endpoint 使用
+  `SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE`，GitHub 和 Gitea 沙盒均可通过同一通知链路。
+- `router.policy.test.ts`
+  新增该 endpoint 的全 SCM 路由矩阵断言；本地路由策略测试 60 项、全局 TypeScript
+  typecheck 和 lint 均通过。CI run `33210464061`（含重跑后的 integration job）与 Terraform Apply run
+  `33210464084` 均成功，生产健康端点保持正常。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
