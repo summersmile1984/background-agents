@@ -385,6 +385,15 @@ export async function startNewSession(input: {
   traceId: string;
   targets?: Awaited<ReturnType<typeof listRepositoryTargets>>;
 }): Promise<void> {
+  const existing = await lookupThreadSession(input.env, input.coordinates);
+  if (existing) {
+    await replySessionText(
+      input.env,
+      input.coordinates,
+      `本话题已绑定 ${existing.targetLabel}，无需重新选择仓库。请直接继续发送消息。`
+    );
+    return;
+  }
   const targets = input.targets ?? (await listRepositoryTargets(input.env, input.traceId));
   const target = findRepositoryTarget(targets, input.targetKey);
   if (!target) {

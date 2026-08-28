@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { buildRepositoryPickerCard, REPOSITORIES_PER_PAGE } from "../cards";
 import {
+  claimThreadSelection,
   claimCardActionOnce,
   deletePendingRequest,
   getPendingRequest,
+  lookupThreadSession,
+  releaseThreadSelection,
 } from "../conversation/store";
 import { replySessionCard, replySessionText } from "../conversation/delivery";
 import { startNewSession } from "../events/dispatcher";
@@ -125,7 +128,33 @@ export async function handleFeishuCardAction(
   ) {
     return { ok: false, content: "该选择已过期或无权操作，请重新发起请求。" };
   }
+  const coordinates = {
+    tenantKey: pending.tenantKey,
+    chatId: pending.chatId,
+    chatType: pending.chatType,
+    rootMessageId: pending.rootMessageId,
+    ...(pending.threadId ? { threadId: pending.threadId } : {}),
+    replyMode: pending.replyMode,
+  };
   try {
+    const existing = await lookupThreadSession(env, coordinates);
+    if (existing) {
+      await deletePendingRequest(env, value.pendingId);
+      log.info("card_action.thread_already_bound", {
+        trace_id: traceId,
+        pending_id: value.pendingId,
+        session_id: existing.sessionId,
+        repository_key: existing.repositoryKey,
+        root_message_id: existing.rootMessageId,
+        ...(existing.threadId ? { thread_id: existing.threadId } : {}),
+      });
+      await replySessionText(
+        env,
+        coordinates,
+        `本话题已绑定 ${existing.targetLabel}，无需重新选择仓库。请直接在本话题继续发送消息。`
+      );
+      return { ok: false, content: "本话题已绑定仓库，无需重新选择。" };
+    }
     const catalog = await listRepositoryCatalog(env, traceId);
     const { targets } = catalog;
     if (value.action === "select_connection" || value.action === "repository_page") {
@@ -162,22 +191,35 @@ export async function handleFeishuCardAction(
     if (!selected || selected.connectionId !== value.connectionId) {
       return { ok: false, content: "仓库已不可用，请重新选择。" };
     }
-    await startNewSession({
-      env,
-      coordinates: {
-        tenantKey: pending.tenantKey,
-        chatId: pending.chatId,
-        chatType: pending.chatType,
-        rootMessageId: pending.rootMessageId,
-        ...(pending.threadId ? { threadId: pending.threadId } : {}),
-        replyMode: pending.replyMode,
-      },
-      actor,
-      content: pending.content,
-      targetKey: selected.repositoryKey,
-      traceId,
-      targets,
-    });
+    if (!(await claimThreadSelection(env, coordinates, actionId))) {
+      await replySessionText(env, coordinates, "本话题正在创建会话，请勿重复选择仓库。");
+      return { ok: false, content: "本话题正在创建会话。" };
+    }
+    try {
+      // Re-check after taking the topic claim so a completed earlier action
+      // cannot be overwritten by this stale card.
+      const boundAfterClaim = await lookupThreadSession(env, coordinates);
+      if (boundAfterClaim) {
+        await deletePendingRequest(env, value.pendingId);
+        await replySessionText(
+          env,
+          coordinates,
+          `本话题已绑定 ${boundAfterClaim.targetLabel}，无需重新选择仓库。`
+        );
+        return { ok: false, content: "本话题已绑定仓库。" };
+      }
+      await startNewSession({
+        env,
+        coordinates,
+        actor,
+        content: pending.content,
+        targetKey: selected.repositoryKey,
+        traceId,
+        targets,
+      });
+    } finally {
+      await releaseThreadSelection(env, coordinates, actionId);
+    }
     await deletePendingRequest(env, value.pendingId);
     return { ok: true, content: "已开始创建会话。" };
   } catch (error) {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  claimThreadSelection,
   listConversationSessions,
   lookupThreadSession,
+  releaseThreadSelection,
   storeThreadSession,
   updateThreadSession,
 } from "./store";
@@ -167,5 +169,24 @@ describe("Feishu conversation session index", () => {
       replyMode: "thread",
       threadId: "thread-1",
     });
+  });
+
+  it("allows only one in-flight repository selection per topic", async () => {
+    const env = { FEISHU_KV: new MemoryKv() as unknown as KVNamespace };
+    const coordinates = {
+      tenantKey: "tenant",
+      chatId: "chat",
+      chatType: "group" as const,
+      rootMessageId: "root-thread",
+      threadId: "thread-1",
+      replyMode: "thread" as const,
+    };
+
+    await expect(claimThreadSelection(env, coordinates, "action-1")).resolves.toBe(true);
+    await expect(claimThreadSelection(env, coordinates, "action-2")).resolves.toBe(false);
+    await releaseThreadSelection(env, coordinates, "action-2");
+    await expect(claimThreadSelection(env, coordinates, "action-3")).resolves.toBe(false);
+    await releaseThreadSelection(env, coordinates, "action-1");
+    await expect(claimThreadSelection(env, coordinates, "action-4")).resolves.toBe(true);
   });
 });

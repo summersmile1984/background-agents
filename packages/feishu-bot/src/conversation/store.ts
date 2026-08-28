@@ -5,6 +5,7 @@ import type { Env } from "../types";
 
 const THREAD_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PENDING_TTL_SECONDS = 60 * 60;
+const THREAD_SELECTION_TTL_SECONDS = 10 * 60;
 const SESSION_INDEX_LIMIT = 30;
 
 export interface FeishuConversationCoordinates {
@@ -128,6 +129,10 @@ function pendingKey(pendingId: string): string {
   return `pending:${pendingId}`;
 }
 
+function threadSelectionKey(coordinates: FeishuConversationCoordinates): string {
+  return `thread-selection:${coordinates.tenantKey}:${coordinates.chatId}:${coordinates.rootMessageId}`;
+}
+
 function sessionIndexKey(
   input: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId"> & {
     actorId: string;
@@ -240,6 +245,32 @@ export async function clearThreadSession(
   coordinates: FeishuConversationCoordinates
 ): Promise<void> {
   await createKvCacheStore(env.FEISHU_KV).delete(threadKey(coordinates));
+}
+
+/**
+ * Best-effort guard against two repository buttons starting sessions for the
+ * same topic before the first session mapping has been persisted.
+ */
+export async function claimThreadSelection(
+  env: Pick<Env, "FEISHU_KV">,
+  coordinates: FeishuConversationCoordinates,
+  claimId: string
+): Promise<boolean> {
+  const store = createKvCacheStore(env.FEISHU_KV);
+  const key = threadSelectionKey(coordinates);
+  if (await store.get(key)) return false;
+  await store.put(key, claimId, { expirationTtl: THREAD_SELECTION_TTL_SECONDS });
+  return true;
+}
+
+export async function releaseThreadSelection(
+  env: Pick<Env, "FEISHU_KV">,
+  coordinates: FeishuConversationCoordinates,
+  claimId: string
+): Promise<void> {
+  const store = createKvCacheStore(env.FEISHU_KV);
+  const key = threadSelectionKey(coordinates);
+  if ((await store.get(key)) === claimId) await store.delete(key);
 }
 
 export async function storePendingRequest(
