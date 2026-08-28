@@ -420,6 +420,12 @@ flag 关闭时出站 body 与当前生产等价。
   `huangdong/chatbi`、Codex、GPT 5.6 Luna、`main`。19:26 同一飞书话题收到 `#8CDF69`
   完成卡；Codex 报告仅完成只读检查，仓库无文件变化。该证据覆盖消息回执、双 SCM 入口、Gitea 仓库分页、Harness/模型/Effort 选择和同话题完成投递，但没有覆盖截图/preview/PR（本测试明确不修改文件）。
 
+- 19:35 创建第二个顶层任务，选择 GitHub `summersmile1984/flow-pilot`、Codex、GPT 5.5，生成工作卡
+  `#A41DFC`；Web session `3bdfa52b4bbc870d18b125a91f2b423d` 显示独立的 Connected/Ready 沙盒和 GitHub
+  `master`。19:41 同一话题收到 `#A41DFC`
+  完成卡，仓库检查无文件变化。期间故意在已绑定的 Gitea 话题内发送 GitHub 文本，系统正确回执“沿用 huangdong/chatbi”，证明话题不能原地换 repo。Codex 尝试的 child-session 操作返回
+  `HTTP 409: Approval policy cannot be configured at session scope`，未创建额外可运行子会话，不影响父会话完成。
+
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
 - 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、
