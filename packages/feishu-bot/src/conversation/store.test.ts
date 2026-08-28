@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   claimThreadSelection,
+  getPendingRequest,
   listConversationSessions,
   lookupThreadMessageAlias,
   lookupThreadSession,
   releaseThreadSelection,
   storeThreadSession,
   storeThreadMessageAlias,
+  storePendingRequest,
+  updatePendingRequest,
   updateThreadSession,
 } from "./store";
 
@@ -217,5 +220,35 @@ describe("Feishu conversation session index", () => {
     await expect(claimThreadSelection(env, coordinates, "action-3")).resolves.toBe(false);
     await releaseThreadSelection(env, coordinates, "action-1");
     await expect(claimThreadSelection(env, coordinates, "action-4")).resolves.toBe(true);
+  });
+
+  it("increments pending selection revisions so older cards expire", async () => {
+    const env = { FEISHU_KV: new MemoryKv() as unknown as KVNamespace };
+    const pendingId = await storePendingRequest(env, {
+      tenantKey: "tenant",
+      chatId: "chat",
+      chatType: "group",
+      rootMessageId: "root",
+      threadId: "thread",
+      replyMode: "thread",
+      actorId: "feishu:tenant:user",
+      content: "检查项目",
+    });
+
+    await expect(getPendingRequest(env, pendingId)).resolves.toMatchObject({
+      selectionRevision: 0,
+    });
+    await expect(
+      updatePendingRequest(env, pendingId, { selectedConnectionId: "gitea-primary" })
+    ).resolves.toMatchObject({
+      selectedConnectionId: "gitea-primary",
+      selectionRevision: 1,
+    });
+    await expect(
+      updatePendingRequest(env, pendingId, { selectedRepositoryKey: "repo-chatbi" })
+    ).resolves.toMatchObject({
+      selectedRepositoryKey: "repo-chatbi",
+      selectionRevision: 2,
+    });
   });
 });

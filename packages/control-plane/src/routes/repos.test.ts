@@ -308,6 +308,46 @@ describe("repository list route", () => {
     const body = (await response.json()) as { repos: Array<{ owner: string }> };
     expect(body.repos.map((repository) => repository.owner).sort()).toEqual(["acme", "huangdong"]);
   });
+
+  it("bounds cold-catalog repository upserts while preserving catalog order", async () => {
+    let active = 0;
+    let maxActive = 0;
+    mockListRepositories.mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({
+        id: index + 1,
+        owner: "acme",
+        name: `repo-${index + 1}`,
+        fullName: `acme/repo-${index + 1}`,
+        description: null,
+        private: true,
+        archived: false,
+        defaultBranch: "main",
+      }))
+    );
+    mockUpsertRepository.mockImplementation(async (input: { name: string }) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return { id: `repo-${input.name}` };
+    });
+
+    const { handler, match } = getListHandler();
+    const response = await handler(
+      new Request("https://test.local/repos"),
+      { REPOS_CACHE: {} as KVNamespace, TOKEN_ENCRYPTION_KEY: "unused" } as Env,
+      match,
+      createContext()
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { repos: Array<{ name: string }> };
+    expect(body.repos.map((repository) => repository.name)).toEqual(
+      Array.from({ length: 20 }, (_, index) => `repo-${index + 1}`)
+    );
+    expect(maxActive).toBeGreaterThan(1);
+    expect(maxActive).toBeLessThanOrEqual(8);
+  });
 });
 
 describe("repository metadata routes", () => {

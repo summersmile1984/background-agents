@@ -34,6 +34,7 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     // New button cards carry the selection in value. Keep this optional so
     // already-sent select_static cards using action.option remain valid.
     connectionId: z.string().min(1).optional(),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("select_target"),
@@ -41,12 +42,14 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     connectionId: z.string().min(1),
     repositoryKey: z.string().min(1).optional(),
     page: z.number().int().nonnegative(),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("repository_page"),
     pendingId: z.string().uuid(),
     connectionId: z.string().min(1),
     page: z.number().int().nonnegative(),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("select_harness"),
@@ -54,6 +57,7 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     connectionId: z.string().min(1),
     repositoryKey: z.string().min(1),
     harness: agentHarnessSchema,
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("select_model"),
@@ -63,6 +67,7 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     harness: agentHarnessSchema,
     routeId: z.string().min(1),
     model: z.string().min(1),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("runtime_model_page"),
@@ -71,6 +76,7 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     repositoryKey: z.string().min(1),
     harness: agentHarnessSchema,
     page: z.number().int().nonnegative(),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
   z.object({
     action: z.literal("select_effort"),
@@ -81,6 +87,7 @@ const cardActionValueSchema = z.discriminatedUnion("action", [
     routeId: z.string().min(1),
     model: z.string().min(1),
     effort: z.string().min(1),
+    selectionRevision: z.number().int().nonnegative().optional(),
   }),
 ]);
 
@@ -168,7 +175,7 @@ export async function handleFeishuCardAction(
   }
   const { value, targetKey, tenantKey, chatId, openId, actionId } = action;
   if (!(await claimCardActionOnce(env, actionId))) return { ok: true, content: "该操作已处理。" };
-  const pending = await getPendingRequest(env, value.pendingId);
+  let pending = await getPendingRequest(env, value.pendingId);
   const actor = actorId(tenantKey, openId);
   if (
     !pending ||
@@ -177,6 +184,12 @@ export async function handleFeishuCardAction(
     pending.chatId !== chatId
   ) {
     return { ok: false, content: "该选择已过期或无权操作，请重新发起请求。" };
+  }
+  if (
+    value.selectionRevision !== undefined &&
+    value.selectionRevision !== pending.selectionRevision
+  ) {
+    return { ok: false, content: "这张卡片已过期，请使用该话题中最新的选择卡。" };
   }
   const coordinates = {
     tenantKey: pending.tenantKey,
@@ -220,6 +233,17 @@ export async function handleFeishuCardAction(
         );
         return { ok: false, content: "目录仍在刷新。" };
       }
+      if (value.action === "select_connection") {
+        const staged = await updatePendingRequest(env, value.pendingId, {
+          selectedConnectionId: connection.id,
+          selectedRepositoryKey: undefined,
+          runtime: undefined,
+        });
+        if (!staged) return { ok: false, content: "选择已过期，请重新发起请求。" };
+        pending = staged;
+      } else if (pending.selectedConnectionId !== connection.id) {
+        return { ok: false, content: "代码源选择已过期，请重新选择代码源。" };
+      }
       const repositories = targets.filter((target) => target.connectionId === connection.id);
       const page = value.action === "repository_page" ? value.page : 0;
       const pageCount = Math.max(1, Math.ceil(repositories.length / REPOSITORIES_PER_PAGE));
@@ -232,6 +256,7 @@ export async function handleFeishuCardAction(
           connection,
           repositories,
           page,
+          selectionRevision: pending.selectionRevision,
         })
       );
       return { ok: true, content: "请选择仓库。" };
@@ -261,6 +286,7 @@ export async function handleFeishuCardAction(
             target: selected,
             harnesses: runtimeCatalog.harnesses,
             commands: runtimeCatalog.commands,
+            selectionRevision: staged.selectionRevision,
           })
         );
         return { ok: true, content: "请选择 Harness。" };
@@ -302,6 +328,7 @@ export async function handleFeishuCardAction(
             target: selected,
             harness,
             page: value.page,
+            selectionRevision: pending.selectionRevision,
           })
         );
         return { ok: true, content: "请选择模型。" };
@@ -318,6 +345,7 @@ export async function handleFeishuCardAction(
             pendingId: value.pendingId,
             target: selected,
             harness,
+            selectionRevision: staged.selectionRevision,
           })
         );
         return { ok: true, content: "请选择模型。" };
@@ -343,6 +371,7 @@ export async function handleFeishuCardAction(
             model,
             routeId: value.routeId,
             commands: runtimeCatalog.commands,
+            selectionRevision: staged.selectionRevision,
           })
         );
         return { ok: true, content: "请选择 Effort。" };

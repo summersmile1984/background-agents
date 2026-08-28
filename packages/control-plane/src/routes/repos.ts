@@ -35,6 +35,10 @@ const CONNECTION_REPOS_CACHE_PREFIX = "repos:list:v4";
 const REPOS_CACHE_FRESH_MS = 5 * 60 * 1000; // Serve without revalidation for 5 minutes
 const REPOS_CACHE_KV_TTL_SECONDS = 3600; // Keep stale data in KV for 1 hour
 const CONNECTION_CATALOG_RESPONSE_TIMEOUT_MS = 16_000;
+// D1 round trips dominate a cold catalog refresh. Keep a small bounded
+// worker pool so a self-hosted SCM with many repositories does not time out
+// while still avoiding an unbounded burst of writes against D1.
+const CATALOG_UPSERT_CONCURRENCY = 8;
 
 /**
  * Cached repos list structure stored in KV.
@@ -112,6 +116,25 @@ interface ConnectionCatalogResult {
   revalidate?: Promise<ConnectionCatalogResult>;
 }
 
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (values.length === 0) return [];
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= values.length) return;
+      results[index] = await mapper(values[index]!, index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  return results;
+}
+
 async function refreshConnectionCatalog(
   env: Env,
   db: SqlDatabase,
@@ -124,29 +147,35 @@ async function refreshConnectionCatalog(
   const resolved = await registry(env, db).getConnection(connection.id);
   const upstream = await timeScmApi(() => resolved.provider.listRepositories());
   const repositoryStore = new ScmRepositoryStore(db);
-  const catalog: EnrichedRepository[] = [];
-  for (const repository of upstream) {
-    const urls = repositoryUrls(connection, repository);
-    const stored = await repositoryStore.upsertResolved({
-      connectionId: connection.id,
-      externalId: String(repository.id),
-      owner: repository.owner,
-      name: repository.name,
-      defaultBranch: repository.defaultBranch,
-      webUrl: urls.webUrl,
-      cloneUrl: urls.cloneUrl,
-      private: repository.private,
-      archived: repository.archived,
-    });
-    catalog.push({
+  const resolvedRepositories = await mapWithConcurrency(
+    upstream,
+    CATALOG_UPSERT_CONCURRENCY,
+    async (repository) => {
+      const urls = repositoryUrls(connection, repository);
+      const stored = await repositoryStore.upsertResolved({
+        connectionId: connection.id,
+        externalId: String(repository.id),
+        owner: repository.owner,
+        name: repository.name,
+        defaultBranch: repository.defaultBranch,
+        webUrl: urls.webUrl,
+        cloneUrl: urls.cloneUrl,
+        private: repository.private,
+        archived: repository.archived,
+      });
+      return { repository, urls, stored };
+    }
+  );
+  const catalog: EnrichedRepository[] = resolvedRepositories.map(
+    ({ repository, urls, stored }) => ({
       ...repository,
       ...urls,
       repositoryKey: stored.id,
       connectionId: connection.id,
       provider: connection.provider,
       connection: connectionSummary(connection),
-    });
-  }
+    })
+  );
 
   await applyCatalogMetadata(db, connection, catalog);
 

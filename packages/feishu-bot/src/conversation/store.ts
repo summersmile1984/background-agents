@@ -64,6 +64,8 @@ export interface FeishuPendingRequest extends FeishuConversationCoordinates {
   selectedRepositoryKey?: string;
   selectedConnectionId?: string;
   runtime?: RuntimeConfigFragment;
+  /** Monotonic card generation; older cards are rejected after every selection. */
+  selectionRevision: number;
   createdAt: number;
 }
 
@@ -126,6 +128,7 @@ const pendingRequestSchema: z.ZodType<FeishuPendingRequest> = z.object({
   selectedRepositoryKey: z.string().min(1).optional(),
   selectedConnectionId: z.string().min(1).optional(),
   runtime: runtimeConfigFragmentSchema.optional(),
+  selectionRevision: z.number().int().nonnegative().default(0),
   createdAt: z.number().finite().nonnegative(),
 });
 
@@ -360,10 +363,10 @@ export async function releaseThreadSelection(
 
 export async function storePendingRequest(
   env: Pick<Env, "FEISHU_KV">,
-  input: Omit<FeishuPendingRequest, "createdAt">
+  input: Omit<FeishuPendingRequest, "createdAt" | "selectionRevision">
 ): Promise<string> {
   const pendingId = crypto.randomUUID();
-  const record: FeishuPendingRequest = { ...input, createdAt: Date.now() };
+  const record: FeishuPendingRequest = { ...input, selectionRevision: 0, createdAt: Date.now() };
   await createKvCacheStore(env.FEISHU_KV).put(
     pendingKey(pendingId),
     JSON.stringify(pendingRequestSchema.parse(record)),
@@ -389,7 +392,9 @@ export async function getPendingRequest(
       createdAt: z.number().finite().nonnegative(),
     })
     .safeParse(value);
-  return legacy.success ? { ...legacy.data, chatType: "p2p", replyMode: "flat" } : null;
+  return legacy.success
+    ? { ...legacy.data, chatType: "p2p", replyMode: "flat", selectionRevision: 0 }
+    : null;
 }
 
 export async function updatePendingRequest(
@@ -401,7 +406,11 @@ export async function updatePendingRequest(
 ): Promise<FeishuPendingRequest | null> {
   const current = await getPendingRequest(env, pendingId);
   if (!current) return null;
-  const next = pendingRequestSchema.parse({ ...current, ...patch });
+  const next = pendingRequestSchema.parse({
+    ...current,
+    ...patch,
+    selectionRevision: current.selectionRevision + 1,
+  });
   await createKvCacheStore(env.FEISHU_KV).put(pendingKey(pendingId), JSON.stringify(next), {
     expirationTtl: PENDING_TTL_SECONDS,
   });

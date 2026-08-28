@@ -72,6 +72,22 @@ const payload = {
   },
 };
 
+function payloadWithRevision(selectionRevision: number) {
+  return {
+    ...payload,
+    header: { event_id: `action-revision-${selectionRevision}`, tenant_key: "tenant" },
+    event: {
+      ...payload.event,
+      action: {
+        value: {
+          ...payload.event.action.value,
+          selectionRevision,
+        },
+      },
+    },
+  };
+}
+
 describe("handleFeishuCardAction topic binding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -143,6 +159,26 @@ describe("handleFeishuCardAction topic binding", () => {
       "action-1"
     );
     expect(mocks.deletePendingRequest).toHaveBeenCalledWith(expect.anything(), pendingId);
+  });
+
+  it("rejects a card from an older staged selection revision", async () => {
+    mocks.getPendingRequest.mockResolvedValue({
+      ...(await mocks.getPendingRequest()),
+      selectionRevision: 1,
+    });
+
+    const result = await handleFeishuCardAction(
+      payloadWithRevision(0),
+      {} as never,
+      "trace-stale-revision"
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      content: "这张卡片已过期，请使用该话题中最新的选择卡。",
+    });
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+    expect(mocks.startNewSession).not.toHaveBeenCalled();
   });
 
   it("stages repository selection before choosing a ready harness", async () => {

@@ -84,8 +84,10 @@ function buttonRow(input: {
 export function buildConnectionPickerCard(input: {
   pendingId: string;
   connections: FeishuRepositoryConnection[];
+  selectionRevision?: number;
 }): FeishuCard {
   const card = title("选择代码源");
+  const selectionRevision = input.selectionRevision ?? 0;
   elements(card).push(
     {
       tag: "div",
@@ -104,6 +106,7 @@ export function buildConnectionPickerCard(input: {
           action: "select_connection",
           pendingId: input.pendingId,
           connectionId: connection.id,
+          selectionRevision,
         },
       })
     )
@@ -116,11 +119,13 @@ export function buildRepositoryPickerCard(input: {
   connection: FeishuRepositoryConnection;
   repositories: FeishuRepositoryTarget[];
   page: number;
+  selectionRevision?: number;
 }): FeishuCard {
   const pageCount = Math.max(1, Math.ceil(input.repositories.length / REPOSITORIES_PER_PAGE));
   const page = Math.min(Math.max(0, input.page), pageCount - 1);
   const offset = page * REPOSITORIES_PER_PAGE;
   const visible = input.repositories.slice(offset, offset + REPOSITORIES_PER_PAGE);
+  const selectionRevision = input.selectionRevision ?? 0;
   const card = title(`选择 ${input.connection.label} 仓库`);
   const navigationActions: Record<string, unknown>[] = [];
   if (page > 0) {
@@ -133,6 +138,7 @@ export function buildRepositoryPickerCard(input: {
         pendingId: input.pendingId,
         connectionId: input.connection.id,
         page: page - 1,
+        selectionRevision,
       },
     });
   }
@@ -146,6 +152,7 @@ export function buildRepositoryPickerCard(input: {
         pendingId: input.pendingId,
         connectionId: input.connection.id,
         page: page + 1,
+        selectionRevision,
       },
     });
   }
@@ -166,6 +173,7 @@ export function buildRepositoryPickerCard(input: {
           connectionId: input.connection.id,
           repositoryKey: repository.repositoryKey,
           page,
+          selectionRevision,
         },
       })
     ),
@@ -190,8 +198,10 @@ export function buildRuntimeHarnessPickerCard(input: {
   target: FeishuRepositoryTarget;
   harnesses: readonly RuntimeHarnessOption[];
   commands?: readonly RuntimeCommandOption[];
+  selectionRevision?: number;
 }): FeishuCard {
   const card = title("选择 Harness");
+  const selectionRevision = input.selectionRevision ?? 0;
   const ready = input.harnesses.filter(
     (harness) => harness.ready && readyModels(harness).length > 0
   );
@@ -213,6 +223,7 @@ export function buildRuntimeHarnessPickerCard(input: {
           connectionId: input.target.connectionId,
           repositoryKey: input.target.repositoryKey,
           harness: harness.harness,
+          selectionRevision,
         },
       })
     )
@@ -247,6 +258,7 @@ export function buildRuntimeModelPickerCard(input: {
   target: FeishuRepositoryTarget;
   harness: RuntimeHarnessOption;
   page?: number;
+  selectionRevision?: number;
 }): FeishuCard {
   const card = title(`选择 ${input.harness.displayName} 模型`);
   const allModels = readyModels(input.harness);
@@ -256,6 +268,7 @@ export function buildRuntimeModelPickerCard(input: {
     page * RUNTIME_MODELS_PER_PAGE,
     (page + 1) * RUNTIME_MODELS_PER_PAGE
   );
+  const selectionRevision = input.selectionRevision ?? 0;
   const navigationActions: Record<string, unknown>[] = [];
   if (page > 0) {
     navigationActions.push({
@@ -269,6 +282,7 @@ export function buildRuntimeModelPickerCard(input: {
         repositoryKey: input.target.repositoryKey,
         harness: input.harness.harness,
         page: page - 1,
+        selectionRevision,
       },
     });
   }
@@ -284,6 +298,7 @@ export function buildRuntimeModelPickerCard(input: {
         repositoryKey: input.target.repositoryKey,
         harness: input.harness.harness,
         page: page + 1,
+        selectionRevision,
       },
     });
   }
@@ -306,6 +321,7 @@ export function buildRuntimeModelPickerCard(input: {
           harness: input.harness.harness,
           routeId: model.routeId,
           model: model.model,
+          selectionRevision,
         },
       })
     ),
@@ -321,8 +337,10 @@ export function buildRuntimeEffortPickerCard(input: {
   model: RuntimeModelOption;
   routeId: string;
   commands?: readonly RuntimeCommandOption[];
+  selectionRevision?: number;
 }): FeishuCard {
   const card = title("选择 Effort");
+  const selectionRevision = input.selectionRevision ?? 0;
   const efforts = input.model.efforts;
   elements(card).push({
     tag: "div",
@@ -344,6 +362,7 @@ export function buildRuntimeEffortPickerCard(input: {
         routeId: input.routeId,
         model: input.model.model,
         effort: effort.value,
+        selectionRevision,
       },
     })
   );
@@ -360,6 +379,7 @@ export function buildRuntimeEffortPickerCard(input: {
         routeId: input.routeId,
         model: input.model.model,
         effort: "inherit",
+        selectionRevision,
       },
     })
   );
