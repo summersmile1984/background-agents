@@ -325,12 +325,63 @@ describe("handleFeishuEvent receipt", () => {
         }),
       })
     );
+    expect(mocks.replySessionText).toHaveBeenNthCalledWith(
+      1,
+      groupEnv,
+      expect.objectContaining({ rootMessageId: "root-1", threadId: "thread-1" }),
+      expect.stringContaining("本话题沿用已绑定仓库，无需重新选择")
+    );
     expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
     expect(mocks.updateThreadSession).toHaveBeenCalledWith(
       groupEnv,
       expect.objectContaining({ rootMessageId: "root-1" }),
       expect.objectContaining({ state: "active", lastMessageId: "follow-up-1" })
     );
+  });
+
+  it("does not reveal the bound repository before rejecting another actor", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:owner",
+      targetLabel: "private-owner/secret-repository",
+      chatType: "group",
+      rootMessageId: "root-private",
+      threadId: "thread-private",
+      replyMode: "thread",
+    });
+    const crossActorEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "group" as const,
+          message_id: "message-cross-actor",
+          root_id: "root-private",
+          thread_id: "thread-private",
+          mentions: [{ id: { open_id: "bot-1" } }],
+          content: JSON.stringify({ text: "继续" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const groupEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_THREAD_REPLIES_ENABLED: "true",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(crossActorEvent, groupEnv, "trace-cross-actor");
+
+    const replies = mocks.replySessionText.mock.calls.map(([, , text]) => text);
+    expect(replies).toEqual([
+      "已收到，正在检查这个话题的会话状态。",
+      "只有发起该会话的用户可以在此主题继续操作。",
+    ]);
+    expect(replies.join(" ")).not.toContain("private-owner/secret-repository");
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
   });
 
   it("keeps two topic roots routed to two independent sessions", async () => {

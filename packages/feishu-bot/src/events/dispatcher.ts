@@ -95,6 +95,18 @@ export function canReuseThreadSession(existing: FeishuThreadSession): boolean {
   return existing.state !== "stale" && existing.harness === defaultHarnessForModel(existing.model);
 }
 
+function receiptTextForConversation(existing: FeishuThreadSession | null, actor: string): string {
+  if (!existing) {
+    return "已收到，正在工作中。需要选择仓库时，我会继续发送选择卡片。";
+  }
+  if (existing.actorId === actor && canReuseThreadSession(existing)) {
+    return `已收到，正在继续处理 ${existing.targetLabel}。本话题沿用已绑定仓库，无需重新选择。`;
+  }
+  // Do not reveal the bound repository before the actor/runtime checks in
+  // deliverFollowUp have accepted this request.
+  return "已收到，正在检查这个话题的会话状态。";
+}
+
 async function deliverFollowUp(input: {
   env: Env;
   coordinates: FeishuConversationCoordinates;
@@ -276,7 +288,7 @@ export async function handleFeishuEvent(
     const receipt = await replySessionText(
       env,
       coordinates,
-      "已收到，正在工作中。需要选择仓库时，我会继续发送选择卡片。"
+      receiptTextForConversation(existing, actor)
     );
     if (receipt?.threadId && receipt.threadId !== coordinates.threadId) {
       coordinates = { ...coordinates, threadId: receipt.threadId, replyMode: "thread" };
