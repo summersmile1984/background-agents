@@ -152,6 +152,15 @@ describe("scmCloneIdentityForConfig", () => {
   it("keeps legacy providers on their configured identity without a proxy", () => {
     expect(scmCloneIdentityForConfig("github")).toEqual(scmCloneIdentity("github"));
   });
+
+  it.each([
+    "http://control-plane.example/git/session/sess-1",
+    "https://user:secret@control-plane.example/git/session/sess-1",
+    "https://control-plane.example/git/session/sess-1?token=leak",
+    "https://control-plane.example/git/session/sess-1#fragment",
+  ])("rejects an unsafe proxy URL: %s", (proxyBaseUrl) => {
+    expect(() => scmCloneIdentityForConfig("gitea", proxyBaseUrl)).toThrow("SCM Git proxy URL");
+  });
 });
 
 describe("applyScmCloneEnv", () => {
@@ -456,6 +465,18 @@ describe("buildImageBuildEnvVars", () => {
     expect(envVars.OI_SCM_PROXY_MODE).toBe("1");
     expect(envVars.SCM_GIT_CAPABILITY).toBe("oig-build-capability");
     expect(envVars).not.toHaveProperty("VCS_CLONE_TOKEN");
+  });
+
+  it("rejects unsafe proxy URLs before building an image environment", () => {
+    expect(() =>
+      buildImageBuildEnvVars({
+        sandboxId: "build-env-env_flagship",
+        repositories,
+        scmIdentity: scmCloneIdentity("github"),
+        cloneToken: "oig-build-capability",
+        cloneBaseUrl: "https://control-plane.example/git/build/build-1?token=leak",
+      })
+    ).toThrow("SCM Git proxy URL");
   });
 
   it("throws when the repository list is empty", () => {

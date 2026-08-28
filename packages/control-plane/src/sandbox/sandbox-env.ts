@@ -231,6 +231,30 @@ export function scmCloneIdentity(scmProvider: SourceControlProviderName): ScmClo
   return identity;
 }
 
+function parseScmProxyBaseUrl(value: string): { url: string; host: string } {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed || /\p{Cc}/u.test(trimmed)) {
+    throw new Error("SCM Git proxy URL must be an absolute HTTPS URL");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("SCM Git proxy URL must be an absolute HTTPS URL");
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    !parsed.host ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error("SCM Git proxy URL must be an absolute HTTPS URL without credentials or query");
+  }
+  return { url: trimmed, host: parsed.host };
+}
+
 /**
  * Resolve the identity used to seed a sandbox's Git environment. A
  * connection-aware proxy is independent of the deployment-level provider,
@@ -241,10 +265,7 @@ export function scmCloneIdentityForConfig(
   proxyBaseUrl?: string | null
 ): ScmCloneIdentity {
   if (!proxyBaseUrl) return scmCloneIdentity(scmProvider);
-  const parsed = new URL(proxyBaseUrl);
-  if (parsed.protocol !== "https:" || !parsed.host) {
-    throw new Error("SCM Git proxy URL must be an absolute HTTPS URL");
-  }
+  const parsed = parseScmProxyBaseUrl(proxyBaseUrl);
   return {
     host: parsed.host,
     cloneUsername: "open-inspect-capability",
@@ -360,17 +381,19 @@ export function buildSandboxEnvVars(
     );
   }
 
-  const proxyBaseUrl = config.scmGitProxyBaseUrl?.trim().replace(/\/+$/, "");
+  const proxyBaseUrl = config.scmGitProxyBaseUrl
+    ? parseScmProxyBaseUrl(config.scmGitProxyBaseUrl)
+    : undefined;
   const cloneIdentity = proxyBaseUrl
     ? {
-        host: new URL(proxyBaseUrl).host,
+        host: proxyBaseUrl.host,
         cloneUsername: "open-inspect-capability",
-        secretHosts: [new URL(proxyBaseUrl).host],
+        secretHosts: [proxyBaseUrl.host],
       }
     : options.scmIdentity;
   applyScmCloneEnv(envVars, cloneIdentity);
   if (proxyBaseUrl) {
-    envVars.VCS_CLONE_BASE_URL = proxyBaseUrl;
+    envVars.VCS_CLONE_BASE_URL = proxyBaseUrl.url;
     envVars.OI_SCM_PROXY_MODE = "1";
     if (!config.scmGitCapability) {
       throw new Error("SCM Git proxy mode requires a repository-scoped capability");
@@ -458,6 +481,10 @@ export function buildImageBuildEnvVars(options: ImageBuildEnvVarsOptions): Recor
     throw new Error("image build requires at least one repository");
   }
 
+  const cloneBaseUrl = options.cloneBaseUrl
+    ? parseScmProxyBaseUrl(options.cloneBaseUrl)
+    : undefined;
+
   const envVars: Record<string, string> = { ...(options.baseEnvVars ?? {}) };
   for (const key of RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS) {
     delete envVars[key];
@@ -478,13 +505,9 @@ export function buildImageBuildEnvVars(options: ImageBuildEnvVarsOptions): Recor
   // A clone base URL is the server-side SCM proxy contract. The capability is
   // supplied separately by the provider, so never forward a legacy/provider
   // token into the proxy-mode build sandbox.
-  applyScmCloneEnv(
-    envVars,
-    options.scmIdentity,
-    options.cloneBaseUrl ? undefined : options.cloneToken
-  );
-  if (options.cloneBaseUrl) {
-    envVars.VCS_CLONE_BASE_URL = options.cloneBaseUrl.replace(/\/+$/, "");
+  applyScmCloneEnv(envVars, options.scmIdentity, cloneBaseUrl ? undefined : options.cloneToken);
+  if (cloneBaseUrl) {
+    envVars.VCS_CLONE_BASE_URL = cloneBaseUrl.url;
     envVars.OI_SCM_PROXY_MODE = "1";
     if (options.cloneToken) {
       envVars[SCM_GIT_CAPABILITY_ENV_VAR] = options.cloneToken;
