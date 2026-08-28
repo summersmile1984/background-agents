@@ -102,6 +102,7 @@ describe("route policy table", () => {
     ["PATCH", "/sessions/session-1/read-state"],
     ["GET", "/sessions/session-1/sandbox-access"],
     ["GET", "/sessions/session-1/tunnel-urls"],
+    ["POST", "/sessions/session-1/slack-notify"],
     ["GET", "/sessions/session-1/commit-signing"],
     ["GET", "/sessions/session-1/participant-profiles"],
     ["POST", "/sessions/session-1/openai-token-refresh"],

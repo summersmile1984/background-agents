@@ -22,7 +22,7 @@ import {
   type RouteAuthentication,
   type RequestContext,
   defineRoute,
-  GITHUB_SANDBOX_FALLBACK_ROUTE,
+  SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
   parsePattern,
   json,
   error,
@@ -283,7 +283,7 @@ export const routes: Route[] = [
   // Session management
   ...sessionRoutes,
   // Agent-initiated Slack notification (sandbox-authenticated)
-  defineRoute(GITHUB_SANDBOX_FALLBACK_ROUTE, {
+  defineRoute(SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE, {
     method: "POST",
     pattern: parsePattern("/sessions/:id/slack-notify"),
     handler: handleSlackNotify,
