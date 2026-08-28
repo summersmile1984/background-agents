@@ -606,7 +606,7 @@ flag 关闭时出站 body 与当前生产等价。
   `isProcessing`，命令路由以该字段或沙盒 running 任一条件开放
   `/stop`，从而能停止浏览器工具卡住但沙盒心跳仍正常的任务。
 - 本地新增 Feishu dispatcher 命令/跨用户测试和 Control
-  Plane 遗留队列测试；部署后仍需在真实飞书话题验证命令回执、stop
+  Plane 遗留队列测试；真实飞书话题已验证命令回执、stop
   confirmation、队列恢复，以及旧消息不会触发 Harness。
 
 发布验证记录：`35756563`（命令路由）、`bae9358d`（processing-aware stop）和
