@@ -430,8 +430,8 @@ flag 关闭时出站 body 与当前生产等价。
 - `f513d3c0` 与 `eea83f19` 已通过 CI/Terraform 并部署到生产 Feishu Worker；最新版本为
   `2b271176-47bd-4481-b576-63e5efb4820b`，`/healthz` 返回
   `{"ok":true,"service":"feishu-bot"}`。本轮补齐 `chat_type=topic_group`
-  的 schema 兼容和内部 group 归一化，并以 94 项 Feishu bot 测试覆盖；私聊带 `root_id`
-  的引用回复、PR 完成卡的同话题投递和关闭线程 rollout
+  的 schema 兼容和内部 group 归一化，并以 95 项 Feishu bot 测试覆盖；私聊带 `root_id` 或仅带
+  `parent_id` 的引用回复、PR 完成卡的同话题投递和关闭线程 rollout
   flag 的 flat 降级也已加入回归测试，分别按根消息续办、原话题附带 PR
   URL，以及不影响既有 session 的方式校验。
 
