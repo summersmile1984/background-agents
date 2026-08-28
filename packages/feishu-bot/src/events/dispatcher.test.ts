@@ -251,6 +251,40 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("falls back to flat replies when the new-thread rollout flag is disabled", async () => {
+    const groupEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "group" as const,
+          mentions: [{ id: { open_id: "bot-1" } }],
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const rollbackEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_THREAD_REPLIES_ENABLED: "false",
+      FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED: "false",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(groupEvent, rollbackEnv, "trace-rollback");
+
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      rollbackEnv,
+      expect.objectContaining({ chatType: "group", replyMode: "flat" }),
+      expect.stringContaining("已收到")
+    );
+    expect(mocks.replySessionCard).toHaveBeenCalledWith(
+      rollbackEnv,
+      expect.objectContaining({ chatType: "group", replyMode: "flat" }),
+      expect.any(Object)
+    );
+  });
+
   it("accepts the rich-text payload produced by a topic-group root", async () => {
     const groupEvent = {
       ...event,
