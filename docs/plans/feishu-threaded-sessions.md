@@ -798,6 +798,8 @@ feishu_error_code
 - 提交 `1cf53ad6` 已通过 CI `33205431628` 与 Terraform 生产发布 `33205431594`；发布后 Feishu
   `/healthz` 和 Control Plane `/health`
   均正常。该实现只新增显式寻址，不改变原有话题绑定或默认新顶层任务语义。
+- 随后的消息别名修复提交 `b90a9333` 已由 Terraform run `33206263525` 成功发布；最新 CI run
+  `33206294469` 通过。发布后两个健康端点仍分别返回 `{"ok":true}` 与 `{"status":"healthy"}`。
 
 ### 7.11 回滚兼容契约（2026-08-29）
 
