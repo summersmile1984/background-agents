@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   listConversationSessions: vi.fn(),
   findConversationSessionByShortId: vi.fn(),
   lookupThreadMessageAlias: vi.fn(),
+  storeThreadMessageAlias: vi.fn(),
   storePendingRequest: vi.fn(),
   listRepositoryCatalog: vi.fn(),
   getRuntimeCatalog: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("../conversation/store", () => ({
   listConversationSessions: mocks.listConversationSessions,
   findConversationSessionByShortId: mocks.findConversationSessionByShortId,
   lookupThreadMessageAlias: mocks.lookupThreadMessageAlias,
+  storeThreadMessageAlias: mocks.storeThreadMessageAlias,
   lookupThreadSession: mocks.lookupThreadSession,
   storePendingRequest: mocks.storePendingRequest,
   storeThreadSession: vi.fn(),
@@ -183,6 +185,7 @@ describe("handleFeishuEvent receipt", () => {
     mocks.resolveFeishuBotOpenId.mockResolvedValue("bot-1");
     mocks.lookupThreadSession.mockResolvedValue(null);
     mocks.lookupThreadMessageAlias.mockResolvedValue(null);
+    mocks.storeThreadMessageAlias.mockResolvedValue(undefined);
     mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
     mocks.invokeRuntimeCommand.mockResolvedValue({
       ok: true,
@@ -813,6 +816,11 @@ describe("handleFeishuEvent receipt", () => {
         content: "检查第二个会话",
         callbackContext: expect.objectContaining({ rootMessageId: "root-two" }),
       })
+    );
+    expect(mocks.storeThreadMessageAlias).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ rootMessageId: "root-two", replyMode: "flat" }),
+      "explicit-short-id"
     );
     expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
   });

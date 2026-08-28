@@ -13,6 +13,7 @@ import {
   listConversationSessions,
   lookupThreadMessageAlias,
   lookupThreadSession,
+  storeThreadMessageAlias,
   storePendingRequest,
   storeThreadSession,
   updateThreadSession,
@@ -527,6 +528,9 @@ export async function handleFeishuEvent(
       return;
     }
     content = explicitReference.prompt;
+    // Keep quote replies to this explicit top-level message on the selected
+    // session as well; Feishu may provide only this message as parent_id.
+    await storeThreadMessageAlias(env, coordinates, messageId).catch(() => undefined);
   }
 
   const slashName = parseRuntimeCommand(content);
