@@ -601,6 +601,10 @@ flag 关闭时出站 body 与当前生产等价。
 - Control Plane 增加来源限定的遗留保护：命令路由上线前已经入队的 Feishu `/stop`
   等已知命令会从 pending 队列丢弃，不会在旧视觉请求结束后再次执行。Web/Slack 的 pending
   prompt 取消语义不变。
+- 真实回归进一步发现：沙盒从 `running` 回落到 `ready` 但仍有 `processing`
+  消息时，原有 stop 可用性判断会误报“当前状态不可用”。内部状态现在显式返回
+  `isProcessing`，命令路由以该字段或沙盒 running 任一条件开放
+  `/stop`，从而能停止浏览器工具卡住但沙盒心跳仍正常的任务。
 - 本地新增 Feishu dispatcher 命令/跨用户测试和 Control
   Plane 遗留队列测试；部署后仍需在真实飞书话题验证命令回执、stop
   confirmation、队列恢复，以及旧消息不会触发 Harness。

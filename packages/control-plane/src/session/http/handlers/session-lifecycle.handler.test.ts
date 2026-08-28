@@ -92,6 +92,7 @@ function createHandler() {
     replaceSessionRepositories: vi.fn(),
     createParticipant: vi.fn(),
     getPendingOrProcessingCount: vi.fn(() => 0),
+    getProcessingMessage: vi.fn(() => null),
     getMessageCount: vi.fn(() => 0),
   };
   const sandboxRepository = { createSandbox: vi.fn() } as unknown as SandboxRepository;
@@ -670,6 +671,7 @@ describe("createSessionLifecycleHandler", () => {
       currentSha: "head-sha",
       opencodeSessionId: "oc-1",
       status: "active",
+      isProcessing: false,
       model: "anthropic/claude-haiku-4-5",
       agentHarness: "opencode",
       reasoningEffort: "high",

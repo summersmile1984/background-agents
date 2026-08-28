@@ -18,6 +18,7 @@ import { sessionRoute, type SessionRouteContext } from "./session-route";
 
 interface RuntimeState {
   status?: string;
+  isProcessing?: boolean;
   sandbox?: { status?: string } | null;
 }
 
@@ -55,7 +56,7 @@ async function sessionState(
 }
 
 function isRunning(state: RuntimeState | null): boolean {
-  return state?.sandbox?.status === "running";
+  return state?.isProcessing === true || state?.sandbox?.status === "running";
 }
 
 async function recordCommand(input: {

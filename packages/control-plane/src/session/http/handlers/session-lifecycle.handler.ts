@@ -388,6 +388,7 @@ export function createSessionLifecycleHandler(
         agentHarness: session.agent_harness ?? DEFAULT_AGENT_HARNESS,
         agentSessionId: session.agent_session_id,
         status: session.status,
+        isProcessing: deps.messageRepository.getProcessingMessage() !== null,
         model: session.model,
         reasoningEffort: session.reasoning_effort ?? undefined,
         createdAt: session.created_at,
