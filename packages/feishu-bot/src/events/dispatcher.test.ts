@@ -422,4 +422,27 @@ describe("handleFeishuEvent receipt", () => {
       expect.stringContaining("后续处理暂时失败")
     );
   });
+
+  it("reports a refreshing repository catalog distinctly from an empty deployment", async () => {
+    mocks.listRepositoryCatalog.mockResolvedValueOnce({
+      connections: [
+        {
+          id: "gitea-default",
+          label: "Gitea",
+          provider: "gitea",
+          repositoryCount: 0,
+          catalogStatus: "refreshing",
+        },
+      ],
+      targets: [],
+    });
+
+    await handleFeishuEvent(event, env, "trace-refreshing");
+
+    expect(mocks.replySessionText).toHaveBeenLastCalledWith(
+      env,
+      expect.any(Object),
+      expect.stringContaining("正在刷新")
+    );
+  });
 });

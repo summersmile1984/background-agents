@@ -325,10 +325,15 @@ export async function handleFeishuEvent(
     const inferred = inferRepositoryTarget(targets, content);
     if (!inferred) {
       if (targets.length === 0) {
+        const refreshing = catalog.connections.some(
+          (connection) => connection.catalogStatus === "refreshing"
+        );
         await replySessionText(
           env,
           coordinates,
-          "当前没有可用仓库。请在 Open-Inspect 设置中检查 GitHub/Gitea connection。 "
+          refreshing
+            ? "仓库目录正在刷新，请稍后在这个话题中重新发送请求。"
+            : "当前没有可用仓库。请在 Open-Inspect 设置中检查 GitHub/Gitea connection。"
         );
         return;
       }

@@ -1,8 +1,10 @@
 import { controlPlaneReposResponseSchema } from "@open-inspect/shared/types/repository-catalog";
 import type { z } from "zod";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "./internal-auth";
+import { createLogger } from "./logger";
 
 const CATALOG_FETCH_TIMEOUT_MS = 20_000;
+const log = createLogger("repository-targets");
 
 export interface FeishuRepositoryTarget {
   repositoryKey: string;
@@ -60,10 +62,37 @@ async function fetchRepositoryCatalog(
         signal: AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS),
       }
     );
-    if (!response.ok) return null;
-    const parsed = controlPlaneReposResponseSchema.safeParse(await response.json());
-    return parsed.success ? parsed.data : null;
-  } catch {
+    if (!response.ok) {
+      log.warn("catalog.fetch_failed", {
+        trace_id: traceId,
+        http_status: response.status,
+      });
+      return null;
+    }
+    const parsed = controlPlaneReposResponseSchema.safeParse(
+      await response.json().catch(() => null)
+    );
+    if (!parsed.success) {
+      log.error("catalog.parse_failed", {
+        trace_id: traceId,
+        http_status: response.status,
+        issue_paths: parsed.error.issues.slice(0, 8).map((issue) => issue.path.join(".")),
+      });
+      return null;
+    }
+    log.info("catalog.fetched", {
+      trace_id: traceId,
+      repository_count: parsed.data.repos.length,
+      connection_count: parsed.data.connections.length,
+      connection_error_count: parsed.data.connectionErrors.length,
+      cached: parsed.data.cached,
+    });
+    return parsed.data;
+  } catch (error) {
+    log.error("catalog.fetch_error", {
+      trace_id: traceId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
     return null;
   }
 }
@@ -95,7 +124,7 @@ export async function listRepositoryCatalog(
   traceId?: string
 ): Promise<FeishuRepositoryCatalog> {
   const initial = await fetchRepositoryCatalog(env, traceId);
-  if (!initial) return { targets: [], connections: [] };
+  if (!initial) throw new Error("Repository catalog request failed");
 
   const unavailable = new Set(initial.connectionErrors.map((entry) => entry.connectionId));
   const targets = uniqueTargets(toTargets(initial));

@@ -135,6 +135,16 @@ describe("listRepositoryCatalog", () => {
       catalogStatus: "refreshing",
     });
   });
+
+  it("surfaces a failed catalog request instead of claiming that no repositories exist", async () => {
+    mockSignedControlPlaneFetch.mockResolvedValueOnce(
+      new Response("unauthorized", { status: 401 })
+    );
+
+    await expect(listRepositoryCatalog(env, "trace-failed")).rejects.toThrow(
+      "Repository catalog request failed"
+    );
+  });
 });
 
 describe("inferRepositoryBranch", () => {
