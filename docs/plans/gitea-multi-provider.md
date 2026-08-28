@@ -2,11 +2,11 @@
 
 ## Status
 
-Implemented on the feature branch through the expand/dual-read phase; production rollout remains
-gated. ADR 0004 replaces ADR 0001 for connection-aware code, but a second connection cannot be
-enabled until the online backfill preflight is clean. The configured target Gitea Enterprise build
-also remains rejected until it is upgraded or the operator records exact vendor-backed security
-backport evidence.
+Implemented on `main` through the expand/dual-read phase; production rollout is operator-controlled.
+ADR 0004 replaces ADR 0001 for connection-aware code, and a second connection is enabled only after
+the online backfill preflight is clean. Gitea version discovery is diagnostic and is not a
+compatibility gate; security advisories remain an operator risk decision with compensating controls
+documented below.
 
 Implemented scope includes the connection registry and encrypted PAT storage, Gitea REST adapter,
 stable repository catalog and UI selection, session/environment/automation pinning, server-side Git
@@ -46,10 +46,10 @@ The first production slice should use these invariants:
 The configured target instance reports Gitea Enterprise `23.8.0` and exposes Swagger 2.0 at
 `/swagger.v1.json`. Gitea's official Enterprise versioning rule maps this to Community `1.23.8` plus
 Enterprise patch level `0`. The required repository, branch, pull-request, webhook, and
-repository-by-ID operations exist. Compatibility should be developed against that exact contract,
-but production enablement must be gated on a vendor-supported security build with the relevant
-upstream fixes or documented backports; the reported version line is affected by multiple later
-Gitea security advisories.
+repository-by-ID operations exist. The adapter is contract-tested against that instance, while the
+reported version remains diagnostic rather than a runtime compatibility gate. The version is
+affected by later Gitea security advisories; operators should apply the documented controls and
+decide whether their deployment risk policy permits enabling the connection.
 
 ## Goals
 
@@ -985,22 +985,25 @@ Use a hashed or opaque connection ID in shared telemetry if forge hostnames are 
 sensitive. Set alerts for authentication failure spikes, contract mismatches, and repeated broker
 host denials.
 
-### Security release gate
+### Security advisory and operator controls (not a compatibility gate)
 
 The target currently reports Enterprise 23.8.0, which corresponds to Community 1.23.8 plus an
-Enterprise patch level. Compatibility and security support are distinct:
+Enterprise patch level. Compatibility and security support are distinct. Open-Inspect records the
+version and exposes connection health, but deliberately does not reject a connection solely based on
+its version:
 
 - The adapter must contract-test the target version so development can proceed.
-- Production enablement requires confirmation from the Enterprise vendor that applicable upstream
-  fixes are included, or an upgrade to a line corresponding to upstream Gitea 1.27.1+ (prefer the
-  current supported patch release).
-- The gate must specifically cover:
+- Operators should obtain vendor security support or apply compensating controls before exposing
+  production repositories; this is an operational recommendation, not an application-level version
+  gate.
+- The security review should specifically cover:
   - OAuth scope enforcement bypass through HTTP Basic (`GHSA-9r5x-wg6m-x2rc`, fixed 1.26.2);
   - restricted-token creation of higher-scope tokens (`GHSA-683j-3ff6-hh2x`, fixed 1.27.0);
   - webhooks continuing after collaborator revocation (`GHSA-66m4-5jjr-2rg5`, fixed 1.27.0);
   - diffpatch Git hook installation RCE (`GHSA-rcr6-4jqh-j84m`, fixed 1.27.1).
-- Until the gate passes, use only a narrowly permissioned test account/repository and do not expose
-  production source code through the connection.
+- If the operator accepts the risk, use a narrowly permissioned service account, limit repository
+  membership, and audit the connection. Open-Inspect still refuses token creation, keeps PATs in the
+  control plane, and blocks unsafe proxy origins regardless of the reported version.
 
 If an upgrade cannot happen immediately, compensating controls include closed public registration,
 blocking the diffpatch API at the reverse proxy, refusing all token-creation calls through
