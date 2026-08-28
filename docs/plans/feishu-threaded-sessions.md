@@ -561,6 +561,19 @@ flag 关闭时出站 body 与当前生产等价。
 - 已有生产话题继续沿用 `huangdong/chatbi`
   的同一 session；服务启动验证显示仓库未修改，但该仓库的 README 依赖 PostgreSQL/Cube，生产 sandbox 镜像没有 Docker，因此只能启动前端临时服务，数据库相关功能不计入本轮通过项。
 
+### 7.5 发布后复核（2026-08-29）
+
+- 生产健康检查通过：Feishu Worker `/healthz` 返回 `{"ok":true,"service":"feishu-bot"}`；Control
+  Plane `/health` 返回 `{"status":"healthy","service":"open-inspect-control-plane"}`。
+- 发布后本地回归再次通过：Feishu bot 17 个测试文件/102 项，sandbox visual-verification
+  47 项通过（1 项按设计跳过），全仓 typecheck 通过；工作区保持干净。
+- 通过已登录飞书网页确认生产卡片仍显示 Gitea 仓库、Harness、模型和 Effort，并保留同话题完成消息。浏览器当前可见的独立 AIO 预览页也能加载并显示
+  `Chromium + CDP + Browser MCP + Cube ready`。
+- 仍不把以下项目标记为完成：从真实 Feishu 话题上传截图/preview
+  artifact、第二个飞书身份的跨用户拒绝、手机端键盘遮挡、关闭 rollout
+  flag 的回滚演练。当前环境只有一个飞书身份，且 `huangdong/chatbi`
+  没有仓库声明的视觉验证服务；这些项目需在具备相应 fixture/账号时单独验收。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
