@@ -616,6 +616,11 @@ flag 关闭时出站 body 与当前生产等价。
 `/stop` 未再送入 Harness。视觉截图请求本轮因 `chatbi`
 缺少声明的视觉服务且原生浏览器调用无响应而停止，截图/preview artifact 仍不能标记为通过。
 
+在 2026-08-29 04:38（飞书网页生产会话）又做了一次无副作用的同话题回归：向已绑定 `huangdong/chatbi`
+的话题发送 `/status`，先收到“已收到命令，正在处理”，随后收到
+`huangdong/chatbi@main`、`codex:openai:subscription`、`openai/gpt-5.6-luna`、Effort、`session: completed`、`sandbox: stopped`
+的状态回执。该消息没有重新要求选择 repo，也没有创建新沙盒，证明已绑定 Gitea 话题的命令仍能沿用原 session 路由。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
