@@ -406,7 +406,7 @@ export interface ImageBuildEnvVarsOptions {
   repositories: SessionRepositoryInfo[];
   /** Resolved clone identity — {@link scmCloneIdentity} of the configured SCM provider. */
   scmIdentity: ScmCloneIdentity;
-  /** One-shot clone token delivered as `VCS_CLONE_TOKEN`. */
+  /** One-shot clone token, or the server-side proxy capability when cloneBaseUrl is set. */
   cloneToken?: string;
   cloneBaseUrl?: string;
   /**
@@ -465,6 +465,9 @@ export function buildImageBuildEnvVars(options: ImageBuildEnvVarsOptions): Recor
   if (options.cloneBaseUrl) {
     envVars.VCS_CLONE_BASE_URL = options.cloneBaseUrl.replace(/\/+$/, "");
     envVars.OI_SCM_PROXY_MODE = "1";
+    if (options.cloneToken) {
+      envVars[SCM_GIT_CAPABILITY_ENV_VAR] = options.cloneToken;
+    }
   }
   return envVars;
 }

@@ -227,6 +227,40 @@ async def test_create_build_sandbox_runs_gated_entrypoint_and_scrubs_callback_en
 
 
 @pytest.mark.asyncio
+async def test_create_build_sandbox_uses_proxy_capability_without_clone_token(monkeypatch):
+    """Proxy-backed builds receive the capability under its dedicated key."""
+    sandbox = SimpleNamespace(object_id="modal-proxy-session")
+    create = _async_method(sandbox)
+    monkeypatch.setattr("src.sandbox.build_session.modal.Sandbox.create", create)
+
+    await ModalBuildSessionService().create(
+        build_id="build-proxy-1",
+        scope_kind="repo",
+        scope_id="scm_gitea:repo-1",
+        repositories=[
+            {
+                "repo_owner": "huangdong",
+                "repo_name": "chatbi",
+                "branch": "main",
+                "repository_key": "scm_gitea:repo-1",
+                "connection_id": "scm_gitea",
+            }
+        ],
+        clone_token="oig-build-capability",
+        clone_host="control-plane.example",
+        clone_username="open-inspect-capability",
+        clone_base_url="https://control-plane.example/git/build/build-proxy-1",
+        callback_url="https://cp.test/image-builds/build-complete",
+        failure_callback_url="https://cp.test/image-builds/build-failed",
+    )
+
+    env = create.aio.await_args.kwargs["env"]
+    assert env["OI_SCM_PROXY_MODE"] == "1"
+    assert env["SCM_GIT_CAPABILITY"] == "oig-build-capability"
+    assert "VCS_CLONE_TOKEN" not in env
+
+
+@pytest.mark.asyncio
 async def test_start_build_sandbox_writes_only_callback_token_to_gated_entrypoint(monkeypatch):
     stdin = SimpleNamespace(write=MagicMock(), drain=_async_method())
     sandbox = SimpleNamespace(

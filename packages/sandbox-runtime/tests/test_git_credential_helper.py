@@ -189,6 +189,25 @@ def test_generic_scm_proxy_keeps_forge_secret_out_of_sandbox(
     assert calls[0] == 0
 
 
+def test_generic_scm_proxy_ignores_stale_clone_token(
+    cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A proxy capability wins even when a legacy build token is present."""
+    monkeypatch.setenv("VCS_CLONE_BASE_URL", "https://cp.example.com/git/build/build-1")
+    monkeypatch.setenv("OI_SCM_PROXY_MODE", "1")
+    monkeypatch.setenv("SCM_GIT_CAPABILITY", "oig_build_scoped")
+    monkeypatch.setenv("VCS_CLONE_TOKEN", "stale-forge-token")
+
+    code, out, _err = _run(
+        "protocol=https\nhost=cp.example.com\npath=git/build/build-1/repo_abc.git\n\n"
+    )
+
+    assert code == 0
+    assert "username=oig_build_scoped" in out
+    assert "password=oig_build_scoped" in out
+    assert "stale-forge-token" not in out
+
+
 def test_generic_scm_proxy_does_not_fall_back_to_sandbox_token(
     cache_dir: Path, env_set: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

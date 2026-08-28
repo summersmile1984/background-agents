@@ -45,8 +45,9 @@ CACHE_FILE = CACHE_DIR / "scm-creds.json"
 LOCK_FILE = CACHE_DIR / "scm-creds.lock"
 CACHE_REFRESH_BUFFER_SECONDS = 5 * 60
 REQUEST_TIMEOUT_SECONDS = 15
-# Image-build sandboxes have no control plane to refresh against. They live
-# for minutes, so we treat the injected token as good for one hour.
+# Image-build sandboxes without a proxy have no control plane to refresh
+# against. They live for minutes, so we treat a direct token as good for one
+# hour. Proxy builds use SCM_GIT_CAPABILITY instead.
 BUILD_MODE_TOKEN_TTL_SECONDS = 60 * 60
 
 
@@ -105,7 +106,7 @@ def _has_control_plane_context() -> bool:
 
 
 def _credentials_from_env() -> dict[str, object] | None:
-    """Build credentials from VCS_CLONE_TOKEN if present.
+    """Build direct-build credentials from VCS_CLONE_TOKEN if present.
 
     Image-build sandboxes don't have a control plane to call, so the manager
     injects a one-shot token directly into the env.

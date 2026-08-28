@@ -431,12 +431,13 @@ describe("buildImageBuildEnvVars", () => {
       sandboxId: "build-env-env_flagship",
       repositories,
       scmIdentity: scmCloneIdentity("github"),
-      cloneToken: "legacy-token",
+      cloneToken: "oig-build-capability",
       cloneBaseUrl: "https://control-plane.example/git/build/build-1",
     });
 
     expect(envVars.VCS_CLONE_BASE_URL).toBe("https://control-plane.example/git/build/build-1");
     expect(envVars.OI_SCM_PROXY_MODE).toBe("1");
+    expect(envVars.SCM_GIT_CAPABILITY).toBe("oig-build-capability");
     expect(envVars).not.toHaveProperty("VCS_CLONE_TOKEN");
   });
 
