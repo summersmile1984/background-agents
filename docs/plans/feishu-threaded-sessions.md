@@ -207,6 +207,10 @@ resolver。Harness 的只读部署策略在卡片中展示；需要输入文本�
 等产品命令从共享命令目录展示，命令执行仍走已存在的 session command
 endpoint，不在卡片回调中复制一套协议。
 
+如果首条消息唯一包含了完整的 `owner/repo`，dispatcher 也只把仓库解析为暂存状态，随后进入同一Harness
+→ 模型/route →
+Effort 卡片链；不会因为“已经推断出仓库”而绕过运行时校验。只有运行时目录服务暂时不可用时，才保留旧版部署默认 Harness 的兼容降级路径，并在后续卡片交互恢复完整校验。
+
 ## 4. 出站消息设计
 
 ### 4.1 统一回复结果
@@ -398,6 +402,13 @@ flag 关闭时出站 body 与当前生产等价。
 
 ### 7.1 生产验收证据（2026-08-28）
 
+- 最新运行时选择修复 commit：`c2f3639e`；CI `33165951905` 与 Terraform `33165951891`
+  均成功。生产 Feishu Worker 最新版本为
+  `e56064f5-19e3-4828-9639-3f2ce3353390`（100% 流量）。本地 Feishu
+  dispatcher 回归为 89 项，新增覆盖“正文唯一命中 repo 仍进入 Harness 选择”的路径。
+- 当前真实 Feishu 消息 E2E 的阻塞点不是代码部署：开发者后台“事件配置”仍显示“暂无数据”，尚未订阅
+  `im.message.receive_v1`，因此新消息不会到达生产 Worker，也不能把没有回执误判为运行时卡片失败。添加并发布该消息事件后，才能继续完成真实回执、Gitea/GitHub 卡片、Harness/模型/Effort 和话题续办验收。
+
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
 - 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、
@@ -452,23 +463,24 @@ flag 关闭时出站 body 与当前生产等价。
 
 ### 8.1 Unit
 
-| 场景                | 必须断言                                                  |
-| ------------------- | --------------------------------------------------------- |
-| 新群顶层消息        | root=message ID，mode=thread                              |
-| 已有话题消息        | root 保持原 root，保留 thread ID，mode=thread             |
-| P2P 顶层消息        | mode=flat                                                 |
-| 旧 callback/job/KV  | 解析成功并默认 flat                                       |
-| reply client        | body 包含正确 `reply_in_thread` 和 `uuid`                 |
-| 线程 API 返回       | message/root/parent/thread ID 均被解析                    |
-| 两个根消息          | 分别命中两个不同 session                                  |
-| 同一话题 follow-up  | 只调用绑定 session 的 prompt endpoint                     |
-| 未绑定、未 @ 群消息 | 不查 catalog、不建 session、不发消息                      |
-| 已绑定、未 @ 群消息 | 开关开启且 actor 匹配时续办                               |
-| 跨用户 follow-up    | 在原话题拒绝，不泄漏 session 细节                         |
-| 仓库选择分页/错误   | 回复原 root，并保留 thread mode                           |
-| 运行时卡片链        | repo 后按 Harness → model/route → effort 分阶段校验和启动 |
-| completion/media    | 卡、截图和警告均回复原 thread                             |
-| 重复 callback       | completion/media 幂等规则保持有效                         |
+| 场景                    | 必须断言                                                   |
+| ----------------------- | ---------------------------------------------------------- |
+| 新群顶层消息            | root=message ID，mode=thread                               |
+| 已有话题消息            | root 保持原 root，保留 thread ID，mode=thread              |
+| P2P 顶层消息            | mode=flat                                                  |
+| 旧 callback/job/KV      | 解析成功并默认 flat                                        |
+| reply client            | body 包含正确 `reply_in_thread` 和 `uuid`                  |
+| 线程 API 返回           | message/root/parent/thread ID 均被解析                     |
+| 两个根消息              | 分别命中两个不同 session                                   |
+| 同一话题 follow-up      | 只调用绑定 session 的 prompt endpoint                      |
+| 未绑定、未 @ 群消息     | 不查 catalog、不建 session、不发消息                       |
+| 已绑定、未 @ 群消息     | 开关开启且 actor 匹配时续办                                |
+| 跨用户 follow-up        | 在原话题拒绝，不泄漏 session 细节                          |
+| 仓库选择分页/错误       | 回复原 root，并保留 thread mode                            |
+| 运行时卡片链            | repo 后按 Harness → model/route → effort 分阶段校验和启动  |
+| 正文唯一命中 owner/repo | 先暂存推断出的 SCM connection/repo，再进入同一运行时卡片链 |
+| completion/media        | 卡、截图和警告均回复原 thread                              |
+| 重复 callback           | completion/media 幂等规则保持有效                          |
 
 ### 8.2 本地和 CI 命令
 
