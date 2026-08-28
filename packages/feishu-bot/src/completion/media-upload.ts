@@ -225,7 +225,14 @@ async function sendAggregateWarning(
   try {
     const warningMessage = await replySessionText(
       input.env,
-      { rootMessageId: input.rootMessageId, replyMode: input.replyMode ?? "flat" },
+      {
+        tenantKey: input.tenantKey,
+        chatId: input.chatId,
+        chatType: input.chatType ?? "p2p",
+        rootMessageId: input.rootMessageId,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        replyMode: input.replyMode ?? "flat",
+      },
       text
     );
     record.warningState = "sent";

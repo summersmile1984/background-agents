@@ -6,6 +6,7 @@ import {
   feishuMediaDeliveryKey,
 } from "./media-upload";
 import { clearTenantAccessTokenCache } from "../feishu/client";
+import { lookupThreadMessageAlias } from "../conversation/store";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -17,7 +18,10 @@ function jsonResponse(value: unknown, status = 200): Response {
 function memoryKv(): KVNamespace {
   const values = new Map<string, string>();
   return {
-    get: vi.fn(async (key: string) => values.get(key) ?? null),
+    get: vi.fn(async (key: string, type?: "json") => {
+      const value = values.get(key) ?? null;
+      return type === "json" && value ? JSON.parse(value) : value;
+    }),
     put: vi.fn(async (key: string, value: string) => {
       values.set(key, value);
     }),
@@ -141,6 +145,43 @@ describe("Feishu media completion delivery", () => {
     expect(feishuFetch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(String(feishuFetch.mock.calls[1][1]?.body))).toMatchObject({
       msg_type: "text",
+    });
+  });
+
+  it("keeps an aggregate warning reply in the native topic and aliases it", async () => {
+    const env = createEnv(vi.fn());
+    const feishuFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 7200 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { message_id: "warning-topic-1" } }));
+    vi.stubGlobal("fetch", feishuFetch);
+
+    await expect(
+      deliverFeishuMediaArtifacts({
+        ...baseInput,
+        env,
+        chatType: "group",
+        threadId: "thread-1",
+        replyMode: "thread",
+        artifacts: [{ id: "artifact-large", type: "screenshot", sizeBytes: 99_999_999 }],
+      })
+    ).resolves.toEqual({ replied: 0, failed: 0, omitted: 1, suppressed: 0 });
+
+    expect(feishuFetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(feishuFetch.mock.calls[1][1]?.body))).toMatchObject({
+      msg_type: "text",
+    });
+    expect(JSON.parse(String(feishuFetch.mock.calls[1][1]?.body))).toMatchObject({
+      content: expect.stringContaining("完整媒体仍保留"),
+    });
+    await expect(
+      lookupThreadMessageAlias(env, { tenantKey: "tenant-1", chatId: "chat-1" }, "warning-topic-1")
+    ).resolves.toMatchObject({
+      rootMessageId: "root-1",
+      threadId: "thread-1",
+      replyMode: "thread",
     });
   });
 });
