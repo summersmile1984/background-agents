@@ -626,8 +626,9 @@ feishu_error_code
 - [x] 生产部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
 - [x] 一个 GitHub session 与一个 Gitea
       session 在两个飞书话题并行运行，session/sandbox/branch 不交叉；
-- [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题；
-- [ ] 未绑定群消息不触发，跨用户和旧卡片不能控制 session；
+- [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题（follow-up、完成卡与 PR 已有代码/生产证据，截图与 preview 仍待真实视觉任务）；
+- [x] 未绑定群消息不触发；
+- [ ] 跨用户和未过期旧卡片不能控制 session（已有单测与过期卡生产证据，仍待另一用户/未过期卡实测）；
 - [ ] 私聊两个 session 不依赖隐式当前会话且可以显式续办；
 - [ ] 飞书 Web/桌面与手机端截图验证通过；
 - [ ] 关闭 rollout flag 的回滚演练不停止既有 sandbox，Web 仍可接管；
