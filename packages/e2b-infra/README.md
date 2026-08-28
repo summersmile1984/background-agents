@@ -118,6 +118,10 @@ CUBE_IMAGE=localhost:5000/oi-e2b:latest \
   bash build-cube-template.sh
 ```
 
+The build script disables Docker BuildKit provenance and SBOM attestations so the registry tag is a
+single-architecture runnable manifest. Cube can report an attested OCI index as `READY` while later
+template restores fail with an opaque guest-clock/reset timeout.
+
 Set `CUBE_IMAGE_BUILD_LABEL` to a unique value when Cube must rebuild the image artifact instead of
 reusing one cached for the same image digest. This is useful when recovering from a corrupted
 artifact; the label changes only the image metadata and does not alter the sandbox runtime.

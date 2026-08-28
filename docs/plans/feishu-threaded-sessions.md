@@ -505,9 +505,21 @@ flag 关闭时出站 body 与当前生产等价。
   `config_missing`/`service_not_found`，不能声称截图通过。
 - 本次 Codex 视觉请求随后因 sandbox 内访问 `https://chatgpt.com/backend-api/ps/mcp`
   持续网络重试和模型刷新超时而失败，未产生 artifact/preview；这是 Harness 网络依赖问题，不是沙盒启动或元数据缺失问题。该负向结果保留，不能计入“截图/preview 已验收”。
-- 后续修复已将生产 relay 的 native Codex ChatGPT base URL 指向
+- 后续修复 commit `48936883` 已将生产 relay 的 native Codex ChatGPT base URL 指向
   `https://codex-relay-summersmile1984.89347589.org/backend-api`，并在 Host relay 中仅开放
   `/ps/mcp`（含 `/backend-api/ps/mcp`）到 ChatGPT 上游；Responses 与插件路径仍按原有严格白名单处理。
+- 为了把该运行时修复放进 Cube 镜像，构建了模板
+  `tpl-e486bfcb5d3e4854a57c9c03`；模板构建任务和分发均显示 `READY`，但直接调用 Cube
+  `POST /sandboxes` 连续返回
+  `reset guest time failed:ttrpc err: Receive packet timeout`，即模板“可构建”不等于“可恢复创建”。同期已知模板
+  `tpl-a0ff1eda32964a68940db1bb` 能正常创建，因此生产通过 Terraform run `33180831569`
+  回滚到旧模板，避免把不稳定模板暴露给用户。宿主 relay 与控制面代码仍已部署，但生产沙盒镜像尚未切换到
+  `48936883`。
+- 随后使用同一源码、关闭 BuildKit provenance/SBOM attestation 的镜像构建验证：模板
+  `tpl-d979943f4f7940968f3e4075` 成功 `READY`，直接 `POST /sandboxes` 返回 HTTP 201（sandbox
+  `d0f95a6ece3a43bcbddb9ff0ab81c0cb`），并已立即删除探针。故构建脚本现在显式使用
+  `docker build --provenance=false --sbom=false`；在把该模板提升到生产前，仍需完成桥接、Codex
+  MCP 鉴权和视觉回归验收。
 
 ## 8. 自动测试矩阵
 

@@ -26,7 +26,12 @@ cp -R "$repo_root/packages/sandbox-runtime/src/sandbox_runtime" "$build_dir/sand
 find "$build_dir/sandbox_runtime" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 find "$build_dir/sandbox_runtime" -type f -name '*.pyc' -delete
 
-docker_build_args=(--pull -t "$image")
+# Cube imports one runnable image manifest. Disable BuildKit's provenance and
+# SBOM attestations so the registry tag resolves to a single-architecture
+# manifest instead of an OCI index with an auxiliary attestation manifest.
+# The latter can restore successfully as a template but fail at sandbox create
+# time with an opaque guest-clock/reset error on some Cube runtimes.
+docker_build_args=(--pull --provenance=false --sbom=false -t "$image")
 if [[ -n "$image_build_label" ]]; then
   docker_build_args+=(--label "org.openinspect.cube-build=$image_build_label")
 fi
