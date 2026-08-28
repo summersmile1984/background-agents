@@ -365,7 +365,7 @@ flag 关闭时出站 body 与当前生产等价。
 
 - [x] 向后兼容代码已部署到生产；
 - [x] 生产已开启 thread replies，并验证根消息派生原生话题；
-- [ ] 验证带 @ 的两个话题并行 E2E；
+- [x] 验证带 @ 的两个话题并行 E2E；
 - [x] 已发布群全部消息权限；
 - [x] 已开启 bound follow-up，并验证已绑定话题内不 @ 续办；
 - [x] 已验证一个话题只绑定一次仓库；旧仓库卡和并发选择由服务端拒绝；
@@ -392,11 +392,20 @@ flag 关闭时出站 body 与当前生产等价。
   Plane 将 prompt 派发给原
   `sessionId=d0ecc91821aa7dcf8d8da93bb81b8599`；KV 的 root/thread/repository/session 坐标保持不变，D1 显示
   `message_count=9`、`provider=gitea`、`repo=huangdong/chatbi`、`status=completed`。
-- 16:06 重放同话题 10:50 的旧仓库选择卡，服务端返回“该选择已过期或无权操作”，没有创建 session；本次实际命中pending 过期校验，不能替代仍待执行的未过期旧卡/跨用户负向用例。
-- 16:09 创建 GitHub 测试话题后，代码源卡正确列出 GitHub 与 Gitea，GitHub 仓库按钮分页也正常；但指定的
+- 16:06 重放同话题 10:50 的旧仓库选择卡，服务端返回“该选择已过期或无权操作”，没有创建 session；本次实际命中
+  `pending` 过期校验，不能替代仍待执行的未过期旧卡/跨用户负向用例。
+- 16:09 创建 GitHub 测试话题后，代码源卡正确列出 GitHub 与 Gitea，GitHub 仓库按钮分页也正常；原计划指定的
   `summersmile1984/n9n` 不在 App 返回的全部 24 个 GitHub 仓库中，已登录 GitHub API 和
-  `git ls-remote` 均返回 404，因此没有误选其他仓库或宣称双 SCM E2E 已完成。
-- 本轮证明“同一话题续办不重选仓库、不换 session”和旧卡无法控制 session。双话题 GitHub/Gitea 并行、截图/preview/PR 归属、跨用户、未过期旧卡、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
+  `git ls-remote` 均返回 404。随后在该话题选择实际存在的 `summersmile1984/flow-pilot`，创建独立
+  `sessionId=7b4ac83dd27803e76452a2e71207f678`、短编号 `#16ED73`、base branch
+  `master`。16:23 在 GitHub 话题发送不带 @ 的 follow-up，回执显示沿用 `flow-pilot`
+  且无需重新选择，16:25 和 16:26 的两张完成卡均回到同一 GitHub 话题。
+- 最终 D1 记录 GitHub session `message_count=2`、Gitea session `message_count=9`，两者均为
+  `status=completed`，provider/repo/branch/session 均不交叉。GitHub 执行期间 Control
+  Plane 日志仍记录 Gitea session 的 sandbox
+  WebSocket 保持连接，证明两个 session/sandbox 同时存在；两个 Feishu completion
+  delivery 也各自携带不同 root/thread/session 坐标。
+- 本轮证明“双 SCM 两话题隔离”“同一话题续办不重选仓库、不换 session”和旧卡无法控制 session。截图/preview/PR 归属、跨用户、未过期旧卡、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
 
 ## 8. 自动测试矩阵
 
@@ -535,7 +544,7 @@ feishu_error_code
 - [x] 自动测试覆盖新旧 payload、两个并行 session、completion/media 和负向授权；
 - [x] shared 先构建，Feishu、Control Plane、全局 typecheck/lint、Terraform fmt 全部通过；
 - [x] 生产部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
-- [ ] 一个 GitHub session 与一个 Gitea
+- [x] 一个 GitHub session 与一个 Gitea
       session 在两个飞书话题并行运行，session/sandbox/branch 不交叉；
 - [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题；
 - [ ] 未绑定群消息不触发，跨用户和旧卡片不能控制 session；
