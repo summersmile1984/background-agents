@@ -120,6 +120,50 @@ describe("Feishu message client", () => {
     });
   });
 
+  it("retries a transient reply with the same idempotency key", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 500, msg: "temporarily unavailable" }, 500))
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { message_id: "reply-retried" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      replyFeishuText(env, "root-1", "已收到", { idempotencyKey: "event-retry" })
+    ).resolves.toEqual({ messageId: "reply-retried" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      uuid: "event-retry",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      uuid: "event-retry",
+    });
+  });
+
+  it("retries one ambiguous network failure when a key makes it safe", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockRejectedValueOnce(new Error("socket reset"))
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { message_id: "reply-network" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      replyFeishuText(env, "root-1", "已收到", { idempotencyKey: "event-network" })
+    ).resolves.toEqual({ messageId: "reply-network" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      uuid: "event-network",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      uuid: "event-network",
+    });
+  });
+
   it("resolves and caches the bot Open ID when no override is configured", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

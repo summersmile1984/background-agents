@@ -253,13 +253,15 @@ describe("handleFeishuEvent receipt", () => {
       1,
       env,
       expect.objectContaining({ rootMessageId: "stop-message" }),
-      "已收到命令 /stop，正在处理。"
+      "已收到命令 /stop，正在处理。",
+      "feishu:stop-message:command-receipt"
     );
     expect(mocks.replySessionText).toHaveBeenNthCalledWith(
       2,
       env,
       expect.objectContaining({ rootMessageId: "stop-message" }),
-      "已请求停止当前任务。"
+      "已请求停止当前任务。",
+      "feishu:stop-message:command-result"
     );
   });
 
@@ -325,7 +327,8 @@ describe("handleFeishuEvent receipt", () => {
         rootMessageId: "message-1",
         replyMode: "thread",
       }),
-      expect.stringContaining("已收到")
+      expect.stringContaining("已收到"),
+      "feishu:message-1:receipt"
     );
     expect(mocks.storePendingRequest).toHaveBeenCalledWith(
       groupEnv,
@@ -370,7 +373,8 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.replySessionText).toHaveBeenCalledWith(
       groupEnv,
       expect.objectContaining({ chatType: "group", replyMode: "thread" }),
-      expect.stringContaining("已收到")
+      expect.stringContaining("已收到"),
+      "feishu:message-1:receipt"
     );
     expect(mocks.storePendingRequest).toHaveBeenCalledWith(
       groupEnv,
@@ -403,7 +407,8 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.replySessionText).toHaveBeenCalledWith(
       rollbackEnv,
       expect.objectContaining({ chatType: "group", replyMode: "flat" }),
-      expect.stringContaining("已收到")
+      expect.stringContaining("已收到"),
+      "feishu:message-1:receipt"
     );
     expect(mocks.replySessionCard).toHaveBeenCalledWith(
       rollbackEnv,
@@ -495,7 +500,8 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.replySessionText).toHaveBeenCalledWith(
       groupEnv,
       expect.any(Object),
-      expect.stringContaining("已收到")
+      expect.stringContaining("已收到"),
+      "feishu:message-1:receipt"
     );
     expect(mocks.storePendingRequest).toHaveBeenCalledWith(
       groupEnv,
@@ -583,7 +589,8 @@ describe("handleFeishuEvent receipt", () => {
       1,
       groupEnv,
       expect.objectContaining({ rootMessageId: "root-1", threadId: "thread-1" }),
-      expect.stringContaining("本话题沿用已绑定仓库，无需重新选择")
+      expect.stringContaining("本话题沿用已绑定仓库，无需重新选择"),
+      "feishu:follow-up-1:receipt"
     );
     expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
     expect(mocks.updateThreadSession).toHaveBeenCalledWith(
@@ -643,7 +650,8 @@ describe("handleFeishuEvent receipt", () => {
         threadId: "stored-thread",
         replyMode: "thread",
       }),
-      expect.stringContaining("本话题沿用已绑定仓库")
+      expect.stringContaining("本话题沿用已绑定仓库"),
+      "feishu:follow-up-omitted-thread:receipt"
     );
   });
 
@@ -964,7 +972,8 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.replySessionText).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ rootMessageId: "message-1", replyMode: "flat" }),
-      expect.stringContaining("已收到，正在工作中")
+      expect.stringContaining("已收到，正在工作中"),
+      "feishu:message-1:receipt"
     );
     expect(mocks.replySessionCard).toHaveBeenCalledOnce();
     expect(mocks.replySessionText.mock.invocationCallOrder[0]).toBeLessThan(

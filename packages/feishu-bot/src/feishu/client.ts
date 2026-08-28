@@ -4,6 +4,8 @@ import type { Env } from "../types";
 const DEFAULT_FEISHU_API_BASE = "https://open.feishu.cn";
 const OUTBOUND_TIMEOUT_MS = 10_000;
 const TOKEN_REFRESH_SKEW_SECONDS = 300;
+const REPLY_MAX_ATTEMPTS = 2;
+const REPLY_RETRY_DELAY_MS = 200;
 
 const tenantTokenResponseSchema = z.object({
   code: z.number(),
@@ -166,40 +168,54 @@ async function replyFeishuMessage(
     throw new FeishuApiError("transient", "Feishu tenant access token request failed");
   }
 
-  let response: Response;
-  try {
-    response = await fetch(
-      `${apiBase(env)}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`,
-      {
+  const requestUrl = `${apiBase(env)}/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reply`;
+  const requestBody = JSON.stringify({
+    msg_type: msgType,
+    content: JSON.stringify(content),
+    ...(options.replyInThread !== undefined ? { reply_in_thread: options.replyInThread } : {}),
+    ...(options.idempotencyKey ? { uuid: options.idempotencyKey } : {}),
+  });
+
+  for (let attempt = 1; attempt <= REPLY_MAX_ATTEMPTS; attempt += 1) {
+    let response: Response;
+    try {
+      response = await fetch(requestUrl, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          msg_type: msgType,
-          content: JSON.stringify(content),
-          ...(options.replyInThread !== undefined
-            ? { reply_in_thread: options.replyInThread }
-            : {}),
-          ...(options.idempotencyKey ? { uuid: options.idempotencyKey } : {}),
-        }),
+        body: requestBody,
         signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
+      });
+    } catch {
+      // A network timeout is ambiguous. Reusing a caller-provided idempotency
+      // key makes one bounded retry safe; without a key, never risk creating
+      // a duplicate message after an unknown outcome.
+      if (!options.idempotencyKey || attempt >= REPLY_MAX_ATTEMPTS) {
+        throw new FeishuApiError("ambiguous", "Feishu message reply outcome is unknown");
       }
-    );
-  } catch {
-    throw new FeishuApiError("ambiguous", "Feishu message reply outcome is unknown");
-  }
+      await new Promise((resolve) => setTimeout(resolve, REPLY_RETRY_DELAY_MS));
+      continue;
+    }
 
-  const parsed = createMessageResponseSchema.safeParse(await response.json().catch(() => null));
-  if (!response.ok || !parsed.success || parsed.data.code !== 0) {
+    const parsed = createMessageResponseSchema.safeParse(await response.json().catch(() => null));
+    if (response.ok && parsed.success && parsed.data.code === 0) {
+      return sentMessage(parsed.data.data);
+    }
+
+    const reason = classifyFeishuFailure(response, "reply");
     const apiDetail = parsed.success
       ? `code=${parsed.data.code}, msg=${(parsed.data.msg || "unknown").slice(0, 200)}`
       : "invalid_response";
-    throw new FeishuApiError(
-      classifyFeishuFailure(response, "reply"),
+    const failure = new FeishuApiError(
+      reason,
       `Feishu message reply failed (http_status=${response.status}, ${apiDetail})`,
       response.status
     );
+    const retryable = reason === "rate_limited" || reason === "transient";
+    if (!options.idempotencyKey || !retryable || attempt >= REPLY_MAX_ATTEMPTS) throw failure;
+    await new Promise((resolve) => setTimeout(resolve, REPLY_RETRY_DELAY_MS));
   }
-  return sentMessage(parsed.data.data);
+
+  throw new FeishuApiError("transient", "Feishu message reply failed after retries");
 }
 
 function sentMessage(

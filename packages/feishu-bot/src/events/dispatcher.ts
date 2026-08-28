@@ -47,6 +47,15 @@ function actorId(tenantKey: string, openId: string): string {
   return `feishu:${tenantKey}:${openId}`;
 }
 
+/**
+ * Feishu retries a request with the same event ID, while the reply endpoint
+ * deduplicates a UUID for one hour. Keep the acknowledgement keys short and
+ * deterministic so a transient 429/5xx cannot create duplicate receipts.
+ */
+function deliveryIdempotencyKey(messageId: string, kind: string): string {
+  return `feishu:${messageId}:${kind}`.slice(0, 64);
+}
+
 function messageCoordinates(
   event: FeishuEventEnvelope,
   env: Pick<Env, "FEISHU_THREAD_REPLIES_ENABLED">
@@ -209,7 +218,8 @@ async function handleRuntimeCommand(input: {
   await replySessionText(
     input.env,
     input.coordinates,
-    `已收到命令 /${input.slashName}，正在处理。`
+    `已收到命令 /${input.slashName}，正在处理。`,
+    deliveryIdempotencyKey(input.messageId, "command-receipt")
   );
   const response = await invokeRuntimeCommand({
     env: input.env,
@@ -227,7 +237,8 @@ async function handleRuntimeCommand(input: {
       response,
       sessionId: input.existing.sessionId,
       webAppUrl: input.env.WEB_APP_URL,
-    })
+    }),
+    deliveryIdempotencyKey(input.messageId, "command-result")
   );
   return true;
 }
@@ -563,7 +574,8 @@ export async function handleFeishuEvent(
     const receipt = await replySessionText(
       env,
       coordinates,
-      receiptTextForConversation(existing, actor)
+      receiptTextForConversation(existing, actor),
+      deliveryIdempotencyKey(messageId, "receipt")
     );
     if (receipt?.threadId && receipt.threadId !== coordinates.threadId) {
       coordinates = { ...coordinates, threadId: receipt.threadId, replyMode: "thread" };
