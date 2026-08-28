@@ -177,7 +177,13 @@ describe("Feishu completion delivery", () => {
     vi.mocked(extractAgentResponse).mockResolvedValue({
       textContent: "PR created",
       toolCalls: [],
-      artifacts: [{ type: "pr", url: "https://gitea.example/huangdong/chatbi/pulls/3" }],
+      artifacts: [
+        {
+          type: "pr",
+          url: "https://gitea.example/huangdong/chatbi/pulls/3",
+          label: "PR #3",
+        },
+      ],
       mediaArtifacts: [],
       success: true,
     });
