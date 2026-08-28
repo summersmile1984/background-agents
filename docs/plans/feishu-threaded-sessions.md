@@ -407,6 +407,24 @@ flag 关闭时出站 body 与当前生产等价。
   delivery 也各自携带不同 root/thread/session 坐标。
 - 本轮证明“双 SCM 两话题隔离”“同一话题续办不重选仓库、不换 session”和旧卡无法控制 session。截图/preview/PR 归属、跨用户、未过期旧卡、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
 
+### 7.2 生产视觉模板回归（2026-08-28）
+
+- 运行时修复 commit：`efff7ad4`；生产 E2B/Cube 模板：`tpl-a0ff1eda32964a68940db1bb` （镜像 digest
+  `sha256:e770f464e7c63732ef25002690f54dd344f0204c4e44176d8036f88f2f521a34`），规格为 4 vCPU / 8
+  GiB；GitHub Actions Terraform run `33159835710` 成功。
+- 新建生产会话 `808b467e874ee67ecd78c9b1f0e699b2`（Gitea `huangdong/chatbi`、Codex、
+  `openai/gpt-5.6-luna`）实际落到 sandbox `3c910d3f12fb40458c5822d6224531f8`，provider
+  inventory 显示上述新模板与资源规格。
+- 启动证据：AIO Chromium CDP `127.0.0.1:9222`、Browser MCP `127.0.0.1:8100`、Codex bridge、Gitea
+  clone 和 managed skills 均成功；`sandbox.startup` 记录
+  `git_sync_success=true`、`setup_success=true`、`start_success=true`。
+- `/tmp/open-inspect-dev-services.json`
+  已写入空注册表（`manifestPath=null`、`services=[]`），证明本轮修复已进入生产模板。`chatbi` 没有
+  `.openinspect/environment.yaml`，所以它不具备可监督服务，视觉验证按契约应返回结构化
+  `config_missing`/`service_not_found`，不能声称截图通过。
+- 本次 Codex 视觉请求随后因 sandbox 内访问 `https://chatgpt.com/backend-api/ps/mcp`
+  持续网络重试和模型刷新超时而失败，未产生 artifact/preview；这是 Harness 网络依赖问题，不是沙盒启动或元数据缺失问题。该负向结果保留，不能计入“截图/preview 已验收”。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
