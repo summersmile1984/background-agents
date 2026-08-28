@@ -427,8 +427,8 @@ flag 关闭时出站 body 与当前生产等价。
   `HTTP 409: Approval policy cannot be configured at session scope`，未创建额外可运行子会话，不影响父会话完成。
 - 随后在同一飞书群发送未 @ 机器人的顶层消息
   `Open-Inspect negative routing smoke test: no bot mention, this message should be ignored.`；等待 5 秒未出现机器人回执、选择卡或新会话，证明未绑定群消息不会误触发运行时流程。
-- `f513d3c0` 与 `eea83f19` 已通过 CI/Terraform 并部署到生产 Feishu Worker；最新版本为
-  `2b271176-47bd-4481-b576-63e5efb4820b`，`/healthz` 返回
+- `f513d3c0`、`eea83f19`、`53c108ec` 与 `9313bd48` 已通过 CI/Terraform 并部署到生产 Feishu
+  Worker；最新版本为 `06152f32-c267-44dd-906f-243f4a57fd95`，`/healthz` 返回
   `{"ok":true,"service":"feishu-bot"}`。本轮补齐 `chat_type=topic_group`
   的 schema 兼容和内部 group 归一化，并以 95 项 Feishu bot 测试覆盖；私聊带 `root_id` 或仅带
   `parent_id` 的引用回复、PR 完成卡的同话题投递和关闭线程 rollout
