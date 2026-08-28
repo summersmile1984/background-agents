@@ -408,7 +408,17 @@ flag 关闭时出站 body 与当前生产等价。
   dispatcher 回归为 89 项，新增覆盖“正文唯一命中 repo 仍进入 Harness 选择”的路径。
 - 开发者后台现已添加并发布 `im.message.receive_v1`，事件请求地址为生产 Worker 的
   `/events`，卡片回调仍指向
-  `/card-actions`。因此消息入口配置已完成；真实消息 E2E（回执、Gitea/GitHub 卡片、Harness/模型/Effort和话题续办）仍需发送一条无副作用测试消息后才能计入验收。
+  `/card-actions`。因此消息入口配置已完成；真实消息 E2E 已完成一条无副作用 smoke
+  test，仍需按下文范围补齐截图、preview、PR、跨用户和移动端路径。
+
+- 19:19 发送无副作用 smoke
+  test 后，机器人先回“已收到，正在工作中”，代码源卡列出 Gitea（64 个仓库）和 GitHub（24 个仓库）；分页后选择
+  `gitea · huangdong/chatbi`，随后依次显示 Harness、模型和 Effort 卡。Harness 卡实际列出 OpenCode、Codex、Claude
+  Code、DeepSeek Harness，模型卡列出 GPT 5.6 Luna。
+- 19:23 生成工作卡 `#8CDF69`；对应 Web session `c4b3a85ad383d51621d9d627598398b1` 显示
+  `Connection status: Connected`、`Sandbox status: Ready`，详情为 Gitea
+  `huangdong/chatbi`、Codex、GPT 5.6 Luna、`main`。19:26 同一飞书话题收到 `#8CDF69`
+  完成卡；Codex 报告仅完成只读检查，仓库无文件变化。该证据覆盖消息回执、双 SCM 入口、Gitea 仓库分页、Harness/模型/Effort 选择和同话题完成投递，但没有覆盖截图/preview/PR（本测试明确不修改文件）。
 
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
