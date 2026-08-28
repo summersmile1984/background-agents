@@ -834,7 +834,7 @@ feishu_error_code
 - 回复 API 仅在调用方提供幂等键时做一次有界重试（覆盖 429/5xx 和一次网络失败），并复用同一 UUID；没有幂等键时对结果不明的网络错误保持不重试，避免把一次可能成功的请求复制成两条消息。该策略覆盖“先回执、后目录/沙盒处理”的路径，不改变业务消息协议。
 - 首轮生产验证发现飞书对旧的冒号分隔键返回
   `99992402 field validation failed`；改用标准 UUID 后，旧话题回执恢复正常（事件日志仍为 HTTP
-  200）。Feishu bot 回归现为 124 项通过；全局 TypeScript typecheck 和 lint 通过。
+  200）。Feishu bot 回归现为 125 项通过；全局 TypeScript typecheck 和 lint 通过。
 - 提交 `9843a3b1` 的 CI run `33213599905` 与 Terraform Apply run `33213599916` 均成功；生产
   `/healthz` 和 Control Plane `/health` 均正常。2026-08-29 05:45 在既有 Gitea `huangdong/chatbi`
   话题中发送 `/status`，真实飞书 Web 收到回执和状态结果，证明标准 UUID 已兼容飞书回复 API。
