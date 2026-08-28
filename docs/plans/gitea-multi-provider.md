@@ -14,6 +14,12 @@ proxy capabilities, clone/push/pull-request flow, stable secrets/metadata/images
 stores, aggregate database guards, and the leased/checkpointed migration UI. Gitea webhooks,
 user-delegated Gitea OAuth, and final removal of legacy keys remain later contract/parity phases.
 
+The sandbox lifecycle now also resolves a repository prebuilt image by its stable
+`repo:<repositoryKey>` scope whenever a connection-aware repository is present, while retaining the
+legacy `owner/name` lookup for pre-migration sessions. This keeps Gitea and GitHub repositories with
+identical paths from sharing an image and allows the per-repository development environment to be
+reused after a session restart (`12bf0478`).
+
 ## Executive Summary
 
 Open-Inspect should support GitHub and Gitea in the same installation by introducing an explicit
