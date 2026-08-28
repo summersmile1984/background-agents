@@ -7,6 +7,7 @@ import {
 } from "@open-inspect/shared/types/session-api";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
+import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "../internal-auth";
 import type { FeishuRepositoryTarget } from "../targets";
 
@@ -35,13 +36,20 @@ export async function createSession(input: {
   target: FeishuRepositoryTarget;
   branch?: string;
   model: string;
+  runtime?: RuntimeConfigFragment;
   actorId: string;
   traceId?: string;
 }): Promise<CreateSessionResponse | null> {
   const body = JSON.stringify({
     repositoryKey: input.target.repositoryKey,
     ...(input.branch ? { branch: input.branch } : {}),
-    runtime: { harness: defaultHarnessForModel(input.model), model: input.model },
+    runtime: {
+      harness: input.runtime?.harness ?? defaultHarnessForModel(input.model),
+      model: input.runtime?.model ?? input.model,
+      ...(input.runtime?.routeId ? { routeId: input.runtime.routeId } : {}),
+      ...(input.runtime?.effort ? { effort: input.runtime.effort } : {}),
+      ...(input.runtime?.settings ? { settings: input.runtime.settings } : {}),
+    },
   });
   const response = await signedControlPlaneFetch(
     input.env,

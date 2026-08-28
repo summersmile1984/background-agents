@@ -7,11 +7,13 @@ const mocks = vi.hoisted(() => ({
   getPendingRequest: vi.fn(),
   lookupThreadSession: vi.fn(),
   releaseThreadSelection: vi.fn(),
+  updatePendingRequest: vi.fn(),
   replySessionCard: vi.fn(),
   replySessionText: vi.fn(),
   startNewSession: vi.fn(),
   findRepositoryTarget: vi.fn(),
   listRepositoryCatalog: vi.fn(),
+  getRuntimeCatalog: vi.fn(),
 }));
 
 vi.mock("../conversation/store", () => ({
@@ -21,6 +23,7 @@ vi.mock("../conversation/store", () => ({
   getPendingRequest: mocks.getPendingRequest,
   lookupThreadSession: mocks.lookupThreadSession,
   releaseThreadSelection: mocks.releaseThreadSelection,
+  updatePendingRequest: mocks.updatePendingRequest,
 }));
 
 vi.mock("../conversation/delivery", () => ({
@@ -33,6 +36,10 @@ vi.mock("../events/dispatcher", () => ({ startNewSession: mocks.startNewSession 
 vi.mock("../targets", () => ({
   findRepositoryTarget: mocks.findRepositoryTarget,
   listRepositoryCatalog: mocks.listRepositoryCatalog,
+}));
+
+vi.mock("../sessions/runtime-catalog", () => ({
+  getRuntimeCatalog: mocks.getRuntimeCatalog,
 }));
 
 import { handleFeishuCardAction } from "./card-actions";
@@ -91,6 +98,8 @@ describe("handleFeishuCardAction topic binding", () => {
     });
     mocks.findRepositoryTarget.mockReturnValue(target);
     mocks.startNewSession.mockResolvedValue(undefined);
+    mocks.getRuntimeCatalog.mockResolvedValue(null);
+    mocks.updatePendingRequest.mockResolvedValue(null);
   });
 
   it("rejects an old repository card after the topic is already bound", async () => {
@@ -134,5 +143,136 @@ describe("handleFeishuCardAction topic binding", () => {
       "action-1"
     );
     expect(mocks.deletePendingRequest).toHaveBeenCalledWith(expect.anything(), pendingId);
+  });
+
+  it("stages repository selection before choosing a ready harness", async () => {
+    mocks.getRuntimeCatalog.mockResolvedValue({
+      harnesses: [
+        {
+          harness: "codex",
+          displayName: "Codex",
+          ready: true,
+          routes: [{ routeId: "codex:openai:subscription", ready: true, models: [] }],
+          settings: [],
+        },
+      ],
+      commands: [],
+    });
+    mocks.updatePendingRequest.mockResolvedValue({
+      ...mocks.getPendingRequest.mock.results[0]?.value,
+      selectedRepositoryKey: target.repositoryKey,
+      selectedConnectionId: target.connectionId,
+    });
+
+    const result = await handleFeishuCardAction(payload, {} as never, "trace-runtime-stage");
+
+    expect(result).toEqual({ ok: true, content: "请选择 Harness。" });
+    expect(mocks.startNewSession).not.toHaveBeenCalled();
+    expect(mocks.replySessionCard).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ rootMessageId: "root" }),
+      expect.any(Object)
+    );
+    expect(mocks.updatePendingRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      pendingId,
+      expect.objectContaining({ selectedRepositoryKey: target.repositoryKey })
+    );
+  });
+
+  it("validates the selected model and launches with the selected effort", async () => {
+    const runtimeCatalog = {
+      harnesses: [
+        {
+          harness: "codex" as const,
+          displayName: "Codex",
+          ready: true,
+          settings: [],
+          routes: [
+            {
+              routeId: "codex:openai:subscription",
+              ready: true,
+              models: [
+                {
+                  model: "openai/gpt-5.6-luna",
+                  displayName: "GPT 5.6 Luna",
+                  ready: true,
+                  routeId: "codex:openai:subscription",
+                  efforts: [{ value: "high", label: "high", nativeValue: "high", isDefault: true }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      commands: [],
+    };
+    mocks.getRuntimeCatalog.mockResolvedValue(runtimeCatalog);
+    mocks.getPendingRequest.mockResolvedValueOnce({
+      ...(await mocks.getPendingRequest()),
+      selectedRepositoryKey: target.repositoryKey,
+      selectedConnectionId: target.connectionId,
+      runtime: {
+        harness: "codex",
+        routeId: "codex:openai:subscription",
+        model: "openai/gpt-5.6-luna",
+      },
+    });
+    mocks.getPendingRequest.mockResolvedValue({
+      ...(await mocks.getPendingRequest()),
+      selectedRepositoryKey: target.repositoryKey,
+      selectedConnectionId: target.connectionId,
+      runtime: {
+        harness: "codex",
+        routeId: "codex:openai:subscription",
+        model: "openai/gpt-5.6-luna",
+        effort: "high",
+      },
+    });
+    mocks.updatePendingRequest.mockResolvedValue({
+      ...(await mocks.getPendingRequest()),
+      selectedRepositoryKey: target.repositoryKey,
+      selectedConnectionId: target.connectionId,
+      runtime: {
+        harness: "codex",
+        routeId: "codex:openai:subscription",
+        model: "openai/gpt-5.6-luna",
+        effort: "high",
+      },
+    });
+
+    const effortPayload = {
+      ...payload,
+      header: { event_id: "action-effort", tenant_key: "tenant" },
+      event: {
+        ...payload.event,
+        action: {
+          value: {
+            action: "select_effort",
+            pendingId,
+            connectionId: target.connectionId,
+            repositoryKey: target.repositoryKey,
+            harness: "codex",
+            routeId: "codex:openai:subscription",
+            model: "openai/gpt-5.6-luna",
+            effort: "high",
+          },
+        },
+      },
+    };
+    const result = await handleFeishuCardAction(effortPayload, {} as never, "trace-effort");
+
+    expect(result).toEqual({ ok: true, content: "已开始创建会话。" });
+    expect(mocks.startNewSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetKey: target.repositoryKey,
+        runtime: {
+          harness: "codex",
+          routeId: "codex:openai:subscription",
+          model: "openai/gpt-5.6-luna",
+          effort: "high",
+        },
+      })
+    );
   });
 });

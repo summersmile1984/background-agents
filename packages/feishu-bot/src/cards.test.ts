@@ -3,6 +3,9 @@ import {
   buildCompletionCard,
   buildConnectionPickerCard,
   buildRepositoryPickerCard,
+  buildRuntimeEffortPickerCard,
+  buildRuntimeHarnessPickerCard,
+  buildRuntimeModelPickerCard,
   buildSessionListCard,
   buildWorkingCard,
   REPOSITORIES_PER_PAGE,
@@ -137,6 +140,99 @@ describe("Feishu repository cards", () => {
     expect(serialized).not.toContain("select_static");
     expect(serialized.match(/"action":"select_target"/g)).toHaveLength(2);
     expect(serialized).toContain("直接点选仓库，不会唤起手机输入法");
+  });
+});
+
+describe("Feishu runtime launch cards", () => {
+  const repository = target(1);
+  const harness = {
+    harness: "codex" as const,
+    displayName: "Codex",
+    description: "Native Codex",
+    enabled: true,
+    runtimeAvailable: true,
+    ready: true,
+    settingsSchemaVersion: "1",
+    settings: [],
+    liveMutation: { model: false, effort: false, settings: [] },
+    routes: [
+      {
+        routeId: "codex:openai:subscription",
+        harness: "codex" as const,
+        provider: "openai",
+        transport: "native" as const,
+        displayName: "OpenAI subscription",
+        ready: true,
+        code: "READY" as const,
+        models: [
+          {
+            model: "openai/gpt-5.6-luna",
+            displayName: "GPT 5.6 Luna",
+            description: "Fast",
+            category: "OpenAI",
+            routeId: "codex:openai:subscription",
+            provider: "openai",
+            enabled: true,
+            ready: true,
+            efforts: [{ value: "high", label: "high", nativeValue: "high", isDefault: true }],
+            supportsAttachments: true,
+            supportsToolEvents: true,
+            supportsLiveModelSwitch: false,
+          },
+        ],
+      },
+    ],
+  };
+
+  it("stages harness, model, and effort selection with opaque action values", () => {
+    const harnessCard = JSON.stringify(
+      buildRuntimeHarnessPickerCard({
+        pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+        target: repository,
+        harnesses: [harness],
+        commands: [
+          {
+            id: "product.help",
+            slashName: "help",
+            title: "Help",
+            description: "help",
+            group: "session",
+            owner: "product",
+            harnesses: "all",
+            contexts: ["draft"],
+            execution: "control-plane",
+            arguments: [],
+            mutates: [],
+            available: true,
+          },
+        ],
+      })
+    );
+    expect(harnessCard).toContain("select_harness");
+    expect(harnessCard).toContain("/help");
+
+    const modelCard = JSON.stringify(
+      buildRuntimeModelPickerCard({
+        pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+        target: repository,
+        harness,
+      })
+    );
+    expect(modelCard).toContain("select_model");
+    expect(modelCard).toContain("openai/gpt-5.6-luna");
+
+    const effortCard = JSON.stringify(
+      buildRuntimeEffortPickerCard({
+        pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+        target: repository,
+        harness,
+        model: harness.routes[0]!.models[0]!,
+        routeId: "codex:openai:subscription",
+        commands: [],
+      })
+    );
+    expect(effortCard).toContain("select_effort");
+    expect(effortCard).toContain("使用模型默认");
   });
 });
 

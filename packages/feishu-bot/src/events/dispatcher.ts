@@ -1,5 +1,6 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
 import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
+import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
 import { buildConnectionPickerCard, buildSessionListCard, buildWorkingCard } from "../cards";
 import {
   listConversationSessions,
@@ -396,6 +397,7 @@ export async function startNewSession(input: {
   targetKey: string;
   traceId: string;
   targets?: Awaited<ReturnType<typeof listRepositoryTargets>>;
+  runtime?: RuntimeConfigFragment;
 }): Promise<void> {
   const existing = await lookupThreadSession(input.env, input.coordinates);
   if (existing) {
@@ -412,13 +414,20 @@ export async function startNewSession(input: {
     await replySessionText(input.env, input.coordinates, "该仓库已不可用，请重新发起请求。");
     return;
   }
-  const model = input.env.DEFAULT_MODEL;
+  const model =
+    input.runtime?.model && input.runtime.model !== "inherit"
+      ? input.runtime.model
+      : input.env.DEFAULT_MODEL;
+  const harness = input.runtime?.harness ?? defaultHarnessForModel(model);
+  const reasoningEffort =
+    input.runtime?.effort && input.runtime.effort !== "inherit" ? input.runtime.effort : undefined;
   const branch = inferRepositoryBranch(target, input.content);
   const session = await createSession({
     env: input.env,
     target,
     branch,
     model,
+    ...(input.runtime ? { runtime: input.runtime } : {}),
     actorId: input.actor,
     traceId: input.traceId,
   });
@@ -434,7 +443,8 @@ export async function startNewSession(input: {
     targetLabel: target.fullName,
     ...(branch ? { branch } : {}),
     model,
-    harness: defaultHarnessForModel(model),
+    harness,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     actorId: input.actor,
     chatType: input.coordinates.chatType,
     rootMessageId: input.coordinates.rootMessageId,
@@ -452,7 +462,8 @@ export async function startNewSession(input: {
       targetLabel: target.fullName,
       model,
       ...(branch ? { branch } : {}),
-      harness: defaultHarnessForModel(model),
+      harness,
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       chatType: input.coordinates.chatType,
       replyMode: input.coordinates.replyMode,
       sessionId: session.sessionId,
@@ -476,10 +487,11 @@ export async function startNewSession(input: {
     ...(input.coordinates.threadId ? { threadId: input.coordinates.threadId } : {}),
     replyMode: input.coordinates.replyMode,
     ...(branch ? { branch } : {}),
-    harness: defaultHarnessForModel(model),
+    harness,
     ...(workingMessage?.messageId ? { workingMessageId: workingMessage.messageId } : {}),
     targetLabel: target.fullName,
     model,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
   const delivered = await sendPrompt({
     env: input.env,

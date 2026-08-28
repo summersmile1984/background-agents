@@ -3,7 +3,7 @@
 ## 状态
 
 **Implementation in progress
-— 生产线程路由、单话题续办与单仓库绑定已验收；双话题跨 SCM、移动端和回滚 E2E 仍待完成。**
+— 生产线程路由、单话题续办与单仓库绑定已验收；运行时选择卡已接入，双话题跨 SCM、移动端和回滚 E2E 仍待完成。**
 
 本文是把飞书多会话体验对齐 Slack thread 的实施依据。它聚焦已经上线的
 `packages/feishu-bot`，替代早期总方案中“用 `root_id`
@@ -190,6 +190,23 @@ replyMode?: "thread" | "flat";
 同样增加可选字段，不提升 queue 版本。旧 job 默认投递到 flat；新 job 按 callback 中固定的 mode 投递。线程创建 feature
 flag 只控制**新任务是否创建话题**，不能把一个已经绑定话题的 completion 降级到主 timeline。
 
+### 3.4 完整运行时选择
+
+仓库选择不能直接隐式启动部署默认 Harness，否则飞书入口与 Web 的 launch
+spec 会分叉。当前 Feishu 卡片在代码源/仓库选择后读取 control-plane 的 readiness-aware runtime
+catalog，并按以下顺序暂存选择：
+
+```text
+代码源 → 仓库 → Harness → 模型/route → Effort → 创建 session
+```
+
+每个动作都重新用服务端目录校验 Harness、route、model 和 effort，pending
+KV 只保存不含密钥的选择。最终请求把 `runtime.harness`、`runtime.routeId`、`runtime.model` 和可选的
+`runtime.effort` 传入与 Web 相同的 session-create
+resolver。Harness 的只读部署策略在卡片中展示；需要输入文本的用户设置仍在 Web 设置中完成。`/help`、`/new`
+等产品命令从共享命令目录展示，命令执行仍走已存在的 session command
+endpoint，不在卡片回调中复制一套协议。
+
 ## 4. 出站消息设计
 
 ### 4.1 统一回复结果
@@ -301,6 +318,9 @@ Plane、模型或日志正文。
 | `packages/feishu-bot/src/completion/delivery.ts`                      | 完成卡走 session facade；更新 mapping 终态                                      |
 | `packages/feishu-bot/src/completion/media-upload.ts`                  | 截图、聚合警告携带相同 reply mode；保持媒体幂等记录                             |
 | `packages/feishu-bot/src/cards.ts`                                    | session 短编号、branch、Harness、effort、状态和入口说明                         |
+| `packages/feishu-bot/src/sessions/runtime-catalog.ts`                 | 读取 control-plane readiness catalog，过滤异常/未就绪项                         |
+| `packages/feishu-bot/src/interactions/card-actions.ts`                | 分阶段暂存 repo/Harness/model/effort，最终携带完整 runtime launch fragment      |
+| `packages/feishu-bot/src/conversation/store.ts`                       | pending 记录保存不含密钥的运行时选择并刷新 TTL                                  |
 | `packages/feishu-bot/src/types/index.ts`                              | 新增线程创建和 bound-follow-up feature flag                                     |
 | `packages/shared/src/types/session-api.ts`                            | callback context 可选 thread fields；先构建 shared                              |
 | `packages/control-plane/src/session/callback-notification-service.ts` | 保证新增字段签名后原样回传；补回归测试                                          |
@@ -358,6 +378,9 @@ flag 关闭时出站 body 与当前生产等价。
 - [x] 群话题卡提示“在本话题继续即可”；
 - [ ] 第二阶段可增加 `#短编号` 显式续办，但不得引入 chat-level active session；
 - [x] 手机端保留当前按钮分页，不恢复会被输入法遮挡的下拉选择器。
+- [x] 仓库选择后按 readiness
+      catalog 分阶段选择 Harness、模型和 Effort；旧部署目录不可用时保留默认启动兼容路径。
+- [x] 卡片展示共享产品命令；命令执行仍复用 Control Plane endpoint，不在 Feishu 复制协议。
 
 阶段门：仅看任意一张截图也能判断它属于哪个 repo、branch 和 session。
 
@@ -429,22 +452,23 @@ flag 关闭时出站 body 与当前生产等价。
 
 ### 8.1 Unit
 
-| 场景                | 必须断言                                      |
-| ------------------- | --------------------------------------------- |
-| 新群顶层消息        | root=message ID，mode=thread                  |
-| 已有话题消息        | root 保持原 root，保留 thread ID，mode=thread |
-| P2P 顶层消息        | mode=flat                                     |
-| 旧 callback/job/KV  | 解析成功并默认 flat                           |
-| reply client        | body 包含正确 `reply_in_thread` 和 `uuid`     |
-| 线程 API 返回       | message/root/parent/thread ID 均被解析        |
-| 两个根消息          | 分别命中两个不同 session                      |
-| 同一话题 follow-up  | 只调用绑定 session 的 prompt endpoint         |
-| 未绑定、未 @ 群消息 | 不查 catalog、不建 session、不发消息          |
-| 已绑定、未 @ 群消息 | 开关开启且 actor 匹配时续办                   |
-| 跨用户 follow-up    | 在原话题拒绝，不泄漏 session 细节             |
-| 仓库选择分页/错误   | 回复原 root，并保留 thread mode               |
-| completion/media    | 卡、截图和警告均回复原 thread                 |
-| 重复 callback       | completion/media 幂等规则保持有效             |
+| 场景                | 必须断言                                                  |
+| ------------------- | --------------------------------------------------------- |
+| 新群顶层消息        | root=message ID，mode=thread                              |
+| 已有话题消息        | root 保持原 root，保留 thread ID，mode=thread             |
+| P2P 顶层消息        | mode=flat                                                 |
+| 旧 callback/job/KV  | 解析成功并默认 flat                                       |
+| reply client        | body 包含正确 `reply_in_thread` 和 `uuid`                 |
+| 线程 API 返回       | message/root/parent/thread ID 均被解析                    |
+| 两个根消息          | 分别命中两个不同 session                                  |
+| 同一话题 follow-up  | 只调用绑定 session 的 prompt endpoint                     |
+| 未绑定、未 @ 群消息 | 不查 catalog、不建 session、不发消息                      |
+| 已绑定、未 @ 群消息 | 开关开启且 actor 匹配时续办                               |
+| 跨用户 follow-up    | 在原话题拒绝，不泄漏 session 细节                         |
+| 仓库选择分页/错误   | 回复原 root，并保留 thread mode                           |
+| 运行时卡片链        | repo 后按 Harness → model/route → effort 分阶段校验和启动 |
+| completion/media    | 卡、截图和警告均回复原 thread                             |
+| 重复 callback       | completion/media 幂等规则保持有效                         |
 
 ### 8.2 本地和 CI 命令
 

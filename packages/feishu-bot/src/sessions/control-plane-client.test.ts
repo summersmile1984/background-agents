@@ -54,4 +54,41 @@ describe("createSession", () => {
       runtime: { harness: "codex", model: "openai/gpt-5.6-luna" },
     });
   });
+
+  it("forwards an explicit harness route and effort for staged launches", async () => {
+    mockSignedControlPlaneFetch.mockResolvedValue(
+      Response.json({ sessionId: "session-runtime", durableObjectId: "do-runtime" })
+    );
+
+    await createSession({
+      env: { CONTROL_PLANE: {} as Fetcher, SERVICE_AUTH_SECRET: "test-secret" },
+      target: {
+        repositoryKey: "repo-1",
+        fullName: "huangdong/chatbi",
+        displayName: "chatbi",
+        provider: "gitea",
+        connectionId: "gitea-primary",
+        connectionLabel: "Gitea",
+        defaultBranch: "main",
+      },
+      model: "openai/gpt-5.6-luna",
+      runtime: {
+        harness: "codex",
+        routeId: "codex:openai:subscription",
+        model: "openai/gpt-5.6-luna",
+        effort: "high",
+      },
+      actorId: "feishu:tenant:user",
+    });
+
+    const request = mockSignedControlPlaneFetch.mock.calls[0]?.[1] as { body?: string };
+    expect(JSON.parse(request.body ?? "{}")).toMatchObject({
+      runtime: {
+        harness: "codex",
+        routeId: "codex:openai:subscription",
+        model: "openai/gpt-5.6-luna",
+        effort: "high",
+      },
+    });
+  });
 });

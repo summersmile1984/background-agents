@@ -10,6 +10,7 @@ import {
   buildRuntimeHarnessOptions,
   RUNTIME_CAPABILITY_CATALOG_VERSION,
 } from "../agent-runtime/capabilities";
+import { buildRuntimeCommandOptions } from "../agent-runtime/commands";
 import {
   ModelRelayAdminClient,
   ModelRelayAdminError,
@@ -246,6 +247,10 @@ async function getCatalog(env: Env, ctx: { db: UserRouteContext["db"] }): Promis
           (credential.kind === "codex-auth-json" || credential.kind === "codex-access-token")
       ),
     }),
+    // Keep channel adapters on the same command vocabulary as the Web UI.
+    // Draft context deliberately exposes only commands that are meaningful
+    // before a session exists; session mutations are still server-validated.
+    commands: buildRuntimeCommandOptions({ context: "draft", harness: "opencode" }),
   });
 }
 

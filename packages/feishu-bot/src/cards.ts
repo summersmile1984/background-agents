@@ -1,11 +1,17 @@
 import type { FeishuCard } from "./feishu/client";
 import type { VisualVerificationReport } from "@open-inspect/shared/types/visual-verification";
 import type { FeishuRepositoryConnection, FeishuRepositoryTarget } from "./targets";
+import type {
+  RuntimeCommandOption,
+  RuntimeHarnessOption,
+  RuntimeModelOption,
+} from "@open-inspect/shared/types/runtime-launch";
 
 // Keep mobile cards short enough to scroll comfortably. Repository selection
 // uses buttons instead of select_static because Feishu's mobile selector opens
 // a searchable bottom sheet whose keyboard can cover the available actions.
 export const REPOSITORIES_PER_PAGE = 6;
+export const RUNTIME_MODELS_PER_PAGE = 8;
 const SESSION_LIST_LIMIT = 12;
 
 export function sessionShortId(sessionId: string): string {
@@ -165,6 +171,209 @@ export function buildRepositoryPickerCard(input: {
     ),
     ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : [])
   );
+  return card;
+}
+
+function readyModels(
+  harness: RuntimeHarnessOption
+): Array<RuntimeModelOption & { routeId: string }> {
+  return harness.routes.flatMap((route) =>
+    route.models
+      .filter((model) => model.ready)
+      .map((model) => ({ ...model, routeId: route.routeId }))
+  );
+}
+
+/** Continue a staged launch after a repository has been selected. */
+export function buildRuntimeHarnessPickerCard(input: {
+  pendingId: string;
+  target: FeishuRepositoryTarget;
+  harnesses: readonly RuntimeHarnessOption[];
+  commands?: readonly RuntimeCommandOption[];
+}): FeishuCard {
+  const card = title("选择 Harness");
+  const ready = input.harnesses.filter(
+    (harness) => harness.ready && readyModels(harness).length > 0
+  );
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: `代码源：**${input.target.connectionLabel}**\n仓库：**${input.target.fullName}**\n\n选择本次会话使用的 Harness。设置由运行时能力目录校验，不会把密钥放进卡片。`,
+    },
+  });
+  elements(card).push(
+    ...ready.map((harness) =>
+      buttonRow({
+        label: harness.displayName,
+        type: "primary",
+        value: {
+          action: "select_harness",
+          pendingId: input.pendingId,
+          connectionId: input.target.connectionId,
+          repositoryKey: input.target.repositoryKey,
+          harness: harness.harness,
+        },
+      })
+    )
+  );
+  const userSettings = ready
+    .flatMap((harness) => harness.settings.filter((setting) => setting.visibility === "user"))
+    .map((setting) => setting.label);
+  const commandNames = (input.commands ?? [])
+    .filter((command) => command.available)
+    .map((command) => `/${command.slashName}`)
+    .slice(0, 8);
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: [
+        ready.length === 0 ? "当前没有已就绪的 Harness，请到 Web 设置检查运行时凭据。" : undefined,
+        userSettings.length > 0
+          ? `可配置设置：${[...new Set(userSettings)].join("、")}（复杂设置请在 Web 会话中调整）`
+          : "Harness 设置当前遵循部署策略。",
+        commandNames.length > 0 ? `可用命令：${commandNames.join("、")}` : undefined,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  });
+  return card;
+}
+
+export function buildRuntimeModelPickerCard(input: {
+  pendingId: string;
+  target: FeishuRepositoryTarget;
+  harness: RuntimeHarnessOption;
+  page?: number;
+}): FeishuCard {
+  const card = title(`选择 ${input.harness.displayName} 模型`);
+  const allModels = readyModels(input.harness);
+  const pageCount = Math.max(1, Math.ceil(allModels.length / RUNTIME_MODELS_PER_PAGE));
+  const page = Math.min(Math.max(0, input.page ?? 0), pageCount - 1);
+  const models = allModels.slice(
+    page * RUNTIME_MODELS_PER_PAGE,
+    (page + 1) * RUNTIME_MODELS_PER_PAGE
+  );
+  const navigationActions: Record<string, unknown>[] = [];
+  if (page > 0) {
+    navigationActions.push({
+      tag: "button",
+      text: text("上一页"),
+      type: "default",
+      value: {
+        action: "runtime_model_page",
+        pendingId: input.pendingId,
+        connectionId: input.target.connectionId,
+        repositoryKey: input.target.repositoryKey,
+        harness: input.harness.harness,
+        page: page - 1,
+      },
+    });
+  }
+  if (page + 1 < pageCount) {
+    navigationActions.push({
+      tag: "button",
+      text: text("下一页"),
+      type: "default",
+      value: {
+        action: "runtime_model_page",
+        pendingId: input.pendingId,
+        connectionId: input.target.connectionId,
+        repositoryKey: input.target.repositoryKey,
+        harness: input.harness.harness,
+        page: page + 1,
+      },
+    });
+  }
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n\n只显示当前部署已启用且凭据就绪的模型。第 ${page + 1}/${pageCount} 页`,
+    },
+  });
+  elements(card).push(
+    ...models.map((model) =>
+      buttonRow({
+        label: `${model.displayName} · ${model.model}`,
+        value: {
+          action: "select_model",
+          pendingId: input.pendingId,
+          connectionId: input.target.connectionId,
+          repositoryKey: input.target.repositoryKey,
+          harness: input.harness.harness,
+          routeId: model.routeId,
+          model: model.model,
+        },
+      })
+    ),
+    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : [])
+  );
+  return card;
+}
+
+export function buildRuntimeEffortPickerCard(input: {
+  pendingId: string;
+  target: FeishuRepositoryTarget;
+  harness: RuntimeHarnessOption;
+  model: RuntimeModelOption;
+  routeId: string;
+  commands?: readonly RuntimeCommandOption[];
+}): FeishuCard {
+  const card = title("选择 Effort");
+  const efforts = input.model.efforts;
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n模型：**${input.model.displayName}**\n\n选择推理深度；没有该选项的模型将使用自身默认值。`,
+    },
+  });
+  const effortButtons = efforts.map((effort) =>
+    buttonRow({
+      label: effort.label,
+      type: effort.isDefault ? "primary" : "default",
+      value: {
+        action: "select_effort",
+        pendingId: input.pendingId,
+        connectionId: input.target.connectionId,
+        repositoryKey: input.target.repositoryKey,
+        harness: input.harness.harness,
+        routeId: input.routeId,
+        model: input.model.model,
+        effort: effort.value,
+      },
+    })
+  );
+  effortButtons.push(
+    buttonRow({
+      label: efforts.length > 0 ? "使用模型默认" : "开始会话",
+      type: "primary",
+      value: {
+        action: "select_effort",
+        pendingId: input.pendingId,
+        connectionId: input.target.connectionId,
+        repositoryKey: input.target.repositoryKey,
+        harness: input.harness.harness,
+        routeId: input.routeId,
+        model: input.model.model,
+        effort: "inherit",
+      },
+    })
+  );
+  elements(card).push(...effortButtons);
+  const commandNames = (input.commands ?? [])
+    .filter((command) => command.available)
+    .map((command) => `/${command.slashName}`)
+    .slice(0, 8);
+  if (commandNames.length > 0) {
+    elements(card).push({
+      tag: "div",
+      text: { tag: "lark_md", content: `创建后可在本话题使用：${commandNames.join("、")}` },
+    });
+  }
   return card;
 }
 

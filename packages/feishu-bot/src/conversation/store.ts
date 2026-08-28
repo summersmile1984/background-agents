@@ -1,5 +1,9 @@
 import { createKvCacheStore } from "@open-inspect/shared/cache-store";
 import { agentHarnessSchema, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
+import {
+  runtimeConfigFragmentSchema,
+  type RuntimeConfigFragment,
+} from "@open-inspect/shared/types/runtime-launch";
 import { z } from "zod";
 import type { Env } from "../types";
 
@@ -55,6 +59,10 @@ export interface FeishuConversationSessionSummary {
 export interface FeishuPendingRequest extends FeishuConversationCoordinates {
   actorId: string;
   content: string;
+  /** Repository/runtime selections are staged here until the final launch action. */
+  selectedRepositoryKey?: string;
+  selectedConnectionId?: string;
+  runtime?: RuntimeConfigFragment;
   createdAt: number;
 }
 
@@ -99,6 +107,9 @@ const pendingRequestSchema: z.ZodType<FeishuPendingRequest> = z.object({
   replyMode: z.enum(["thread", "flat"]),
   actorId: z.string().min(1),
   content: z.string().trim().min(1),
+  selectedRepositoryKey: z.string().min(1).optional(),
+  selectedConnectionId: z.string().min(1).optional(),
+  runtime: runtimeConfigFragmentSchema.optional(),
   createdAt: z.number().finite().nonnegative(),
 });
 
@@ -305,6 +316,22 @@ export async function getPendingRequest(
     })
     .safeParse(value);
   return legacy.success ? { ...legacy.data, chatType: "p2p", replyMode: "flat" } : null;
+}
+
+export async function updatePendingRequest(
+  env: Pick<Env, "FEISHU_KV">,
+  pendingId: string,
+  patch: Partial<
+    Pick<FeishuPendingRequest, "selectedRepositoryKey" | "selectedConnectionId" | "runtime">
+  >
+): Promise<FeishuPendingRequest | null> {
+  const current = await getPendingRequest(env, pendingId);
+  if (!current) return null;
+  const next = pendingRequestSchema.parse({ ...current, ...patch });
+  await createKvCacheStore(env.FEISHU_KV).put(pendingKey(pendingId), JSON.stringify(next), {
+    expirationTtl: PENDING_TTL_SECONDS,
+  });
+  return next;
 }
 
 export async function deletePendingRequest(
