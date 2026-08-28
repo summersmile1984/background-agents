@@ -383,6 +383,46 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("routes a private-chat reply by its root message instead of the latest session", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+      chatType: "p2p",
+      rootMessageId: "root-private-chat",
+      replyMode: "flat",
+      targetLabel: "huangdong/chatbi",
+    });
+    const privateReply = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "p2p" as const,
+          message_id: "private-reply-1",
+          root_id: "root-private-chat",
+          parent_id: "root-private-chat",
+          content: JSON.stringify({ text: "继续检查，不要修改文件" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(privateReply, env, "trace-private-reply");
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        content: "继续检查，不要修改文件",
+        callbackContext: expect.objectContaining({
+          rootMessageId: "root-private-chat",
+          replyMode: "flat",
+        }),
+      })
+    );
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+  });
+
   it("does not reveal the bound repository before rejecting another actor", async () => {
     mocks.lookupThreadSession.mockResolvedValue({
       ...thread,
