@@ -609,6 +609,14 @@ flag 关闭时出站 body 与当前生产等价。
   Plane 遗留队列测试；部署后仍需在真实飞书话题验证命令回执、stop
   confirmation、队列恢复，以及旧消息不会触发 Harness。
 
+发布验证记录：`35756563`（命令路由）、`bae9358d`（processing-aware stop）和
+`deea6579`（中文错误提示）对应的 CI/Terraform 均成功。生产飞书网页实际看到 `/stop`
+的“已收到命令，正在处理”与“已请求停止当前任务”，随后同一话题收到 `Execution was stopped`；`/status`
+返回
+`huangdong/chatbi@main`、Codex、`codex:openai:subscription`、模型、Effort、会话和沙盒状态。只读 service-auth 复核显示 processing/pending 队列在停止后均为空，旧版本遗留的 Feishu
+`/stop` 未再送入 Harness。视觉截图请求本轮因 `chatbi`
+缺少声明的视觉服务且原生浏览器调用无响应而停止，截图/preview artifact 仍不能标记为通过。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
