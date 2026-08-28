@@ -100,12 +100,17 @@ describe("canReuseThreadSession", () => {
 });
 
 describe("visualVerificationForPrompt", () => {
-  it.each(["生产视觉验证", "请截图验证这个页面", "请验证 UI", "verify ui after the change"])(
-    "enables verification for an explicit request: %s",
-    (prompt) => {
-      expect(visualVerificationForPrompt(prompt)).toEqual({});
-    }
-  );
+  it.each([
+    "生产视觉验证",
+    "请截图验证这个页面",
+    "截个图发给我",
+    "给我预览地址",
+    "capture the current page",
+    "请验证 UI",
+    "verify ui after the change",
+  ])("enables verification for an explicit request: %s", (prompt) => {
+    expect(visualVerificationForPrompt(prompt)).toEqual({});
+  });
 
   it("keeps ordinary coding prompts free of browser work", () => {
     expect(visualVerificationForPrompt("修复登录页面的按钮样式")).toBeUndefined();
