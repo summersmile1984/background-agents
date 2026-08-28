@@ -2,7 +2,8 @@
 
 ## 状态
 
-**Implementation in progress — 本地代码与自动测试已完成，等待生产部署和真实飞书 E2E。**
+**Implementation in progress
+— 生产线程路由、单话题续办与单仓库绑定已验收；双话题跨 SCM、移动端和回滚 E2E 仍待完成。**
 
 本文是把飞书多会话体验对齐 Slack thread 的实施依据。它聚焦已经上线的
 `packages/feishu-bot`，替代早期总方案中“用 `root_id`
@@ -362,13 +363,30 @@ flag 关闭时出站 body 与当前生产等价。
 
 ### 阶段 D：部署、权限和真实 E2E
 
-- [ ] 先部署代码，两个开关保持 false；
-- [ ] 在测试群开启 thread replies，bound follow-up 保持 false；
-- [ ] 验证带 @ 的话题并行 E2E；
-- [ ] 申请/发布群全部消息权限；
-- [ ] 开启 bound follow-up，验证话题内不 @ 续办和未绑定消息忽略；
+- [x] 向后兼容代码已部署到生产；
+- [x] 生产已开启 thread replies，并验证根消息派生原生话题；
+- [ ] 验证带 @ 的两个话题并行 E2E；
+- [x] 已发布群全部消息权限；
+- [x] 已开启 bound follow-up，并验证已绑定话题内不 @ 续办；
+- [x] 已验证一个话题只绑定一次仓库；旧仓库卡和并发选择由服务端拒绝；
+- [ ] 在生产验证未绑定、未 @ 群消息忽略，以及跨用户和旧卡片负向路径；
 - [ ] 完成 Web、飞书桌面/网页、飞书手机端验收；
 - [ ] 观察错误率后再扩大应用可见范围。
+
+### 7.1 生产验收证据（2026-08-28）
+
+- 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
+  `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
+- 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、
+  `threadId=omt_19f57e5e220d1b86`、`replyMode=thread` →
+  `sessionId=d0ecc91821aa7dcf8d8da93bb81b8599`、`repo=huangdong/chatbi`、
+  `harness=codex`。飞书卡显示短编号 `#95AC9C`，与该 session ID 的摘要一致。
+- 15:23 在既有话题发送不带 @ 的 follow-up；机器人先在原话题发送“已收到”回执，15:24在同一话题返回
+  `#95AC9C` 完成卡。KV 的 `sessionId` 和 `repositoryKey` 保持不变，只刷新
+  `updatedAt`/`lastMessageId`，且没有再次发送仓库选择卡。
+- 生产 Worker 绑定显示 `FEISHU_THREAD_REPLIES_ENABLED=true`、
+  `FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED=true`；completion 日志记录相同的 root/thread/session 坐标并成功投递。
+- 本轮只证明“同一话题续办不重选仓库、不换 session”。双话题 GitHub/Gitea 并行、截图/preview/PR 归属、跨用户、旧卡生产重放、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
 
 ## 8. 自动测试矩阵
 
@@ -506,7 +524,7 @@ feishu_error_code
 
 - [x] 自动测试覆盖新旧 payload、两个并行 session、completion/media 和负向授权；
 - [x] shared 先构建，Feishu、Control Plane、全局 typecheck/lint、Terraform fmt 全部通过；
-- [ ] 生产/测试部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
+- [x] 生产部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
 - [ ] 一个 GitHub session 与一个 Gitea
       session 在两个飞书话题并行运行，session/sandbox/branch 不交叉；
 - [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题；
