@@ -426,6 +426,20 @@ describe("buildImageBuildEnvVars", () => {
     }
   });
 
+  it("does not forward a clone token when using the SCM proxy", () => {
+    const envVars = buildImageBuildEnvVars({
+      sandboxId: "build-env-env_flagship",
+      repositories,
+      scmIdentity: scmCloneIdentity("github"),
+      cloneToken: "legacy-token",
+      cloneBaseUrl: "https://control-plane.example/git/build/build-1",
+    });
+
+    expect(envVars.VCS_CLONE_BASE_URL).toBe("https://control-plane.example/git/build/build-1");
+    expect(envVars.OI_SCM_PROXY_MODE).toBe("1");
+    expect(envVars).not.toHaveProperty("VCS_CLONE_TOKEN");
+  });
+
   it("throws when the repository list is empty", () => {
     expect(() =>
       buildImageBuildEnvVars({

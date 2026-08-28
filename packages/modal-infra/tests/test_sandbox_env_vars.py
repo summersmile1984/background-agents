@@ -148,6 +148,40 @@ async def test_create_sandbox_uses_server_side_scm_proxy_capability(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_restore_proxy_mode_drops_legacy_snapshot_clone_token(monkeypatch):
+    """A proxy-backed restore must not leak a legacy snapshot token."""
+    captured = {}
+
+    class FakeImage:
+        object_id = "img-proxy"
+
+    monkeypatch.setattr("src.sandbox.manager.modal.Image.from_id", lambda *a, **kw: FakeImage())
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
+    monkeypatch.delenv("SCM_PROVIDER", raising=False)
+
+    await SandboxManager().restore_from_snapshot(
+        snapshot_image_id="img-legacy",
+        session_config={
+            "session_id": "sess-1",
+            "repo_owner": "acme",
+            "repo_name": "repo",
+        },
+        control_plane_url="https://control-plane.example",
+        sandbox_auth_token="sandbox-capability",
+        scm_git_proxy_base_url="https://control-plane.example/git/session/sess-1",
+        scm_git_capability="oig_repo_scoped",
+        clone_token="legacy-snapshot-token",
+    )
+
+    env = captured["env"]
+    assert env["OI_SCM_PROXY_MODE"] == "1"
+    assert env["SCM_GIT_CAPABILITY"] == "oig_repo_scoped"
+    assert "VCS_CLONE_TOKEN" not in env
+    assert "GITHUB_TOKEN" not in env
+    assert "GITHUB_APP_TOKEN" not in env
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_rejects_insecure_scm_proxy(monkeypatch):
     with pytest.raises(ValueError, match="absolute HTTPS"):
         await SandboxManager().create_sandbox(

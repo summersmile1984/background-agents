@@ -454,7 +454,14 @@ export function buildImageBuildEnvVars(options: ImageBuildEnvVarsOptions): Recor
     }),
   });
 
-  applyScmCloneEnv(envVars, options.scmIdentity, options.cloneToken);
+  // A clone base URL is the server-side SCM proxy contract. The capability is
+  // supplied separately by the provider, so never forward a legacy/provider
+  // token into the proxy-mode build sandbox.
+  applyScmCloneEnv(
+    envVars,
+    options.scmIdentity,
+    options.cloneBaseUrl ? undefined : options.cloneToken
+  );
   if (options.cloneBaseUrl) {
     envVars.VCS_CLONE_BASE_URL = options.cloneBaseUrl.replace(/\/+$/, "");
     envVars.OI_SCM_PROXY_MODE = "1";

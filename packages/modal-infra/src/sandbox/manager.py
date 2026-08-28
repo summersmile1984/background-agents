@@ -418,6 +418,7 @@ class SandboxManager:
         inject_vcs_env_vars(
             env_vars,
             clone_token=clone_token if has_repository else None,
+            clone_base_url=config.scm_git_proxy_base_url,
             include_github_cli_aliases=include_github_cli_aliases,
         )
         if config.scm_git_proxy_base_url:

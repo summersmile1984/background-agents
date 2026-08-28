@@ -27,7 +27,10 @@ def inject_vcs_env_vars(
         env_vars["VCS_HOST"] = "github.com"
         env_vars["VCS_CLONE_USERNAME"] = "x-access-token"
 
-    if not clone_token:
+    # A clone base URL is the server-side SCM proxy contract.  In this mode
+    # the sandbox authenticates with the short-lived capability injected by
+    # the caller; never forward a legacy/provider token alongside it.
+    if not clone_token or clone_base_url:
         if clone_base_url:
             env_vars["VCS_CLONE_BASE_URL"] = clone_base_url.rstrip("/")
             env_vars["OI_SCM_PROXY_MODE"] = "1"
