@@ -276,12 +276,23 @@ export async function handleFeishuEvent(
     ).catch(() => undefined);
     return;
   }
-  if (existing && coordinates.threadId && existing.replyMode !== "thread") {
-    existing =
-      (await updateThreadSession(env, coordinates, {
-        threadId: coordinates.threadId,
+  if (existing) {
+    if (coordinates.threadId && existing.replyMode !== "thread") {
+      existing =
+        (await updateThreadSession(env, coordinates, {
+          threadId: coordinates.threadId,
+          replyMode: "thread",
+        })) ?? existing;
+    } else if (existing.replyMode === "thread" && coordinates.replyMode !== "thread") {
+      // Some Feishu clients omit thread_id on quote/reply events. Once the
+      // root is known to be a native topic, preserve the stored delivery mode
+      // instead of accidentally sending the follow-up to the main timeline.
+      coordinates = {
+        ...coordinates,
+        ...(existing.threadId ? { threadId: existing.threadId } : {}),
         replyMode: "thread",
-      })) ?? existing;
+      };
+    }
   }
   if (coordinates.chatType === "group") {
     const boundFollowUp =

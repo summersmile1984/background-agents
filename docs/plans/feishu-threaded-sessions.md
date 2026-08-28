@@ -435,6 +435,11 @@ flag 关闭时出站 body 与当前生产等价。
   flag 的 flat 降级也已加入回归测试，分别按根消息续办、原话题附带 PR
   URL，以及不影响既有 session 的方式校验。
 
+- 后续回归又覆盖了“引用回复只带 `root_id`/`parent_id`、不带
+  `thread_id`”的客户端变体：若根消息已绑定 native topic，dispatcher 会从 KV 恢复已存的
+  `threadId/replyMode`，不会把 follow-up 降级到主 timeline；Feishu
+  bot 本地回归现为 96 项，类型检查和 lint 均通过。
+
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
 - 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、

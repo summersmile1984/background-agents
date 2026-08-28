@@ -417,6 +417,60 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("preserves a stored topic when a reply event omits thread_id", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+      chatType: "group",
+      rootMessageId: "root-omitted-thread",
+      threadId: "stored-thread",
+      replyMode: "thread",
+    });
+    const followUp = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "group" as const,
+          message_id: "follow-up-omitted-thread",
+          root_id: "root-omitted-thread",
+          content: JSON.stringify({ text: "继续这个话题" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const groupEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED: "true",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(followUp, groupEnv, "trace-omitted-thread");
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        callbackContext: expect.objectContaining({
+          rootMessageId: "root-omitted-thread",
+          threadId: "stored-thread",
+          replyMode: "thread",
+        }),
+      })
+    );
+    expect(mocks.replySessionText).toHaveBeenNthCalledWith(
+      1,
+      groupEnv,
+      expect.objectContaining({
+        rootMessageId: "root-omitted-thread",
+        threadId: "stored-thread",
+        replyMode: "thread",
+      }),
+      expect.stringContaining("本话题沿用已绑定仓库")
+    );
+  });
+
   it("routes a private-chat reply by its root message instead of the latest session", async () => {
     mocks.lookupThreadSession.mockResolvedValue({
       ...thread,
