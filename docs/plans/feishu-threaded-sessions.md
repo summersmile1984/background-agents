@@ -406,8 +406,9 @@ flag 关闭时出站 body 与当前生产等价。
   均成功。生产 Feishu Worker 最新版本为
   `e56064f5-19e3-4828-9639-3f2ce3353390`（100% 流量）。本地 Feishu
   dispatcher 回归为 89 项，新增覆盖“正文唯一命中 repo 仍进入 Harness 选择”的路径。
-- 当前真实 Feishu 消息 E2E 的阻塞点不是代码部署：开发者后台“事件配置”仍显示“暂无数据”，尚未订阅
-  `im.message.receive_v1`，因此新消息不会到达生产 Worker，也不能把没有回执误判为运行时卡片失败。添加并发布该消息事件后，才能继续完成真实回执、Gitea/GitHub 卡片、Harness/模型/Effort 和话题续办验收。
+- 开发者后台现已添加并发布 `im.message.receive_v1`，事件请求地址为生产 Worker 的
+  `/events`，卡片回调仍指向
+  `/card-actions`。因此消息入口配置已完成；真实消息 E2E（回执、Gitea/GitHub 卡片、Harness/模型/Effort和话题续办）仍需发送一条无副作用测试消息后才能计入验收。
 
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
