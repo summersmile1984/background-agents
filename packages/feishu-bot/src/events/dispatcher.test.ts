@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   listConversationSessions: vi.fn(),
   storePendingRequest: vi.fn(),
   listRepositoryCatalog: vi.fn(),
+  getRuntimeCatalog: vi.fn(),
+  inferRepositoryTarget: vi.fn(() => null as unknown),
   sendPrompt: vi.fn(),
   updateThreadSession: vi.fn(),
 }));
@@ -47,10 +49,14 @@ vi.mock("../sessions/control-plane-client", () => ({
   sendPrompt: mocks.sendPrompt,
 }));
 
+vi.mock("../sessions/runtime-catalog", () => ({
+  getRuntimeCatalog: mocks.getRuntimeCatalog,
+}));
+
 vi.mock("../targets", () => ({
   findRepositoryTarget: vi.fn(),
   inferRepositoryBranch: vi.fn(() => undefined),
-  inferRepositoryTarget: vi.fn(() => undefined),
+  inferRepositoryTarget: mocks.inferRepositoryTarget,
   listRepositoryCatalog: mocks.listRepositoryCatalog,
   listRepositoryTargets: vi.fn(),
 }));
@@ -133,6 +139,8 @@ describe("handleFeishuEvent receipt", () => {
     mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
     mocks.updateThreadSession.mockResolvedValue(null);
     mocks.storePendingRequest.mockResolvedValue("pending-1");
+    mocks.getRuntimeCatalog.mockResolvedValue(null);
+    mocks.inferRepositoryTarget.mockReturnValue(undefined);
     mocks.listRepositoryCatalog.mockResolvedValue({
       connections: [
         {
@@ -458,6 +466,78 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.replySessionCard).toHaveBeenCalledOnce();
     expect(mocks.replySessionText.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.listRepositoryCatalog.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("stages runtime selection even when the repository is inferred from the prompt", async () => {
+    const inferredTarget = {
+      repositoryKey: "gitea-default:huangdong/chatbi",
+      fullName: "huangdong/chatbi",
+      displayName: "chatbi",
+      provider: "gitea",
+      connectionId: "gitea-default",
+      connectionLabel: "Gitea",
+      defaultBranch: "main",
+    };
+    mocks.inferRepositoryTarget.mockReturnValue(inferredTarget);
+    mocks.getRuntimeCatalog.mockResolvedValue({
+      harnesses: [
+        {
+          harness: "codex",
+          displayName: "Codex",
+          description: "Codex",
+          enabled: true,
+          runtimeAvailable: true,
+          ready: true,
+          settingsSchemaVersion: "1",
+          settings: [],
+          liveMutation: { model: false, effort: false, settings: [] },
+          routes: [
+            {
+              routeId: "codex:openai:subscription",
+              harness: "codex",
+              provider: "openai",
+              transport: "native",
+              displayName: "Codex subscription",
+              ready: true,
+              code: "READY",
+              models: [
+                {
+                  model: "openai/gpt-5.6-luna",
+                  displayName: "GPT 5.6 Luna",
+                  description: "",
+                  category: "general",
+                  routeId: "codex:openai:subscription",
+                  provider: "openai",
+                  enabled: true,
+                  ready: true,
+                  efforts: [],
+                  supportsAttachments: true,
+                  supportsToolEvents: true,
+                  supportsLiveModelSwitch: false,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      commands: [],
+    });
+
+    await handleFeishuEvent(event, env, "trace-inferred-runtime");
+
+    expect(mocks.storePendingRequest).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        content: "检查项目",
+        selectedRepositoryKey: inferredTarget.repositoryKey,
+        selectedConnectionId: inferredTarget.connectionId,
+      })
+    );
+    expect(mocks.replySessionCard).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ rootMessageId: "message-1" }),
+      expect.any(Object)
     );
   });
 

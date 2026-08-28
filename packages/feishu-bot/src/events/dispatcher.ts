@@ -1,7 +1,12 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
 import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
-import { buildConnectionPickerCard, buildSessionListCard, buildWorkingCard } from "../cards";
+import {
+  buildConnectionPickerCard,
+  buildRuntimeHarnessPickerCard,
+  buildSessionListCard,
+  buildWorkingCard,
+} from "../cards";
 import {
   listConversationSessions,
   lookupThreadSession,
@@ -19,6 +24,7 @@ import {
   defaultHarnessForModel,
   sendPrompt,
 } from "../sessions/control-plane-client";
+import { getRuntimeCatalog } from "../sessions/runtime-catalog";
 import {
   findRepositoryTarget,
   inferRepositoryBranch,
@@ -106,6 +112,36 @@ function receiptTextForConversation(existing: FeishuThreadSession | null, actor:
   // Do not reveal the bound repository before the actor/runtime checks in
   // deliverFollowUp have accepted this request.
   return "已收到，正在检查这个话题的会话状态。";
+}
+
+async function stageRuntimeSelection(input: {
+  env: Env;
+  coordinates: FeishuConversationCoordinates;
+  actor: string;
+  content: string;
+  target: Awaited<ReturnType<typeof listRepositoryTargets>>[number];
+  traceId: string;
+}): Promise<boolean> {
+  const runtimeCatalog = await getRuntimeCatalog(input.env, input.traceId);
+  if (!runtimeCatalog) return false;
+  const pendingId = await storePendingRequest(input.env, {
+    ...input.coordinates,
+    actorId: input.actor,
+    content: input.content,
+    selectedRepositoryKey: input.target.repositoryKey,
+    selectedConnectionId: input.target.connectionId,
+  });
+  await replySessionCard(
+    input.env,
+    input.coordinates,
+    buildRuntimeHarnessPickerCard({
+      pendingId,
+      target: input.target,
+      harnesses: runtimeCatalog.harnesses,
+      commands: runtimeCatalog.commands,
+    })
+  );
+  return true;
 }
 
 async function deliverFollowUp(input: {
@@ -356,6 +392,18 @@ export async function handleFeishuEvent(
         coordinates,
         buildConnectionPickerCard({ pendingId, connections: catalog.connections })
       );
+      return;
+    }
+    if (
+      await stageRuntimeSelection({
+        env,
+        coordinates,
+        actor,
+        content,
+        target: inferred,
+        traceId,
+      })
+    ) {
       return;
     }
     await startNewSession({
