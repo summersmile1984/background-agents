@@ -194,14 +194,14 @@ async def test_codex_driver_sends_visual_instruction_without_model_prefix_leakag
 
     await driver.start()
     async for _event in driver.stream_prompt(
-        HarnessPrompt(message_id="message-1", content="hello", model="openai/gpt-5.6")
+        HarnessPrompt(message_id="message-1", content="hello", model="openai/gpt-5.6-luna")
     ):
         pass
 
     thread_request = next(params for method, params in rpc.requests if method == "thread/start")
     turn_request = next(params for method, params in rpc.requests if method == "turn/start")
     assert thread_request["developerInstructions"] == VISUAL_VERIFICATION_SYSTEM_INSTRUCTION
-    assert turn_request["model"] == "gpt-5.6"
+    assert turn_request["model"] == "gpt-5.6-luna"
 
 
 def test_codex_driver_configures_https_model_relay():
