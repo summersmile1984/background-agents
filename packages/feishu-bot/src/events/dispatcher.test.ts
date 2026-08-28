@@ -457,6 +457,40 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
   });
 
+  it("uses parent_id when a private quote omits root_id", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+      chatType: "p2p",
+      rootMessageId: "root-quote-only",
+      targetLabel: "huangdong/chatbi",
+    });
+    const quoteReply = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "p2p" as const,
+          message_id: "quote-only-reply",
+          parent_id: "root-quote-only",
+          content: JSON.stringify({ text: "继续处理引用的任务" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(quoteReply, env, "trace-quote-only");
+
+    expect(mocks.lookupThreadSession).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ rootMessageId: "root-quote-only" })
+    );
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "session-1", content: "继续处理引用的任务" })
+    );
+  });
+
   it("does not reveal the bound repository before rejecting another actor", async () => {
     mocks.lookupThreadSession.mockResolvedValue({
       ...thread,

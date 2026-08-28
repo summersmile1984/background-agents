@@ -57,7 +57,10 @@ function messageCoordinates(
     tenantKey,
     chatId: message.chat_id,
     chatType,
-    rootMessageId: message.root_id || message.message_id,
+    // Reply events normally include both IDs. Some quote/reply clients only
+    // send parent_id, which still identifies the bound root for a direct
+    // reply; never fall back to the new message until both are absent.
+    rootMessageId: message.root_id || message.parent_id || message.message_id,
     ...(message.thread_id ? { threadId: message.thread_id } : {}),
     replyMode,
   };
