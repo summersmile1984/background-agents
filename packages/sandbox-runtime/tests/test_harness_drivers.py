@@ -221,6 +221,28 @@ def test_codex_driver_configures_https_model_relay():
     ]
 
 
+def test_codex_driver_configures_chatgpt_base_url_for_hosted_mcp_relay():
+    driver = CodexHarnessDriver(
+        workspace_path="/workspace",
+        log=Log(),
+        environment={
+            "CODEX_OPENAI_BASE_URL": "https://codex-relay.example.test",
+            "CODEX_APP_SERVER_CHATGPT_BASE_URL": "https://codex-relay.example.test/backend-api",
+        },
+    )
+
+    assert driver._rpc._command == [
+        "codex",
+        "-c",
+        'openai_base_url="https://codex-relay.example.test"',
+        "-c",
+        'chatgpt_base_url="https://codex-relay.example.test/backend-api"',
+        "app-server",
+        "--stdio",
+        "--strict-config",
+    ]
+
+
 def test_codex_driver_rejects_insecure_model_relay():
     try:
         CodexHarnessDriver(

@@ -24,6 +24,23 @@ test("keeps the existing ChatGPT Responses route", () => {
   });
 });
 
+test("maps ChatGPT hosted MCP traffic through the relay", () => {
+  assert.deepEqual(routeForRequest("/backend-api/ps/mcp?cursor=next"), {
+    kind: "chatgpt",
+    upstreamHost: "chatgpt.com",
+    upstreamPath: "/backend-api/ps/mcp?cursor=next",
+  });
+  assert.deepEqual(routeForRequest("/ps/mcp"), {
+    kind: "chatgpt",
+    upstreamHost: "chatgpt.com",
+    upstreamPath: "/backend-api/ps/mcp",
+  });
+});
+
+test("does not turn arbitrary ChatGPT backend paths into a proxy", () => {
+  assert.equal(routeForRequest("/backend-api/ps/plugins/installed"), null);
+});
+
 test("maps authenticated DeepSeek OpenAI and Anthropic routes", () => {
   assert.deepEqual(routeForRequest("/sessions/session_1/deepseek/openai/v1/chat/completions"), {
     kind: "deepseek",

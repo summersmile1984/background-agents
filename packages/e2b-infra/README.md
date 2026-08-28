@@ -149,6 +149,11 @@ app-server can use an HTTPS relay by adding a global Open-Inspect secret named
 `CODEX_OPENAI_BASE_URL`. The value is passed to Codex as its `openai_base_url` configuration and is
 excluded from the commands Codex runs inside the workspace.
 
+When the control plane manages this relay, it also injects
+`CODEX_APP_SERVER_CHATGPT_BASE_URL=<relay>/backend-api` for native Codex app-server sessions. This
+routes Codex-hosted MCP discovery and tool traffic (including `/ps/mcp`) through the same ingress;
+the relay allowlists that endpoint and does not become a general ChatGPT backend proxy.
+
 `codex-relay.mjs` is the restricted host-side relay used by the self-hosted Cube deployment. It
 keeps the existing ChatGPT subscription path and also exposes session-scoped DeepSeek OpenAI
 Responses, Chat Completions, and Anthropic Messages paths. For DeepSeek, the sandbox sends its

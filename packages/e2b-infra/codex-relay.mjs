@@ -15,7 +15,9 @@ import {
 import { createRelayAdminAuthenticator } from "./relay-admin-auth.mjs";
 
 const CHATGPT_UPSTREAM_HOST = "chatgpt.com";
+const CHATGPT_BACKEND_PREFIX = "/backend-api";
 const CHATGPT_UPSTREAM_PREFIX = "/backend-api/codex";
+const CHATGPT_MCP_PATH = "/ps/mcp";
 const DEEPSEEK_UPSTREAM_HOST = "api.deepseek.com";
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -73,6 +75,14 @@ function canonicalDeepSeekPath(protocol, pathname) {
 
 export function routeForRequest(rawUrl) {
   const url = new URL(rawUrl || "/", "http://relay.invalid");
+  const chatGptMcpPath = `${CHATGPT_BACKEND_PREFIX}${CHATGPT_MCP_PATH}`;
+  if (url.pathname === CHATGPT_MCP_PATH || url.pathname === chatGptMcpPath) {
+    return {
+      kind: "chatgpt",
+      upstreamHost: CHATGPT_UPSTREAM_HOST,
+      upstreamPath: `${chatGptMcpPath}${url.search}`,
+    };
+  }
   const chatGptAllowed =
     url.pathname === "/models" ||
     url.pathname === "/responses" ||

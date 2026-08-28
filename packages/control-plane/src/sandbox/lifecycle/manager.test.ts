@@ -976,6 +976,7 @@ describe("SandboxLifecycleManager", () => {
           userEnvVars: {
             DATABASE_URL: "postgres://example",
             CODEX_OPENAI_BASE_URL: "https://relay.example.com",
+            CODEX_APP_SERVER_CHATGPT_BASE_URL: "https://relay.example.com/backend-api",
             DEEPSEEK_RELAY_BASE_URL: "https://relay.example.com",
           },
         })
@@ -3446,6 +3447,7 @@ describe("SandboxLifecycleManager", () => {
           userEnvVars: {
             DATABASE_URL: "postgres://example",
             CODEX_OPENAI_BASE_URL: "https://relay.example.com",
+            CODEX_APP_SERVER_CHATGPT_BASE_URL: "https://relay.example.com/backend-api",
             DEEPSEEK_RELAY_BASE_URL: "https://relay.example.com",
           },
         })

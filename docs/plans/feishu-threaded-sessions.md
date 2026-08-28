@@ -505,6 +505,9 @@ flag 关闭时出站 body 与当前生产等价。
   `config_missing`/`service_not_found`，不能声称截图通过。
 - 本次 Codex 视觉请求随后因 sandbox 内访问 `https://chatgpt.com/backend-api/ps/mcp`
   持续网络重试和模型刷新超时而失败，未产生 artifact/preview；这是 Harness 网络依赖问题，不是沙盒启动或元数据缺失问题。该负向结果保留，不能计入“截图/preview 已验收”。
+- 后续修复已将生产 relay 的 native Codex ChatGPT base URL 指向
+  `https://codex-relay-summersmile1984.89347589.org/backend-api`，并在 Host relay 中仅开放
+  `/ps/mcp`（含 `/backend-api/ps/mcp`）到 ChatGPT 上游；Responses 与插件路径仍按原有严格白名单处理。
 
 ## 8. 自动测试矩阵
 

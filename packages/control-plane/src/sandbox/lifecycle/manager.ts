@@ -303,6 +303,7 @@ function withManagedRuntimeEnv(
   return {
     ...(userEnvVars ?? {}),
     CODEX_OPENAI_BASE_URL: modelRelayPublicUrl,
+    CODEX_APP_SERVER_CHATGPT_BASE_URL: `${modelRelayPublicUrl.replace(/\/+$/, "")}/backend-api`,
     DEEPSEEK_RELAY_BASE_URL: modelRelayPublicUrl,
   };
 }

@@ -39,6 +39,7 @@ _SECRET_ENV_NAMES = (
 )
 _REASONING_EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh"}
 _CODEX_BASE_URL_ENV = "CODEX_OPENAI_BASE_URL"
+_CHATGPT_BASE_URL_ENV = "CODEX_APP_SERVER_CHATGPT_BASE_URL"
 _BUILTIN_MCP_ENV_NAMES = (
     "CONTROL_PLANE_URL",
     "SANDBOX_AUTH_TOKEN",
@@ -283,6 +284,19 @@ class CodexHarnessDriver:
             ):
                 raise ValueError(f"{_CODEX_BASE_URL_ENV} must be an HTTPS URL without userinfo")
             command.extend(["-c", f"openai_base_url={json.dumps(base_url)}"])
+        chatgpt_base_url = environment.get(_CHATGPT_BASE_URL_ENV, "").strip().rstrip("/")
+        if chatgpt_base_url:
+            parsed = urlsplit(chatgpt_base_url)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise ValueError(f"{_CHATGPT_BASE_URL_ENV} must be an HTTPS URL without userinfo")
+            command.extend(["-c", f"chatgpt_base_url={json.dumps(chatgpt_base_url)}"])
         command.extend(["app-server", "--stdio", "--strict-config"])
         return command
 
