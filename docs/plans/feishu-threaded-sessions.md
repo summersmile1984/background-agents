@@ -425,6 +425,8 @@ flag 关闭时出站 body 与当前生产等价。
   `master`。19:41 同一话题收到 `#A41DFC`
   完成卡，仓库检查无文件变化。期间故意在已绑定的 Gitea 话题内发送 GitHub 文本，系统正确回执“沿用 huangdong/chatbi”，证明话题不能原地换 repo。Codex 尝试的 child-session 操作返回
   `HTTP 409: Approval policy cannot be configured at session scope`，未创建额外可运行子会话，不影响父会话完成。
+- 随后在同一飞书群发送未 @ 机器人的顶层消息
+  `Open-Inspect negative routing smoke test: no bot mention, this message should be ignored.`；等待 5 秒未出现机器人回执、选择卡或新会话，证明未绑定群消息不会误触发运行时流程。
 
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
