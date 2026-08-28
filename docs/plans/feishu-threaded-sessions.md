@@ -569,6 +569,9 @@ flag 关闭时出站 body 与当前生产等价。
   47 项通过（1 项按设计跳过），全仓 typecheck 通过；工作区保持干净。
 - 通过已登录飞书网页确认生产卡片仍显示 Gitea 仓库、Harness、模型和 Effort，并保留同话题完成消息。浏览器当前可见的独立 AIO 预览页也能加载并显示
   `Chromium + CDP + Browser MCP + Cube ready`。
+- `d83f86c6` 补充了“截个图/截屏/预览/截图”等自然语言视觉请求识别；CI `33192629856` 与 Terraform
+  `33192629876` 均成功。当前生产 Feishu/Control Plane 版本分别为
+  `679c1f0d-c4c7-4be5-9f73-97baefffb094` 与 `c46b1200-7e0b-4a1d-b314-e0f850cbeeda`。
 - 仍不把以下项目标记为完成：从真实 Feishu 话题上传截图/preview
   artifact、第二个飞书身份的跨用户拒绝、手机端键盘遮挡、关闭 rollout
   flag 的回滚演练。当前环境只有一个飞书身份，且 `huangdong/chatbi`
