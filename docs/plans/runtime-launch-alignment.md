@@ -2,11 +2,16 @@
 
 ## Status
 
-Proposed design based on a code-path audit and a read-only production UI walkthrough. The current
-implementation has working source-control connection selection and four sandbox harness drivers, but
-the complete launch configuration is not governed by one capability model. This document defines the
-target product flow, logical data model, control-plane contracts, channel behavior, migration
-sequence, and acceptance gates.
+The design is implemented through the capability catalog, target-aware resolver, immutable
+`LaunchSpec`, and the four sandbox harness drivers. Source-control connections, Web, Slack, and
+Feishu now consume the same resolved runtime fields; Gitea connections are pinned independently of
+the selected harness. This document remains the architecture and acceptance reference for the
+remaining compatibility cleanup and production matrix checks.
+
+Implementation note: provider-qualified model IDs are canonical in the control plane (for example
+`openai/gpt-5.6-luna`), while the native Codex driver strips the provider prefix before sending
+`gpt-5.6-luna` to Codex app-server. The regression is covered by
+`packages/sandbox-runtime/tests/test_harness_drivers.py`.
 
 This design builds on `gitea-multi-provider.md`. Source-control connections and agent harnesses are
 orthogonal axes: selecting Gitea must not imply a particular harness, and selecting Codex must not
