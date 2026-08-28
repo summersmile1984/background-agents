@@ -50,6 +50,7 @@ interface DeliverMediaArtifactsInput {
   env: Env;
   deliveryId: string;
   tenantKey: string;
+  chatId: string;
   sessionId: string;
   messageId: string;
   rootMessageId: string;
@@ -378,7 +379,14 @@ export async function deliverFeishuMediaArtifacts(
       try {
         const replyMessage = await replySessionImage(
           input.env,
-          { rootMessageId: input.rootMessageId, replyMode: input.replyMode ?? "flat" },
+          {
+            tenantKey: input.tenantKey,
+            chatId: input.chatId,
+            chatType: input.chatType ?? "p2p",
+            rootMessageId: input.rootMessageId,
+            ...(input.threadId ? { threadId: input.threadId } : {}),
+            replyMode: input.replyMode ?? "flat",
+          },
           imageKey
         );
         result.replied += 1;

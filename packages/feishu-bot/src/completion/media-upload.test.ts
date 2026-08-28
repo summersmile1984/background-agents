@@ -41,6 +41,7 @@ function createEnv(controlPlaneFetch: ReturnType<typeof vi.fn>): Env {
 const baseInput = {
   deliveryId: "00000000-0000-4000-8000-000000000001",
   tenantKey: "tenant-1",
+  chatId: "chat-1",
   sessionId: "session-1",
   messageId: "message-1",
   rootMessageId: "root-1",

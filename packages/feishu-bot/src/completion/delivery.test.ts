@@ -71,6 +71,7 @@ describe("Feishu completion delivery", () => {
       env,
       deliveryId: job.deliveryId,
       tenantKey: job.tenantKey,
+      chatId: job.chatId,
       sessionId: job.sessionId,
       messageId: job.messageId,
       rootMessageId: job.rootMessageId,
