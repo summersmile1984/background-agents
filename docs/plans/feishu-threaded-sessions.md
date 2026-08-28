@@ -840,6 +840,10 @@ feishu_error_code
   话题中发送 `/status`，真实飞书 Web 收到回执和状态结果，证明标准 UUID 已兼容飞书回复 API。
 - 本轮全仓回归也通过：TypeScript 各 workspace 合计 5,522 项测试，Modal 196 项，sandbox-runtime
   892 项（另 1 项按环境跳过）。
+- 后续提交 `b4af3ef9` 将 UUID 改为由消息 ID/用途稳定派生；CI run `33214537199` 与 Terraform Apply
+  run `33214537196` 均成功。2026-08-29 05:57 在同一话题再次发送
+  `/status`，回执和状态结果正常，Cloudflare Worker 日志仅记录入口与 `message.received`，未再出现
+  `event.dispatch` 错误。
 
 ## 12. 完成定义
 
