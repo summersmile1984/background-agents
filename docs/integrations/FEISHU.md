@@ -31,7 +31,7 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
 - 创建 session、将结果回传同一飞书主题，并提供 Web session、PR 和可用的沙盒预览链接。
 - 完成卡展示视觉验证状态和截图数量。启用 `FEISHU_MEDIA_DELIVERY_ENABLED=true`
   后，Worker 通过服务认证读取本次 prompt 的截图 artifact、上传为飞书图片并回复原主题；图片 key 不持久化。
-- 机器人发出的回执、工作卡、完成卡和截图会登记短期消息别名；用户在私聊中引用机器人卡片时，即使飞书事件只带
+- 机器人发出的回执、工作卡、完成卡、截图和媒体警告会登记短期消息别名；用户在私聊中引用机器人卡片时，即使飞书事件只带
   `parent_id`，也能恢复原 session 和话题坐标，不会误路由到最近会话。
 - 事件与卡片回调的 verification token、加密载荷、签名、事件/action 去重与 Control
   Plane 回调签名验证。
