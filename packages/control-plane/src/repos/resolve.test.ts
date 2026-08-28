@@ -125,7 +125,9 @@ describe("resolveSessionRepositories", () => {
 
     expect(error).toBeInstanceOf(HttpError);
     expect((error as HttpError).status).toBe(500);
-    expect((error as HttpError).message).toContain("acme/frontend (not installed");
+    expect((error as HttpError).message).toContain(
+      "acme/frontend (not accessible through the configured source-control connection"
+    );
     expect((error as HttpError).message).toContain("acme/backend (resolution failed)");
   });
 

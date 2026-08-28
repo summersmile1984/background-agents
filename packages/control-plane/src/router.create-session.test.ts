@@ -255,7 +255,10 @@ describe("handleCreateSession D1 ordering", () => {
 
   it("maps route HttpError failures through the central dispatch catch", async () => {
     vi.mocked(resolveRepoOrError).mockRejectedValue(
-      new HttpError("Repository is not installed for the GitHub App", 404)
+      new HttpError(
+        "Repository is not accessible through the configured source-control connection",
+        404
+      )
     );
 
     const initFetch = vi.fn(async () => Response.json({ status: "created" }));
@@ -263,7 +266,7 @@ describe("handleCreateSession D1 ordering", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      error: "Repository is not installed for the GitHub App",
+      error: "Repository is not accessible through the configured source-control connection",
     });
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("*");
     expect(response.headers.get("x-request-id")).toBeTruthy();

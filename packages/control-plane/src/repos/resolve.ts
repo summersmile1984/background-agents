@@ -242,7 +242,7 @@ export async function resolveSessionRepositories(
           return {
             input,
             ref: null,
-            reason: "not installed for the GitHub App",
+            reason: "not accessible through the configured source-control connection",
             errored: false,
           };
         }

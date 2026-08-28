@@ -291,7 +291,10 @@ export async function resolveRepoOrError(
     throw new HttpError(isConfigError ? message : "Failed to resolve repository", 500);
   }
   if (!resolved) {
-    throw new HttpError("Repository is not installed for the GitHub App", 404);
+    throw new HttpError(
+      "Repository is not accessible through the configured source-control connection",
+      404
+    );
   }
   return resolved;
 }
