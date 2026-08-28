@@ -794,6 +794,9 @@ feishu_error_code
   mode，因此多个私聊会话可以在同一 timeline 中并行续办。
 - Feishu
   bot 单测现为 17 个文件、121 项通过，覆盖成功续办、未知编号拒绝和跨用户索引隔离；全仓 typecheck/lint 通过。该路径尚未在第二个真实飞书账号上做 E2E，因此跨用户的生产证据仍保持未完成。
+- 提交 `1cf53ad6` 已通过 CI `33205431628` 与 Terraform 生产发布 `33205431594`；发布后 Feishu
+  `/healthz` 和 Control Plane `/health`
+  均正常。该实现只新增显式寻址，不改变原有话题绑定或默认新顶层任务语义。
 
 ## 12. 完成定义
 
