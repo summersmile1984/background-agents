@@ -680,6 +680,20 @@ describe("evaluateInactivityTimeout", () => {
 
     expect(decision.action).toBe("timeout");
   });
+
+  it("does not stop a running sandbox while a prompt is processing", () => {
+    const now = Date.now();
+    const state: InactivityState = {
+      lastActivity: now - config.timeoutMs - 1000,
+      status: "running",
+      connectedClientCount: 0,
+      isProcessing: true,
+    };
+
+    const decision = evaluateInactivityTimeout(state, config, now);
+
+    expect(decision).toEqual({ action: "schedule", nextCheckMs: config.minCheckIntervalMs });
+  });
 });
 
 // ==================== Heartbeat Health Tests ====================

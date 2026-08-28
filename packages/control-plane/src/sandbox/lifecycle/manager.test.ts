@@ -2084,6 +2084,38 @@ describe("SandboxLifecycleManager", () => {
       expect(onSandboxTerminating).toHaveBeenCalledOnce();
     });
 
+    it("keeps a sandbox alive while a prompt is processing", async () => {
+      const now = Date.now();
+      const sandbox = createMockSandbox({
+        status: "running",
+        last_heartbeat: now - 10000,
+        last_activity: now - 11 * 60 * 1000,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const stopSandbox = vi.fn(async () => ({ success: true }));
+      const provider = createMockProvider({ stopSandbox });
+      const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const alarmScheduler = createMockAlarmScheduler();
+
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false, 0),
+        alarmScheduler,
+        createMockIdGenerator(),
+        createTestConfig(),
+        { onSandboxTerminating, isProcessing: () => true }
+      );
+
+      await manager.handleAlarm();
+
+      expect(onSandboxTerminating).not.toHaveBeenCalled();
+      expect(stopSandbox).not.toHaveBeenCalled();
+      expect(sandbox.status).toBe("running");
+      expect(alarmScheduler.scheduleAlarm).toHaveBeenCalled();
+    });
+
     it("does not call onSandboxTerminating when no callback provided", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({

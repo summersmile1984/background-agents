@@ -1237,6 +1237,7 @@ export class SessionDO extends DurableObject<Env> {
       {
         onSandboxTerminating: () => this.messageQueue.failStuckProcessingMessage(),
         onSandboxTerminated: () => this.messageQueue.resumeAfterSandboxTermination(),
+        isProcessing: () => this.messageRepository.getProcessingMessage() !== null,
       },
       imageBuildLookup
     );

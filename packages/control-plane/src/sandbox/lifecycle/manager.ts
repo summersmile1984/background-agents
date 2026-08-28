@@ -361,6 +361,8 @@ export interface LifecycleCallbacks {
   onSandboxTerminating?: () => Promise<void>;
   /** Called after the sandbox is terminal and cannot reconnect. */
   onSandboxTerminated?: () => Promise<void>;
+  /** Returns true while a prompt is actively being processed by the sandbox. */
+  isProcessing?: () => boolean;
 }
 
 // ==================== Manager ====================
@@ -1425,6 +1427,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       lastActivity: sandbox.last_activity,
       status: sandbox.status as SandboxStatus,
       connectedClientCount: connectedClients,
+      isProcessing: this.callbacks.isProcessing?.() ?? false,
     };
 
     const inactivityDecision = evaluateInactivityTimeout(

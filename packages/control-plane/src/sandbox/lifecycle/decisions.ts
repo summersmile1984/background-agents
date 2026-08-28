@@ -318,6 +318,8 @@ export interface InactivityState {
   status: SandboxStatus;
   /** Number of connected client WebSockets */
   connectedClientCount: number;
+  /** Whether a prompt is currently being processed by the sandbox. */
+  isProcessing?: boolean;
 }
 
 /**
@@ -392,6 +394,14 @@ export function evaluateInactivityTimeout(
 
   // Only check inactivity for ready or running sandboxes
   if (state.status !== "ready" && state.status !== "running") {
+    return { action: "schedule", nextCheckMs: config.minCheckIntervalMs };
+  }
+
+  // A native harness can spend several minutes waiting on a model/provider
+  // response without emitting a tool or token event. That is still active
+  // work, and the execution-timeout alarm is the correct failure boundary.
+  // Do not let the shorter idle-sandbox timer terminate an in-flight prompt.
+  if (state.isProcessing) {
     return { action: "schedule", nextCheckMs: config.minCheckIntervalMs };
   }
 
