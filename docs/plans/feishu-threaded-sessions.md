@@ -3,7 +3,7 @@
 ## 状态
 
 **Implementation in progress
-— 生产线程路由、单话题续办与单仓库绑定已验收；运行时选择卡已接入，双话题跨 SCM、移动端和回滚 E2E 仍待完成。**
+— 生产线程路由、单话题续办、单仓库绑定和视觉截图/预览回传已验收；跨用户、私聊多会话、飞书移动端交互和回滚 E2E 仍待完成。**
 
 本文是把飞书多会话体验对齐 Slack thread 的实施依据。它聚焦已经上线的
 `packages/feishu-bot`，替代早期总方案中“用 `root_id`
@@ -572,10 +572,9 @@ flag 关闭时出站 body 与当前生产等价。
 - `d83f86c6` 补充了“截个图/截屏/预览/截图”等自然语言视觉请求识别；CI `33192629856` 与 Terraform
   `33192629876` 均成功。当前生产 Feishu/Control Plane 版本分别为
   `679c1f0d-c4c7-4be5-9f73-97baefffb094` 与 `c46b1200-7e0b-4a1d-b314-e0f850cbeeda`。
-- 仍不把以下项目标记为完成：从真实 Feishu 话题上传截图/preview
-  artifact、第二个飞书身份的跨用户拒绝、手机端键盘遮挡、关闭 rollout
-  flag 的回滚演练。当前环境只有一个飞书身份，且 `huangdong/chatbi`
-  没有仓库声明的视觉验证服务；这些项目需在具备相应 fixture/账号时单独验收。
+- 当时仍未完成的项目是：第二个飞书身份的跨用户拒绝、手机端键盘遮挡、关闭 rollout
+  flag 的回滚演练；截图/preview
+  artifact 已在 7.8 的真实视觉 fixture 验收中补齐。当前环境仍只有一个飞书身份，因此跨用户路径需另行安排账号验证。
 
 ### 7.6 现场诊断：视觉请求排队（2026-08-28 17:20 UTC）
 
@@ -749,6 +748,27 @@ feishu_error_code
 - 若必须回退 Worker 版本，旧代码会忽略可选 callback 字段并 flat 回复，功能降级但不破坏 Control Plane
   session。
 
+### 7.8 生产视觉截图与预览回传（2026-08-28）
+
+- 在已登录的飞书网页端创建新的顶层话题，发送只读视觉验收请求：GitHub
+  `summersmile1984/background-agents` 的 `codex/visual-e2e-fixture`
+  分支；按卡片选择Codex、`openai/gpt-5.6-luna` 和
+  `xhigh`。该话题只创建一个 session，未修改仓库内容。
+- 对应 session `7777312f060800528e36e32fceedc1ac` 最终完成；运行时确认分支 commit
+  `fbf0298`，声明服务 `visual-fixture` 在沙盒端口 `4173` 启动并通过健康检查。桌面场景
+  `1440×900`（viewport）与手机场景 `390×844`（full-page）的断言全部通过。
+- 两张截图均由沙盒标准 visual-verification 流程上传并回到原 Feishu 话题：artifact
+  `374b5d825360828969c44d9ae8e29929`（桌面）和
+  `0e8dedf674227864e151911b08d60d95`（手机）。完成卡显示“视觉验证已通过：2 个场景，2 张截图”，并提供“打开预览”入口。
+- 预览网关返回 HTTP 200；可访问地址为
+  `https://preview.89347589.org/sandbox/9f1c820121a647509c4842cdfd9c895e/4173/`，手机场景为同路径下的
+  `responsive`。网页端已实际打开该地址并分别采集桌面/手机截图，确认沙盒外可见。
+- 首次 verifier 运行因目标镜像 `agent-browser 0.21.2` 对子命令位置的 `--timeout`
+  兼容性失败；只读探针确认服务和浏览器均正常后，使用运行时正确的等待时限重试，清理同一 message 的阻塞报告，最终标准流程上传成功。该诊断不会把失败的临时报告误报为通过。
+- 预览 URL 使用 Cube 返回的实际 sandbox
+  ID（`9f1c…`），不是运行时环境变量中的逻辑标签；这是 Cloudflare
+  preview 路由验证的必要条件。沙盒服务保持运行，原仓库工作区无文件变化。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
@@ -758,7 +778,7 @@ feishu_error_code
 - [x] 生产部署中 `reply_in_thread=true` 的请求和返回 `thread_id` 有安全日志证据；
 - [x] 一个 GitHub session 与一个 Gitea
       session 在两个飞书话题并行运行，session/sandbox/branch 不交叉；
-- [ ] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题（follow-up、完成卡与 PR 已有代码/生产证据，截图与 preview 仍待真实视觉任务）；
+- [x] follow-up、完成卡、截图、preview 和 PR 全部回到正确话题（视觉 artifact 已由真实 Feishu 话题验收）；
 - [x] 未绑定群消息不触发；
 - [ ] 跨用户和未过期旧卡片不能控制 session（已有单测与过期卡生产证据，仍待另一用户/未过期卡实测）；
 - [ ] 私聊两个 session 不依赖隐式当前会话且可以显式续办；
