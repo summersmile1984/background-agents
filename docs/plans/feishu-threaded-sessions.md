@@ -838,6 +838,8 @@ feishu_error_code
 - 提交 `9843a3b1` 的 CI run `33213599905` 与 Terraform Apply run `33213599916` 均成功；生产
   `/healthz` 和 Control Plane `/health` 均正常。2026-08-29 05:45 在既有 Gitea `huangdong/chatbi`
   话题中发送 `/status`，真实飞书 Web 收到回执和状态结果，证明标准 UUID 已兼容飞书回复 API。
+- 本轮全仓回归也通过：TypeScript 各 workspace 合计 5,522 项测试，Modal 196 项，sandbox-runtime
+  892 项（另 1 项按环境跳过）。
 
 ## 12. 完成定义
 
