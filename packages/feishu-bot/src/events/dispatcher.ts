@@ -137,6 +137,9 @@ function runtimeCommandResultText(input: {
     if (input.response.reason === "stale") {
       return "这个话题绑定的会话已经失效，请发送新的顶层任务创建新会话。";
     }
+    if (input.response.error === "Unavailable in the current session state") {
+      return "当前会话没有可执行此命令的运行中任务。";
+    }
     return input.response.error || `命令 /${input.slashName} 暂时不可用，请稍后重试。`;
   }
   const data = input.response.data;
