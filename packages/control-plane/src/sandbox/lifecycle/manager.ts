@@ -46,7 +46,11 @@ import {
 import { createLogger, type Logger } from "../../logger";
 import { hashToken } from "../../auth/crypto";
 import { mintJwt } from "../../auth/jwt";
-import { repoImageBuildScope, type ImageBuildScope } from "../../image-builds/model";
+import {
+  repoImageBuildScope,
+  repoImageBuildScopeByRepositoryKey,
+  type ImageBuildScope,
+} from "../../image-builds/model";
 import { parsePersistedSandboxSettings } from "../settings";
 import {
   evaluateImageBuildForSpawn,
@@ -575,8 +579,11 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
           repositories
         );
       } else if (hasRepository && repositories.length === 1) {
+        const repository = repositories[0];
         selectedImage = await this.lookupImageBuildForSpawn(
-          repoImageBuildScope(repositories[0].repoOwner, repositories[0].repoName),
+          repository.repositoryKey
+            ? repoImageBuildScopeByRepositoryKey(repository.repositoryKey)
+            : repoImageBuildScope(repository.repoOwner, repository.repoName),
           repositories
         );
       }

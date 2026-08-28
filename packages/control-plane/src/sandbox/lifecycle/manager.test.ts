@@ -2448,6 +2448,15 @@ describe("SandboxLifecycleManager", () => {
     const REPO_MEMBER: SessionRepositoryInfo[] = [
       { repoOwner: "testowner", repoName: "testrepo", baseBranch: "main" },
     ];
+    const STABLE_REPO_MEMBER: SessionRepositoryInfo[] = [
+      {
+        repositoryKey: "repo_gitea_42",
+        connectionId: "scm_gitea_primary",
+        repoOwner: "testowner",
+        repoName: "testrepo",
+        baseBranch: "main",
+      },
+    ];
 
     async function repoImageRow(
       overrides: Partial<ImageBuildSpawnRow> = {}
@@ -2464,11 +2473,18 @@ describe("SandboxLifecycleManager", () => {
       };
     }
 
+    async function stableRepoImageRow(): Promise<ImageBuildSpawnRow> {
+      return repoImageRow({
+        repositories_fingerprint: await computeRepositoriesFingerprint(STABLE_REPO_MEMBER),
+      });
+    }
+
     function createRepoSessionManager(overrides?: {
       provider?: SandboxProvider;
       imageBuildLookup?: ImageBuildLookup;
       session?: SessionRow;
       sessionRepositories?: SessionRepositoryInfo[];
+      sessionGitCapabilityIssuer?: SessionGitCapabilityIssuer;
     }) {
       const sandbox = createMockSandbox({ status: "pending", created_at: Date.now() - 60000 });
       const storage = createMockStorage(
@@ -2485,7 +2501,12 @@ describe("SandboxLifecycleManager", () => {
         createMockWebSocketManager(false),
         createMockAlarmScheduler(),
         createMockIdGenerator(),
-        createTestConfig(),
+        {
+          ...createTestConfig(),
+          ...(overrides?.sessionGitCapabilityIssuer
+            ? { sessionGitCapabilityIssuer: overrides.sessionGitCapabilityIssuer }
+            : {}),
+        },
         {},
         overrides?.imageBuildLookup
       );
@@ -2504,6 +2525,35 @@ describe("SandboxLifecycleManager", () => {
       expect(imageBuildLookup.getLatestReady).toHaveBeenCalledWith({
         kind: "repo",
         id: "testowner/testrepo",
+      });
+      expect(provider.createSandbox).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prebuiltImageId: "img-abc123",
+          prebuiltImageSha: "sha-def456",
+        })
+      );
+    });
+
+    it("uses the stable repository-key scope for connection-aware repo images", async () => {
+      const imageBuildLookup: ImageBuildLookup = {
+        getLatestReady: vi.fn(async () => stableRepoImageRow()),
+        markRestoreFailed: vi.fn(async () => true),
+      };
+      const issuer: SessionGitCapabilityIssuer = {
+        issue: vi.fn(async () => "oig_session_git"),
+      };
+      const { manager, provider } = createRepoSessionManager({
+        imageBuildLookup,
+        session: createMockSession({ scm_connection_id: "scm_gitea_primary" }),
+        sessionRepositories: STABLE_REPO_MEMBER,
+        sessionGitCapabilityIssuer: issuer,
+      });
+
+      await manager.spawnSandbox();
+
+      expect(imageBuildLookup.getLatestReady).toHaveBeenCalledWith({
+        kind: "repo",
+        id: "repo:repo_gitea_42",
       });
       expect(provider.createSandbox).toHaveBeenCalledWith(
         expect.objectContaining({
