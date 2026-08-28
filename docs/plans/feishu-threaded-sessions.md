@@ -798,6 +798,13 @@ feishu_error_code
   `/healthz` 和 Control Plane `/health`
   均正常。该实现只新增显式寻址，不改变原有话题绑定或默认新顶层任务语义。
 
+### 7.11 回滚兼容契约（2026-08-29）
+
+- 新增回归测试覆盖两个 rollout flag 关闭时的既有话题：带 `root_id`/`thread_id`
+  的消息仍路由到原 session 和原话题，不触发仓库发现或新沙盒创建；完成回调也继续遵循 session 中已保存的 reply
+  mode。
+- 该契约保证关闭 Feishu 线程 rollout 不会主动停止既有 sandbox，用户仍可从 Web 接管；生产环境实际翻转 flag 的演练仍需单独安排，以免影响当前租户的在线任务。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：

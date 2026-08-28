@@ -409,6 +409,55 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("keeps an existing topic session routable during a rollout rollback", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+      chatType: "group",
+      rootMessageId: "existing-root",
+      threadId: "existing-thread",
+      replyMode: "thread",
+    });
+    const rollbackFollowUp = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "group" as const,
+          message_id: "rollback-follow-up",
+          root_id: "existing-root",
+          thread_id: "existing-thread",
+          mentions: [{ id: { open_id: "bot-1" } }],
+          content: JSON.stringify({ text: "继续检查，不要修改文件" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const rollbackEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_THREAD_REPLIES_ENABLED: "false",
+      FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED: "false",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(rollbackFollowUp, rollbackEnv, "trace-existing-rollback");
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        content: "继续检查，不要修改文件",
+        callbackContext: expect.objectContaining({
+          rootMessageId: "existing-root",
+          threadId: "existing-thread",
+          replyMode: "thread",
+        }),
+      })
+    );
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+  });
+
   it("accepts the rich-text payload produced by a topic-group root", async () => {
     const groupEvent = {
       ...event,
