@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   claimThreadSelection,
   listConversationSessions,
+  lookupThreadMessageAlias,
   lookupThreadSession,
   releaseThreadSelection,
   storeThreadSession,
+  storeThreadMessageAlias,
   updateThreadSession,
 } from "./store";
 
@@ -169,6 +171,33 @@ describe("Feishu conversation session index", () => {
       replyMode: "thread",
       threadId: "thread-1",
     });
+  });
+
+  it("stores and resolves outbound message aliases within one chat", async () => {
+    const env = { FEISHU_KV: new MemoryKv() as unknown as KVNamespace };
+    const coordinates = {
+      tenantKey: "tenant",
+      chatId: "chat",
+      chatType: "group" as const,
+      rootMessageId: "root-thread",
+      threadId: "thread-1",
+      replyMode: "thread" as const,
+    };
+
+    await storeThreadMessageAlias(env, coordinates, "bot-card-1");
+
+    await expect(lookupThreadMessageAlias(env, coordinates, "bot-card-1")).resolves.toEqual({
+      version: 1,
+      tenantKey: "tenant",
+      chatId: "chat",
+      chatType: "group",
+      rootMessageId: "root-thread",
+      threadId: "thread-1",
+      replyMode: "thread",
+    });
+    await expect(
+      lookupThreadMessageAlias(env, { tenantKey: "tenant", chatId: "other-chat" }, "bot-card-1")
+    ).resolves.toBeNull();
   });
 
   it("allows only one in-flight repository selection per topic", async () => {

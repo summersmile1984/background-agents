@@ -9,6 +9,7 @@ import {
 } from "../cards";
 import {
   listConversationSessions,
+  lookupThreadMessageAlias,
   lookupThreadSession,
   storePendingRequest,
   storeThreadSession,
@@ -275,6 +276,34 @@ export async function handleFeishuEvent(
       "消息已收到，但暂时无法读取会话状态。为避免创建重复沙盒，请稍后重试。"
     ).catch(() => undefined);
     return;
+  }
+  if (!existing && (message.parent_id || message.root_id)) {
+    // A quoted reply can point at an outbound bot card rather than the root
+    // message. Resolve that message ID back to the canonical root before
+    // deciding whether this is a follow-up or a new task.
+    const aliasCandidates = [message.parent_id, message.root_id].filter(
+      (candidate, index, candidates): candidate is string =>
+        Boolean(candidate) && candidates.indexOf(candidate) === index
+    );
+    for (const messageIdCandidate of aliasCandidates) {
+      const alias: Awaited<ReturnType<typeof lookupThreadMessageAlias>> =
+        await lookupThreadMessageAlias(
+          env,
+          { tenantKey: coordinates.tenantKey, chatId: coordinates.chatId },
+          messageIdCandidate
+        ).catch(() => null);
+      if (!alias) continue;
+      coordinates = {
+        ...coordinates,
+        rootMessageId: alias.rootMessageId,
+        ...((coordinates.threadId ?? alias.threadId)
+          ? { threadId: coordinates.threadId ?? alias.threadId }
+          : {}),
+        replyMode: alias.replyMode,
+      };
+      existing = await lookupThreadSession(env, coordinates);
+      if (existing) break;
+    }
   }
   if (existing) {
     if (coordinates.threadId && existing.replyMode !== "thread") {

@@ -8,6 +8,9 @@ vi.mock("../feishu/client", () => ({
   replyFeishuImage: vi.fn(),
   replyFeishuText: vi.fn(),
 }));
+vi.mock("./store", () => ({
+  storeThreadMessageAlias: vi.fn().mockResolvedValue(undefined),
+}));
 
 const env = {} as Env;
 
@@ -47,5 +50,27 @@ describe("Feishu session delivery", () => {
     expect(replyFeishuText).toHaveBeenCalledWith(env, "root-2", "done", {
       replyInThread: false,
     });
+  });
+
+  it("records outbound message IDs for quote-based continuation", async () => {
+    const { storeThreadMessageAlias } = await import("./store");
+    vi.mocked(replyFeishuCard).mockResolvedValueOnce({ messageId: "card-1" });
+    const kvEnv = { ...env, FEISHU_KV: {} as Env["FEISHU_KV"] };
+    const topicCoordinates = {
+      tenantKey: "tenant-1",
+      chatId: "chat-1",
+      chatType: "group" as const,
+      rootMessageId: "root-1",
+      threadId: "thread-1",
+      replyMode: "thread" as const,
+    };
+
+    await replySessionCard(kvEnv, topicCoordinates, { card: true });
+
+    expect(storeThreadMessageAlias).toHaveBeenCalledWith(
+      { FEISHU_KV: kvEnv.FEISHU_KV },
+      topicCoordinates,
+      "card-1"
+    );
   });
 });

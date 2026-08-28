@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   sendFeishuText: vi.fn(),
   lookupThreadSession: vi.fn(),
   listConversationSessions: vi.fn(),
+  lookupThreadMessageAlias: vi.fn(),
   storePendingRequest: vi.fn(),
   listRepositoryCatalog: vi.fn(),
   getRuntimeCatalog: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("../feishu/client", () => ({
 vi.mock("../conversation/store", () => ({
   clearThreadSession: vi.fn(),
   listConversationSessions: mocks.listConversationSessions,
+  lookupThreadMessageAlias: mocks.lookupThreadMessageAlias,
   lookupThreadSession: mocks.lookupThreadSession,
   storePendingRequest: mocks.storePendingRequest,
   storeThreadSession: vi.fn(),
@@ -136,6 +138,7 @@ describe("handleFeishuEvent receipt", () => {
     mocks.replySessionCard.mockResolvedValue({ messageId: "picker-1" });
     mocks.resolveFeishuBotOpenId.mockResolvedValue("bot-1");
     mocks.lookupThreadSession.mockResolvedValue(null);
+    mocks.lookupThreadMessageAlias.mockResolvedValue(null);
     mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
     mocks.updateThreadSession.mockResolvedValue(null);
     mocks.storePendingRequest.mockResolvedValue("pending-1");
@@ -543,6 +546,57 @@ describe("handleFeishuEvent receipt", () => {
     expect(mocks.sendPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: "session-1", content: "继续处理引用的任务" })
     );
+  });
+
+  it("resolves a private quote of an outbound bot card to its root session", async () => {
+    mocks.lookupThreadSession.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+      chatType: "p2p",
+      rootMessageId: "root-card-quote",
+      targetLabel: "huangdong/chatbi",
+    });
+    mocks.lookupThreadMessageAlias.mockResolvedValue({
+      version: 1,
+      tenantKey: "tenant-1",
+      chatId: "chat-1",
+      chatType: "p2p",
+      rootMessageId: "root-card-quote",
+      replyMode: "flat",
+    });
+    const cardQuote = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "p2p" as const,
+          message_id: "quote-card-reply",
+          parent_id: "outbound-card-1",
+          content: JSON.stringify({ text: "继续卡片里的任务" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(cardQuote, env, "trace-card-quote");
+
+    expect(mocks.lookupThreadMessageAlias).toHaveBeenCalledWith(
+      env,
+      { tenantKey: "tenant-1", chatId: "chat-1" },
+      "outbound-card-1"
+    );
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        content: "继续卡片里的任务",
+        callbackContext: expect.objectContaining({
+          rootMessageId: "root-card-quote",
+          replyMode: "flat",
+        }),
+      })
+    );
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
   });
 
   it("does not reveal the bound repository before rejecting another actor", async () => {

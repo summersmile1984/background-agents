@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { Env } from "../types";
 
 const THREAD_TTL_SECONDS = 7 * 24 * 60 * 60;
+const THREAD_MESSAGE_ALIAS_TTL_SECONDS = THREAD_TTL_SECONDS;
 const PENDING_TTL_SECONDS = 60 * 60;
 const THREAD_SELECTION_TTL_SECONDS = 10 * 60;
 const SESSION_INDEX_LIMIT = 30;
@@ -64,6 +65,21 @@ export interface FeishuPendingRequest extends FeishuConversationCoordinates {
   selectedConnectionId?: string;
   runtime?: RuntimeConfigFragment;
   createdAt: number;
+}
+
+/**
+ * Maps an outbound bot message (for example a work card) back to its stable
+ * root. Feishu quote events may provide only that outbound message as
+ * `parent_id`, so the alias must retain the original delivery coordinates.
+ */
+export interface FeishuThreadMessageAlias {
+  version: 1;
+  tenantKey: string;
+  chatId: string;
+  chatType: FeishuConversationCoordinates["chatType"];
+  rootMessageId: string;
+  threadId?: string;
+  replyMode: FeishuConversationCoordinates["replyMode"];
 }
 
 const legacyThreadSessionSchema = z.object({
@@ -132,6 +148,16 @@ const conversationSessionSummarySchema: z.ZodType<FeishuConversationSessionSumma
 
 const conversationSessionIndexSchema = z.array(conversationSessionSummarySchema);
 
+const threadMessageAliasSchema: z.ZodType<FeishuThreadMessageAlias> = z.object({
+  version: z.literal(1),
+  tenantKey: z.string().min(1),
+  chatId: z.string().min(1),
+  chatType: z.enum(["p2p", "group"]),
+  rootMessageId: z.string().min(1),
+  threadId: z.string().min(1).optional(),
+  replyMode: z.enum(["thread", "flat"]),
+});
+
 function threadKey(coordinates: FeishuConversationCoordinates): string {
   return `thread:${coordinates.tenantKey}:${coordinates.chatId}:${coordinates.rootMessageId}`;
 }
@@ -142,6 +168,13 @@ function pendingKey(pendingId: string): string {
 
 function threadSelectionKey(coordinates: FeishuConversationCoordinates): string {
   return `thread-selection:${coordinates.tenantKey}:${coordinates.chatId}:${coordinates.rootMessageId}`;
+}
+
+function threadMessageAliasKey(
+  coordinates: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId">,
+  messageId: string
+): string {
+  return `thread-message:${coordinates.tenantKey}:${coordinates.chatId}:${messageId}`;
 }
 
 function sessionIndexKey(
@@ -240,6 +273,47 @@ export async function updateThreadSession(
     next
   );
   return next;
+}
+
+/** Remember a bot message ID as another safe entry point into its topic. */
+export async function storeThreadMessageAlias(
+  env: Pick<Env, "FEISHU_KV">,
+  coordinates: Pick<
+    FeishuConversationCoordinates,
+    "tenantKey" | "chatId" | "chatType" | "rootMessageId" | "threadId" | "replyMode"
+  >,
+  messageId: string
+): Promise<void> {
+  const normalizedMessageId = messageId.trim();
+  if (!normalizedMessageId) return;
+  const alias: FeishuThreadMessageAlias = {
+    version: 1,
+    tenantKey: coordinates.tenantKey,
+    chatId: coordinates.chatId,
+    chatType: coordinates.chatType,
+    rootMessageId: coordinates.rootMessageId,
+    ...(coordinates.threadId ? { threadId: coordinates.threadId } : {}),
+    replyMode: coordinates.replyMode,
+  };
+  await createKvCacheStore(env.FEISHU_KV).put(
+    threadMessageAliasKey(coordinates, normalizedMessageId),
+    JSON.stringify(alias),
+    { expirationTtl: THREAD_MESSAGE_ALIAS_TTL_SECONDS }
+  );
+}
+
+/** Resolve a quoted outbound bot message to the canonical topic coordinates. */
+export async function lookupThreadMessageAlias(
+  env: Pick<Env, "FEISHU_KV">,
+  coordinates: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId">,
+  messageId: string
+): Promise<FeishuThreadMessageAlias | null> {
+  const value = await createKvCacheStore(env.FEISHU_KV).get(
+    threadMessageAliasKey(coordinates, messageId),
+    "json"
+  );
+  const parsed = threadMessageAliasSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }
 
 export async function listConversationSessions(
