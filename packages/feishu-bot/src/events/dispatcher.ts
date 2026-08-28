@@ -1,6 +1,7 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
 import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
+import { RUNTIME_COMMANDS } from "@open-inspect/shared/runtime-commands";
 import {
   buildConnectionPickerCard,
   buildRuntimeHarnessPickerCard,
@@ -23,6 +24,7 @@ import { createLogger } from "../logger";
 import {
   createSession,
   defaultHarnessForModel,
+  invokeRuntimeCommand,
   sendPrompt,
 } from "../sessions/control-plane-client";
 import { getRuntimeCatalog } from "../sessions/runtime-catalog";
@@ -102,6 +104,124 @@ export function visualVerificationForPrompt(
     /(?:验证|verify)\s*ui\b/i.test(normalized)
     ? {}
     : undefined;
+}
+
+/**
+ * Feishu is not a Slack slash-command endpoint: a message beginning with `/`
+ * arrives through the normal message event. Keep command parsing deliberately
+ * narrow so ordinary prose containing a slash still reaches the harness.
+ */
+export function parseRuntimeCommand(content: string): string | undefined {
+  const match = /^\/([a-z0-9-]+)$/i.exec(content.trim());
+  return match?.[1]?.toLowerCase();
+}
+
+function runtimeCommandHelp(
+  commands: readonly { slashName: string; available: boolean }[]
+): string {
+  const available = commands
+    .filter((command) => command.available)
+    .map((command) => `/${command.slashName}`);
+  return available.length > 0
+    ? `当前可用命令：${available.join("、")}`
+    : "当前没有可用的运行时命令。";
+}
+
+function runtimeCommandResultText(input: {
+  slashName: string;
+  response: Awaited<ReturnType<typeof invokeRuntimeCommand>>;
+  sessionId: string;
+  webAppUrl: string;
+}): string {
+  if (!input.response.ok) {
+    if (input.response.reason === "stale") {
+      return "这个话题绑定的会话已经失效，请发送新的顶层任务创建新会话。";
+    }
+    return input.response.error || `命令 /${input.slashName} 暂时不可用，请稍后重试。`;
+  }
+  const data = input.response.data;
+  if (input.slashName === "help") {
+    return runtimeCommandHelp(data.commands ?? []);
+  }
+  if (input.slashName === "stop") return "已请求停止当前任务。";
+  if (input.slashName === "review") return "代码审查任务已排队。";
+  if (input.slashName === "new") {
+    return "已记录。请发送新的顶层消息创建独立会话；当前话题仍绑定原仓库。";
+  }
+  if (input.slashName === "model" || input.slashName === "effort") {
+    return `/${input.slashName} 需要在 Web 会话中操作：${input.webAppUrl.replace(/\/$/, "")}/session/${encodeURIComponent(input.sessionId)}`;
+  }
+  const runtime = data.runtime;
+  if (input.slashName === "status" && runtime) {
+    const repositories = runtime.target?.repositories ?? [];
+    const target = repositories.length
+      ? repositories.map((repo) => `${repo.owner}/${repo.name}@${repo.branch}`).join(", ")
+      : "无仓库";
+    return [
+      `目标：${target}`,
+      `Harness：${runtime.harness ?? "未知"}`,
+      `Route：${runtime.routeId ?? "未知"}`,
+      `模型：${runtime.model ?? "未知"}`,
+      `Effort：${runtime.effort ?? "默认"}`,
+      `会话：${runtime.sessionStatus ?? "未知"}；沙盒：${runtime.sandboxStatus ?? "未知"}`,
+    ].join("\n");
+  }
+  return `命令 /${input.slashName} 已完成。`;
+}
+
+async function handleRuntimeCommand(input: {
+  env: Env;
+  coordinates: FeishuConversationCoordinates;
+  existing: FeishuThreadSession | null;
+  actor: string;
+  messageId: string;
+  slashName: string;
+  traceId: string;
+}): Promise<boolean> {
+  const definition = RUNTIME_COMMANDS.find((command) => command.slashName === input.slashName);
+  if (!definition) return false;
+  if (!input.existing) {
+    await replySessionText(
+      input.env,
+      input.coordinates,
+      input.slashName === "help"
+        ? "可用命令需在已绑定的话题中使用：/help、/status、/stop、/review。"
+        : `当前话题还没有绑定会话，无法执行 /${input.slashName}。`
+    );
+    return true;
+  }
+  if (input.existing.actorId !== input.actor) {
+    await replySessionText(
+      input.env,
+      input.coordinates,
+      "只有发起该会话的用户可以执行运行时命令。"
+    );
+    return true;
+  }
+  await replySessionText(
+    input.env,
+    input.coordinates,
+    `已收到命令 /${input.slashName}，正在处理。`
+  );
+  const response = await invokeRuntimeCommand({
+    env: input.env,
+    sessionId: input.existing.sessionId,
+    commandId: definition.id,
+    clientInvocationId: `feishu:${input.messageId}`.slice(0, 128),
+    actorId: input.actor,
+    traceId: input.traceId,
+  });
+  await replySessionText(
+    input.env,
+    input.coordinates,
+    runtimeCommandResultText({
+      slashName: input.slashName,
+      response,
+      sessionId: input.existing.sessionId,
+      webAppUrl: input.env.WEB_APP_URL,
+    })
+  );
+  return true;
 }
 
 /**
@@ -360,6 +480,22 @@ export async function handleFeishuEvent(
       message_type: message.message_type,
     });
     await replySessionText(env, coordinates, "请在消息中写下要完成的开发任务。");
+    return;
+  }
+
+  const slashName = parseRuntimeCommand(content);
+  if (
+    slashName &&
+    (await handleRuntimeCommand({
+      env,
+      coordinates,
+      existing,
+      actor,
+      messageId,
+      slashName,
+      traceId,
+    }))
+  ) {
     return;
   }
 

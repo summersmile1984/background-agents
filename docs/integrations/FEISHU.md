@@ -31,14 +31,22 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
 - 创建 session、将结果回传同一飞书主题，并提供 Web session、PR 和可用的沙盒预览链接。
 - 完成卡展示视觉验证状态和截图数量。启用 `FEISHU_MEDIA_DELIVERY_ENABLED=true`
   后，Worker 通过服务认证读取本次 prompt 的截图 artifact、上传为飞书图片并回复原主题；图片 key 不持久化。
+- 飞书没有独立的 Slack slash-command HTTP 入口；Worker 对独立的
+  `/help`、`/status`、`/stop`、`/review`、`/new`、 `/model` 和 `/effort`
+  消息做严格匹配，并把命令转发到 Control Plane 的 session command
+  endpoint。命令先回复“已收到命令，正在处理”，再在同一话题返回结果；只有会话发起人可以执行。`/model`
+  和 `/effort`
+  在当前原生 Harness 会话不能在线切换时会给出 Web 会话链接，而不会把命令误发给 Harness。
 - 机器人发出的回执、工作卡、完成卡、截图和媒体警告会登记短期消息别名；用户在私聊中引用机器人卡片时，即使飞书事件只带
   `parent_id`，也能恢复原 session 和话题坐标，不会误路由到最近会话。
 - 事件与卡片回调的 verification token、加密载荷、签名、事件/action 去重与 Control
   Plane 回调签名验证。
 
 当前只接受文字输入；用户发来的图片和文件会收到明确提示。运行偏好选择卡、状态/停止/`Review`
-按钮、视频回传、主动通知和受管群自动化仍按 [飞书机器人入口方案](../plans/feishu-bot-integration.md)
-的后续阶段实施。
+图形按钮、视频回传、主动通知和受管群自动化仍按
+[飞书机器人入口方案](../plans/feishu-bot-integration.md)
+的后续阶段实施。旧版本在命令路由上线前已经把 `/stop` 等文本排入 prompt 队列时，Control
+Plane 会按来源识别并丢弃这类遗留命令，避免它们再次送入 Harness。
 
 ## 架构数据流
 
@@ -114,6 +122,9 @@ connection 的变化不会分叉飞书消息协议。
 6. 将机器人加到测试群，在配置 bot open ID 后启用群 @；确认未绑定普通消息不触发。分别验证 mention
    follow-up 模式和授权后的 bound-thread follow-up 模式。
 7. 在手机飞书 App 中分别选择代码源、仓库和翻页；确认全程使用卡片按钮，不会唤起输入法或遮挡操作区。
+8. 在已绑定话题发送独立的 `/status` 和 `/stop`；确认先收到命令回执，Control
+   Plane 事件记录正确，`/stop` 不会作为 Harness
+   prompt 执行。由非发起人发送同一命令应被拒绝；在未绑定话题发送 `/help` 应只收到使用说明。
 
 飞书官方资料：[接收消息](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)、
 [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)、

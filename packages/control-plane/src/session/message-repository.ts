@@ -193,6 +193,30 @@ export class MessageRepository {
     });
   }
 
+  /**
+   * Remove a pending message that was already claimed by a product command
+   * adapter before the adapter rollout reached every worker. This is kept
+   * source-scoped so it cannot broaden the WebSocket cancellation contract.
+   */
+  discardPendingMessage(messageId: string, expectedSource: MessageSource): boolean {
+    return this.transactionSync(() => {
+      const result = this.sql.exec(`SELECT status, source FROM messages WHERE id = ?`, messageId);
+      const message = result.toArray() as Array<{ status: MessageStatus; source: string }>;
+      if (message[0]?.status !== "pending" || message[0].source !== expectedSource) {
+        return false;
+      }
+
+      this.attachments.releaseForMessage(messageId);
+      const deleted = this.sql.exec(
+        `DELETE FROM messages WHERE id = ? AND status = 'pending' AND source = ?`,
+        messageId,
+        expectedSource
+      );
+      deleted.toArray();
+      return deleted.rowsWritten === 1;
+    });
+  }
+
   getMessageCallbackContext(
     messageId: string
   ): { callback_context: string | null; source: string | null } | null {

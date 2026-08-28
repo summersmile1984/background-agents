@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   listRepositoryCatalog: vi.fn(),
   getRuntimeCatalog: vi.fn(),
   inferRepositoryTarget: vi.fn(() => null as unknown),
+  invokeRuntimeCommand: vi.fn(),
   sendPrompt: vi.fn(),
   updateThreadSession: vi.fn(),
 }));
@@ -48,6 +49,7 @@ vi.mock("../sessions/control-plane-client", () => ({
     if (model.startsWith("deepseek/")) return "deepseek";
     return "inherit";
   },
+  invokeRuntimeCommand: mocks.invokeRuntimeCommand,
   sendPrompt: mocks.sendPrompt,
 }));
 
@@ -66,6 +68,7 @@ vi.mock("../targets", () => ({
 import {
   canReuseThreadSession,
   handleFeishuEvent,
+  parseRuntimeCommand,
   visualVerificationForPrompt,
 } from "./dispatcher";
 
@@ -117,6 +120,23 @@ describe("visualVerificationForPrompt", () => {
   });
 });
 
+describe("parseRuntimeCommand", () => {
+  it.each([
+    ["/stop", "stop"],
+    [" /STATUS ", "status"],
+    ["/review", "review"],
+  ])("parses a standalone command %s", (content, expected) => {
+    expect(parseRuntimeCommand(content)).toBe(expected);
+  });
+
+  it.each(["/api/v1", "please use /stop", "stop"])(
+    "does not parse ordinary slash prose: %s",
+    (content) => {
+      expect(parseRuntimeCommand(content)).toBeUndefined();
+    }
+  );
+});
+
 const event = {
   header: { event_type: "im.message.receive_v1", tenant_key: "tenant-1" },
   event: {
@@ -145,6 +165,10 @@ describe("handleFeishuEvent receipt", () => {
     mocks.lookupThreadSession.mockResolvedValue(null);
     mocks.lookupThreadMessageAlias.mockResolvedValue(null);
     mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
+    mocks.invokeRuntimeCommand.mockResolvedValue({
+      ok: true,
+      data: { status: "completed", commandId: "product.stop" },
+    });
     mocks.updateThreadSession.mockResolvedValue(null);
     mocks.storePendingRequest.mockResolvedValue("pending-1");
     mocks.getRuntimeCatalog.mockResolvedValue(null);
@@ -171,6 +195,79 @@ describe("handleFeishuEvent receipt", () => {
         },
       ],
     });
+  });
+
+  it("routes a standalone /stop message to the control-plane command API", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+    });
+    const commandEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          message_id: "stop-message",
+          content: JSON.stringify({ text: "/stop" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(commandEvent, env, "trace-stop");
+
+    expect(mocks.invokeRuntimeCommand).toHaveBeenCalledWith({
+      env,
+      sessionId: "session-1",
+      commandId: "product.stop",
+      clientInvocationId: "feishu:stop-message",
+      actorId: "feishu:tenant-1:user-1",
+      traceId: "trace-stop",
+    });
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).toHaveBeenNthCalledWith(
+      1,
+      env,
+      expect.objectContaining({ rootMessageId: "stop-message" }),
+      "已收到命令 /stop，正在处理。"
+    );
+    expect(mocks.replySessionText).toHaveBeenNthCalledWith(
+      2,
+      env,
+      expect.objectContaining({ rootMessageId: "stop-message" }),
+      "已请求停止当前任务。"
+    );
+  });
+
+  it("rejects a runtime command from a different Feishu actor", async () => {
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      harness: "codex",
+      actorId: "feishu:tenant-1:owner",
+    });
+    const commandEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          message_id: "cross-actor-stop",
+          content: JSON.stringify({ text: "/stop" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(commandEvent, env, "trace-cross-actor-stop");
+
+    expect(mocks.invokeRuntimeCommand).not.toHaveBeenCalled();
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      env,
+      expect.any(Object),
+      "只有发起该会话的用户可以执行运行时命令。"
+    );
   });
 
   it("promotes a new group root request to a native topic", async () => {

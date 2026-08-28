@@ -589,6 +589,22 @@ flag 关闭时出站 body 与当前生产等价。
   `aio_browser` 手工截图调用当作完成证据。
 - 该结果进一步说明完成定义中的“截图/preview 回到正确话题”尚未通过；当前可证明的是回执、仓库绑定、队列隔离和生产健康状态。
 
+### 7.7 飞书命令路由与遗留队列保护（2026-08-29）
+
+- 诊断确认飞书把 `/stop`
+  当作普通消息事件，而不是 Slack 的独立 slash-command 请求；因此旧 Worker 会把它排进同一 session 的 Harness
+  prompt 队列，无法及时停止卡住的视觉调用。
+- Worker 现在对独立的已知命令做严格匹配，并通过带 Feishu service principal、actor 和幂等 invocation
+  ID 的签名请求调用 Control Plane `/sessions/:id/commands`。`/stop`、`/status`、`/review`
+  等命令不再进入 Harness；响应仍回到原话题，跨用户命令在 Worker 层拒绝。普通 `/api/v1`
+  等路径文本不会被识别为命令。
+- Control Plane 增加来源限定的遗留保护：命令路由上线前已经入队的 Feishu `/stop`
+  等已知命令会从 pending 队列丢弃，不会在旧视觉请求结束后再次执行。Web/Slack 的 pending
+  prompt 取消语义不变。
+- 本地新增 Feishu dispatcher 命令/跨用户测试和 Control
+  Plane 遗留队列测试；部署后仍需在真实飞书话题验证命令回执、stop
+  confirmation、队列恢复，以及旧消息不会触发 Harness。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit

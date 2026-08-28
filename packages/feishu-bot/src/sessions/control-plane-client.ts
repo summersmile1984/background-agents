@@ -7,7 +7,10 @@ import {
 } from "@open-inspect/shared/types/session-api";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
-import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
+import type {
+  RuntimeCommandOption,
+  RuntimeConfigFragment,
+} from "@open-inspect/shared/types/runtime-launch";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "../internal-auth";
 import type { FeishuRepositoryTarget } from "../targets";
 
@@ -30,6 +33,31 @@ export function defaultHarnessForModel(model: string): FeishuRuntimeHarness {
 export type SendPromptResult =
   | { ok: true; data: SendPromptResponse }
   | { ok: false; reason: "stale" | "transient" };
+
+export interface RuntimeCommandResponse {
+  invocationId?: string;
+  commandId?: string;
+  status?: string;
+  action?: string;
+  error?: string;
+  commands?: RuntimeCommandOption[];
+  runtime?: {
+    target?: {
+      provider?: string | null;
+      repositories?: Array<{ owner: string; name: string; branch: string }>;
+    };
+    harness?: string;
+    routeId?: string;
+    model?: string;
+    effort?: string | null;
+    sandboxStatus?: string | null;
+    sessionStatus?: string | null;
+  };
+}
+
+export type RuntimeCommandResult =
+  | { ok: true; data: RuntimeCommandResponse }
+  | { ok: false; reason: "stale" | "transient" | "unavailable"; status?: number; error?: string };
 
 export async function createSession(input: {
   env: ControlPlaneEnv;
@@ -96,4 +124,42 @@ export async function sendPrompt(input: {
   if (!response?.ok) return { ok: false, reason: response?.status === 404 ? "stale" : "transient" };
   const parsed = sendPromptResponseSchema.safeParse(await response.json().catch(() => null));
   return parsed.success ? { ok: true, data: parsed.data } : { ok: false, reason: "transient" };
+}
+
+/** Invoke a product-owned slash command against an existing session. */
+export async function invokeRuntimeCommand(input: {
+  env: ControlPlaneEnv;
+  sessionId: string;
+  commandId: string;
+  clientInvocationId: string;
+  actorId: string;
+  traceId?: string;
+}): Promise<RuntimeCommandResult> {
+  const body = JSON.stringify({
+    commandId: input.commandId,
+    arguments: {},
+    clientInvocationId: input.clientInvocationId,
+  });
+  const response = await signedControlPlaneFetch(
+    input.env,
+    {
+      method: "POST",
+      url: `https://internal/sessions/${encodeURIComponent(input.sessionId)}/commands`,
+      body,
+      actor: input.actorId,
+      traceId: input.traceId,
+    },
+    { signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS) }
+  ).catch(() => null);
+  if (!response) return { ok: false, reason: "transient" };
+  const payload = (await response.json().catch(() => ({}))) as RuntimeCommandResponse;
+  if (!response.ok) {
+    return {
+      ok: false,
+      reason: response.status === 404 ? "stale" : "unavailable",
+      status: response.status,
+      error: payload.error,
+    };
+  }
+  return { ok: true, data: payload };
 }

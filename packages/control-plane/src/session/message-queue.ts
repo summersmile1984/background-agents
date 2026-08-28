@@ -13,6 +13,7 @@ import {
 } from "@open-inspect/shared/models";
 import type { SandboxEvent } from "@open-inspect/shared/types/sandbox-events";
 import type { MessageSource } from "@open-inspect/shared/types/sessions";
+import { RUNTIME_COMMANDS } from "@open-inspect/shared/runtime-commands";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { MAX_UNFINISHED_PROMPTS } from "@open-inspect/shared/types/prompts";
 import {
@@ -78,6 +79,13 @@ interface EnqueuePromptCoreData {
 interface EnqueuedPrompt {
   messageId: string;
   position: number | null;
+}
+
+function isProductSlashCommand(content: string): boolean {
+  const slashName = /^\/([a-z0-9-]+)$/i.exec(content.trim())?.[1]?.toLowerCase();
+  return (
+    slashName !== undefined && RUNTIME_COMMANDS.some((command) => command.slashName === slashName)
+  );
 }
 
 export class SessionNotPromptableError extends Error {
@@ -368,6 +376,22 @@ export class SessionMessageQueue {
       return;
     }
     const now = Date.now();
+
+    // Feishu delivers slash-looking text through the ordinary message event.
+    // A message accepted during the command-router rollout may therefore be
+    // left in the prompt queue; never forward that product command to a
+    // harness as user prose.
+    if (message.source === "feishu" && isProductSlashCommand(message.content)) {
+      if (this.messageRepository.discardPendingMessage(message.id, "feishu")) {
+        this.log.info("prompt.discarded_legacy_command", {
+          message_id: message.id,
+          source: message.source,
+        });
+        this.broadcastPromptQueue();
+        await this.processMessageQueue();
+      }
+      return;
+    }
 
     const sandboxWs = this.wsManager.getSandboxSocket();
     if (!sandboxWs) {

@@ -152,6 +152,7 @@ function buildQueue(
     getPendingOrProcessingCount: vi.fn(() => 1),
     getMessageByClientRequestId: vi.fn(() => null as MessageRow | null),
     cancelPendingMessage: vi.fn(() => false),
+    discardPendingMessage: vi.fn(() => false),
     getUnfinishedMessagePosition: vi.fn((): number | null => 1),
     listUnfinishedMessages: vi.fn((): MessageRow[] => []),
     listPromptQueue: vi.fn(() => []),
@@ -319,6 +320,21 @@ describe("SessionMessageQueue", () => {
     expect(h.repository.updateMessageToProcessing).not.toHaveBeenCalled();
     expect(h.repository.startMessageProcessing).not.toHaveBeenCalled();
     expect(h.callbackService.notifyStarted).not.toHaveBeenCalled();
+  });
+
+  it("discards a legacy Feishu slash command instead of sending it to the harness", async () => {
+    const h = buildQueue();
+    h.repository.getNextPendingMessage
+      .mockReturnValueOnce(createMessage({ source: "feishu", content: "/stop" }))
+      .mockReturnValue(null);
+    h.repository.discardPendingMessage.mockReturnValue(true);
+
+    await h.queue.processMessageQueue();
+
+    expect(h.repository.discardPendingMessage).toHaveBeenCalledWith("msg-1", "feishu");
+    expect(h.wsManager.send).not.toHaveBeenCalled();
+    expect(h.sandboxLifecycle.spawnSandbox).not.toHaveBeenCalled();
+    expect(h.repository.startMessageProcessing).not.toHaveBeenCalled();
   });
 
   it.each(["cancelled", "archived"] as const)(
