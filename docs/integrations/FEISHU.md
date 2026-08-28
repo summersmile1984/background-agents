@@ -19,10 +19,14 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
   `FEISHU_THREAD_REPLIES_ENABLED=true`
   后，每个群顶层任务创建独立话题；回执、仓库卡、工作卡、完成卡和截图都携带 `reply_in_thread=true`
   回到同一话题。
+- 普通群和飞书话题群的事件统一按群话题路由；事件中的 `chat_type=topic_group`
+  会在入口归一化为群语义，不需要额外部署一个机器人。
 - 同一群可以并行运行多个话题，每个话题固定一个 session、sandbox、仓库和分支；不设置 chat 级别的隐式“当前 session”。
 - 只有原发起人可以续办。启用 `FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED=true`
   并授权群全部消息权限后，已绑定话题内无需重复 @机器人；未绑定且未 @ 的消息会在读取一次 KV 映射后立即忽略。
-- 私聊顶层消息创建新 session；续办应引用回复对应任务。工作/完成卡和会话列表显示 session 短编号、仓库、分支、Harness、模型和状态，避免多个任务混淆。
+- 私聊顶层消息创建新 session；续办应引用回复对应任务。入口优先使用事件的 `root_id`，兼容仅携带
+  `parent_id`
+  的引用回复，不按最近活跃 session 猜测。工作/完成卡和会话列表显示 session 短编号、仓库、分支、Harness、模型和状态，避免多个任务混淆。
 - 模型由飞书 Worker 的部署默认值选择，并映射到兼容 Harness；session 创建后 Harness 锁定。
 - 创建 session、将结果回传同一飞书主题，并提供 Web session、PR 和可用的沙盒预览链接。
 - 完成卡展示视觉验证状态和截图数量。启用 `FEISHU_MEDIA_DELIVERY_ENABLED=true`
