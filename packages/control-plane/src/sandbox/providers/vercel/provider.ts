@@ -14,7 +14,7 @@ import {
   deriveVncPassword,
   IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_KEY,
   imageBuildSandboxIdentity,
-  scmCloneIdentity,
+  scmCloneIdentityForConfig,
 } from "../../sandbox-env";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -329,7 +329,10 @@ export class VercelSandboxProvider implements SandboxProvider {
     }
   ): Promise<Record<string, string>> {
     const envVars = buildSandboxEnvVars(config, {
-      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+      scmIdentity: scmCloneIdentityForConfig(
+        this.providerConfig.scmProvider,
+        config.scmGitProxyBaseUrl
+      ),
       codeServerPassword: config.codeServerEnabled
         ? await deriveCodeServerPassword(
             config.sandboxId,
@@ -379,7 +382,7 @@ export class VercelSandboxProvider implements SandboxProvider {
               cloneUsername: config.cloneUsername,
               secretHosts: [config.cloneHost],
             }
-          : scmCloneIdentity(this.providerConfig.scmProvider),
+          : scmCloneIdentityForConfig(this.providerConfig.scmProvider, config.cloneBaseUrl),
       cloneToken: config.cloneToken,
       cloneBaseUrl: config.cloneBaseUrl,
       baseEnvVars: config.userEnvVars,

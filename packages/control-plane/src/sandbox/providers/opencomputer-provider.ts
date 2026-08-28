@@ -32,6 +32,7 @@ import {
   REPO_IMAGE_CALLBACK_ENV,
   RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS,
   scmCloneIdentity,
+  scmCloneIdentityForConfig,
   VCS_CLONE_TOKEN_ENV_VAR,
 } from "../sandbox-env";
 import {
@@ -454,7 +455,10 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
     const { envVars: baseEnvVars, secretEnvVars } = this.prepareEnvironment(config.userEnvVars);
     const envVars = buildSandboxEnvVars(config, {
       baseEnvVars,
-      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+      scmIdentity: scmCloneIdentityForConfig(
+        this.providerConfig.scmProvider,
+        config.scmGitProxyBaseUrl
+      ),
       codeServerPassword: config.codeServerEnabled
         ? await deriveCodeServerPassword(
             config.sandboxId,
@@ -514,7 +518,7 @@ export class OpenComputerSandboxProvider implements SandboxProvider {
               cloneUsername: config.cloneUsername,
               secretHosts: [config.cloneHost],
             }
-          : scmCloneIdentity(this.providerConfig.scmProvider),
+          : scmCloneIdentityForConfig(this.providerConfig.scmProvider, config.cloneBaseUrl),
       cloneToken: config.cloneToken,
       cloneBaseUrl: config.cloneBaseUrl,
       baseEnvVars,

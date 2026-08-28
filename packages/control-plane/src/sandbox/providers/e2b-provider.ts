@@ -16,7 +16,7 @@ import {
   buildSandboxEnvVars,
   deriveCodeServerPassword,
   deriveVncPassword,
-  scmCloneIdentity,
+  scmCloneIdentityForConfig,
 } from "../sandbox-env";
 import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
 import type { SourceControlProviderName } from "../../source-control";
@@ -106,7 +106,10 @@ export class E2BSandboxProvider implements SandboxProvider {
       const envVars = buildSandboxEnvVars(
         { ...config, timeoutSeconds },
         {
-          scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+          scmIdentity: scmCloneIdentityForConfig(
+            this.providerConfig.scmProvider,
+            config.scmGitProxyBaseUrl
+          ),
           codeServerPassword,
           vncPassword,
         }

@@ -15,7 +15,7 @@ import {
   buildSandboxEnvVars,
   deriveCodeServerPassword,
   deriveVncPassword,
-  scmCloneIdentity,
+  scmCloneIdentityForConfig,
 } from "../sandbox-env";
 import {
   SandboxProviderError,
@@ -216,7 +216,10 @@ export class DaytonaSandboxProvider implements SandboxProvider {
 
   private async buildEnvVars(config: CreateSandboxConfig): Promise<Record<string, string>> {
     return buildSandboxEnvVars(config, {
-      scmIdentity: scmCloneIdentity(this.providerConfig.scmProvider),
+      scmIdentity: scmCloneIdentityForConfig(
+        this.providerConfig.scmProvider,
+        config.scmGitProxyBaseUrl
+      ),
       codeServerPassword: config.codeServerEnabled
         ? await deriveCodeServerPassword(
             config.sandboxId,

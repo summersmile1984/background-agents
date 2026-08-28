@@ -140,6 +140,29 @@ describe("E2BSandboxProvider", () => {
     expect(env.VCS_CLONE_USERNAME).toBe("x-token-auth");
   });
 
+  it("supports a Gitea session through the proxy with a Gitea deployment default", async () => {
+    const client = mockClient();
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      scmProvider: "gitea",
+    });
+
+    await provider.createSandbox({
+      ...baseCreateConfig,
+      scmGitProxyBaseUrl: "https://control-plane.example/git/session/sess-1",
+      scmGitCapability: "oig-capability",
+    });
+
+    const [, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    expect(env).toMatchObject({
+      VCS_HOST: "control-plane.example",
+      VCS_CLONE_USERNAME: "open-inspect-capability",
+      VCS_CLONE_BASE_URL: "https://control-plane.example/git/session/sess-1",
+      SCM_GIT_CAPABILITY: "oig-capability",
+      OI_SCM_PROXY_MODE: "1",
+    });
+  });
+
   it("resumeSandbox paused uses connectSandbox", async () => {
     const client = mockClient();
     const provider = new E2BSandboxProvider(client, providerConfig);

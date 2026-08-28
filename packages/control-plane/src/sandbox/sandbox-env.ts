@@ -231,6 +231,27 @@ export function scmCloneIdentity(scmProvider: SourceControlProviderName): ScmClo
   return identity;
 }
 
+/**
+ * Resolve the identity used to seed a sandbox's Git environment. A
+ * connection-aware proxy is independent of the deployment-level provider,
+ * so Gitea sessions can use it even when the legacy provider default is GitHub.
+ */
+export function scmCloneIdentityForConfig(
+  scmProvider: SourceControlProviderName,
+  proxyBaseUrl?: string | null
+): ScmCloneIdentity {
+  if (!proxyBaseUrl) return scmCloneIdentity(scmProvider);
+  const parsed = new URL(proxyBaseUrl);
+  if (parsed.protocol !== "https:" || !parsed.host) {
+    throw new Error("SCM Git proxy URL must be an absolute HTTPS URL");
+  }
+  return {
+    host: parsed.host,
+    cloneUsername: "open-inspect-capability",
+    secretHosts: [parsed.host],
+  };
+}
+
 /** Set `VCS_HOST`/`VCS_CLONE_USERNAME` (and the clone token, when given) on an env map. */
 export function applyScmCloneEnv(
   envVars: Record<string, string>,

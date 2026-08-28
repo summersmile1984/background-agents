@@ -14,6 +14,7 @@ import {
   REPO_IMAGE_CALLBACK_ENV,
   RESERVED_REPO_IMAGE_CALLBACK_ENV_KEYS,
   scmCloneIdentity,
+  scmCloneIdentityForConfig,
   VISUAL_VERIFICATION_POLICY_ENV_VAR,
 } from "./sandbox-env";
 import {
@@ -134,6 +135,22 @@ describe("scmCloneIdentity", () => {
       cloneUsername: "x-token-auth",
       secretHosts: ["bitbucket.org", "api.bitbucket.org"],
     });
+  });
+});
+
+describe("scmCloneIdentityForConfig", () => {
+  it("uses the connection-aware proxy identity for Gitea", () => {
+    expect(
+      scmCloneIdentityForConfig("gitea", "https://control-plane.example/git/session/sess-1")
+    ).toEqual({
+      host: "control-plane.example",
+      cloneUsername: "open-inspect-capability",
+      secretHosts: ["control-plane.example"],
+    });
+  });
+
+  it("keeps legacy providers on their configured identity without a proxy", () => {
+    expect(scmCloneIdentityForConfig("github")).toEqual(scmCloneIdentity("github"));
   });
 });
 
