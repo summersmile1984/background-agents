@@ -530,6 +530,23 @@ flag 关闭时出站 body 与当前生产等价。
   supervisor 不会形成完整桥接，CDP/MCP 端口未进入可用态，探针随后按 TTL 清理。因此这只证明模板恢复和 launcher/envd 路径，不计入 Codex
   MCP 鉴权、桥接、截图/preview 或飞书视觉 E2E；这些仍需使用真实会话完成。
 
+### 7.3 生产 Gitea 运行时选择回归（2026-08-29）
+
+- 在生产飞书网页的 `Open-Inspect 工作台` 话题中完成了一次只读回归：代码源卡显示
+  `Gitea · 64 个仓库`，分页为 11 页；第 2 页成功选择
+  `huangdong/chatbi`。随后依次出现 Harness、Codex 模型和 Effort 卡，卡片列出 OpenCode、Codex、Claude
+  Code、DeepSeek Harness，以及 `/help`、`/model`、`/effort`、`/new`。
+- 本次实际创建的生产 session 为 `60239e8fcdcd980d7c878c4451bd4737`，D1 记录为 `status=completed`、
+  `provider=gitea`、`repo=huangdong/chatbi`、`branch=main`、`agent_harness=codex`；运行时解析为
+  `codex:openai:subscription`、`openai/gpt-5.6-luna`、`xhigh`。完成卡回到同一飞书话题，并返回只读 smoke
+  test 的预期文本；没有文件修改、提交或 PR。
+- 首次点击 Gitea 时，卡片在跨 Worker 目录请求期间显示 loading，随后提示“目录刷新中”。只读检查确认当前 Gitea
+  connection 已启用、PAT 可调用 Gitea API，控制面 KV 最终写入 64 条仓库且包含
+  `huangdong/chatbi`；等待缓存完成后重新点击，仓库分页卡正常出现。因此该现象是冷目录刷新/边缘缓存时序，不是 PAT 失效或 Gitea 域名错误。
+- 飞书会保留历史卡片消息，重复选择时旧的模型/Effort 卡仍可能与新卡同时可点击；本次浏览器回归因此命中了旧的 Luna/Effort 卡。服务端仍以 pending/action 校验和 session
+  claim 保证最终只创建一个 session，但 UI 后续应增加“卡片已过期/当前步骤”提示或禁用旧卡，降低人工误点风险。
+- 本轮只验证消息回执、Gitea 目录分页、仓库绑定、Harness/模型/Effort 选择和完成消息；截图、preview、PR、跨用户及手机端遮挡仍不计入通过项。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
