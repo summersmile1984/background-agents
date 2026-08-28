@@ -49,14 +49,21 @@ function actorId(tenantKey: string, openId: string): string {
 
 /**
  * Feishu retries a request with the same event ID, while the reply endpoint
- * deduplicates a UUID for one hour. Generate one valid UUID per logical
- * delivery so a transient 429/5xx cannot create duplicate receipts.
+ * deduplicates a UUID for one hour. Derive one valid UUID per logical delivery
+ * so duplicate event deliveries and transient 429/5xx retries share identity.
  */
-function deliveryIdempotencyKey(_messageId: string, _kind: string): string {
-  // Feishu validates this field as a UUID. Generate it once per logical
-  // delivery so the bounded retry in replyFeishuMessage reuses the same value
-  // without sending the old colon-delimited event key that Feishu rejects.
-  return crypto.randomUUID();
+async function deliveryIdempotencyKey(messageId: string, kind: string): Promise<string> {
+  // Feishu validates this field as a UUID. A SHA-256-derived UUID keeps the
+  // value stable across duplicate event deliveries while remaining opaque.
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`feishu:${messageId}:${kind}`)
+  );
+  const bytes = new Uint8Array(digest).slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // UUID version 5 (name-derived)
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function messageCoordinates(
@@ -218,11 +225,12 @@ async function handleRuntimeCommand(input: {
     );
     return true;
   }
+  const receiptIdempotencyKey = await deliveryIdempotencyKey(input.messageId, "command-receipt");
   await replySessionText(
     input.env,
     input.coordinates,
     `已收到命令 /${input.slashName}，正在处理。`,
-    deliveryIdempotencyKey(input.messageId, "command-receipt")
+    receiptIdempotencyKey
   );
   const response = await invokeRuntimeCommand({
     env: input.env,
@@ -232,6 +240,7 @@ async function handleRuntimeCommand(input: {
     actorId: input.actor,
     traceId: input.traceId,
   });
+  const resultIdempotencyKey = await deliveryIdempotencyKey(input.messageId, "command-result");
   await replySessionText(
     input.env,
     input.coordinates,
@@ -241,7 +250,7 @@ async function handleRuntimeCommand(input: {
       sessionId: input.existing.sessionId,
       webAppUrl: input.env.WEB_APP_URL,
     }),
-    deliveryIdempotencyKey(input.messageId, "command-result")
+    resultIdempotencyKey
   );
   return true;
 }
@@ -574,11 +583,12 @@ export async function handleFeishuEvent(
   }
 
   try {
+    const receiptIdempotencyKey = await deliveryIdempotencyKey(messageId, "receipt");
     const receipt = await replySessionText(
       env,
       coordinates,
       receiptTextForConversation(existing, actor),
-      deliveryIdempotencyKey(messageId, "receipt")
+      receiptIdempotencyKey
     );
     if (receipt?.threadId && receipt.threadId !== coordinates.threadId) {
       coordinates = { ...coordinates, threadId: receipt.threadId, replyMode: "thread" };
