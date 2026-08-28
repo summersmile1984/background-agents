@@ -27,6 +27,8 @@ token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
 - 私聊顶层消息创建新 session；续办应引用回复对应任务。入口优先使用事件的 `root_id`，兼容仅携带
   `parent_id`
   的引用回复，不按最近活跃 session 猜测。工作/完成卡和会话列表显示 session 短编号、仓库、分支、Harness、模型和状态，避免多个任务混淆。
+- 私聊也可以使用会话列表中的短编号显式续办：发送
+  `#ABC123 继续检查登录页面`。短编号只在当前租户、当前聊天和当前用户的索引内解析；群聊仍应优先在原话题继续，未知或冲突编号不会创建新沙盒。
 - 模型由飞书 Worker 的部署默认值选择，并映射到兼容 Harness；session 创建后 Harness 锁定。
 - 创建 session、将结果回传同一飞书主题，并提供 Web session、PR 和可用的沙盒预览链接。
 - 完成卡展示视觉验证状态和截图数量。启用 `FEISHU_MEDIA_DELIVERY_ENABLED=true`
@@ -125,6 +127,8 @@ connection 的变化不会分叉飞书消息协议。
 8. 在已绑定话题发送独立的 `/status` 和 `/stop`；确认先收到命令回执，Control
    Plane 事件记录正确，`/stop` 不会作为 Harness
    prompt 执行。由非发起人发送同一命令应被拒绝；在未绑定话题发送 `/help` 应只收到使用说明。
+9. 在同一私聊中创建两个顶层任务，发送 `sessions` 获取短编号；分别用 `#短编号 请求`
+   续办，确认每条消息回到对应 session，且不会按最近 session 猜测。
 
 飞书官方资料：[接收消息](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)、
 [发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)、
