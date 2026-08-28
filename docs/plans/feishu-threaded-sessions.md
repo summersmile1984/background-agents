@@ -444,6 +444,11 @@ flag 关闭时出站 body 与当前生产等价。
   `parent_id`，也能回到原 session。别名不保存消息正文或密钥，沿用线程 TTL，并在 KV 写入失败时不阻断原消息投递；相关回归后本地 Feishu
   bot 测试为 99 项。
 
+- `d6b9b601`、`440a981e` 和 `83e94541` 均通过 CI/Terraform；其中最新运行时变更为
+  `83e94541`，将截图回复也纳入同一套租户/会话消息别名。Terraform run `33174468456` 与 CI run
+  `33174468464` 均成功，生产 Feishu Worker 当前 100% 流量版本为
+  `d81401e0-57b0-4d59-80bd-e614068e6b97`（2026-08-28 13:15 UTC）。
+
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
 - 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、
