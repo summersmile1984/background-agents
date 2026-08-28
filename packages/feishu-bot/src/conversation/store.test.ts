@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   claimThreadSelection,
+  findConversationSessionByShortId,
   getPendingRequest,
   listConversationSessions,
   lookupThreadMessageAlias,
@@ -12,6 +13,7 @@ import {
   updatePendingRequest,
   updateThreadSession,
 } from "./store";
+import { sessionShortId } from "./session-short-id";
 
 class MemoryKv {
   private readonly data = new Map<string, string>();
@@ -101,6 +103,26 @@ describe("Feishu conversation session index", () => {
         rootMessageId: "root-one",
       },
     ]);
+
+    const sessions = await listConversationSessions(env, {
+      ...base,
+      actorId: "feishu:tenant:user",
+    });
+    const explicitId = sessions[0]!.sessionId;
+    await expect(
+      findConversationSessionByShortId(
+        env,
+        { ...base, actorId: "feishu:tenant:user" },
+        sessionShortId(explicitId)
+      )
+    ).resolves.toMatchObject({ sessionId: explicitId });
+    await expect(
+      findConversationSessionByShortId(
+        env,
+        { ...base, actorId: "feishu:other-user" },
+        sessionShortId(explicitId)
+      )
+    ).resolves.toBeNull();
   });
 
   it("normalizes a legacy mapping to a safe flat V2 record", async () => {

@@ -6,6 +6,9 @@ import type {
   RuntimeHarnessOption,
   RuntimeModelOption,
 } from "@open-inspect/shared/types/runtime-launch";
+import { sessionShortId } from "./conversation/session-short-id";
+
+export { sessionShortId } from "./conversation/session-short-id";
 
 // Keep mobile cards short enough to scroll comfortably. Repository selection
 // uses buttons instead of select_static because Feishu's mobile selector opens
@@ -13,15 +16,6 @@ import type {
 export const REPOSITORIES_PER_PAGE = 6;
 export const RUNTIME_MODELS_PER_PAGE = 8;
 const SESSION_LIST_LIMIT = 12;
-
-export function sessionShortId(sessionId: string): string {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < sessionId.length; index += 1) {
-    hash ^= sessionId.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0").slice(0, 6).toUpperCase();
-}
 
 function stateLabel(
   state: "starting" | "active" | "delivery_failed" | "completed" | "failed" | "stale" | undefined
@@ -569,5 +563,14 @@ export function buildSessionListCard(input: {
         .join("\n")
     : "尚无近期会话。发送一条新的顶层任务即可创建会话。";
   elements(card).push({ tag: "div", text: { tag: "lark_md", content } });
+  if (sessions.length > 0) {
+    elements(card).push({
+      tag: "div",
+      text: {
+        tag: "lark_md",
+        content: "群聊优先在原话题继续；私聊可发送 `#短编号 请求` 显式续办指定会话。",
+      },
+    });
+  }
   return card;
 }

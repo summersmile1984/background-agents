@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   sendFeishuText: vi.fn(),
   lookupThreadSession: vi.fn(),
   listConversationSessions: vi.fn(),
+  findConversationSessionByShortId: vi.fn(),
   lookupThreadMessageAlias: vi.fn(),
   storePendingRequest: vi.fn(),
   listRepositoryCatalog: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("../feishu/client", () => ({
 vi.mock("../conversation/store", () => ({
   clearThreadSession: vi.fn(),
   listConversationSessions: mocks.listConversationSessions,
+  findConversationSessionByShortId: mocks.findConversationSessionByShortId,
   lookupThreadMessageAlias: mocks.lookupThreadMessageAlias,
   lookupThreadSession: mocks.lookupThreadSession,
   storePendingRequest: mocks.storePendingRequest,
@@ -69,6 +71,7 @@ import {
   canReuseThreadSession,
   handleFeishuEvent,
   parseRuntimeCommand,
+  parseSessionReference,
   visualVerificationForPrompt,
 } from "./dispatcher";
 
@@ -133,6 +136,22 @@ describe("parseRuntimeCommand", () => {
     "does not parse ordinary slash prose: %s",
     (content) => {
       expect(parseRuntimeCommand(content)).toBeUndefined();
+    }
+  );
+});
+
+describe("parseSessionReference", () => {
+  it("parses an explicit six-character session id and prompt", () => {
+    expect(parseSessionReference(" #a1b2c3 检查第二个仓库")).toEqual({
+      shortId: "A1B2C3",
+      prompt: "检查第二个仓库",
+    });
+  });
+
+  it.each(["#123 issue", "#abcdef", "普通文本 #ABCDEF 请求"])(
+    "does not treat ordinary text as an explicit continuation: %s",
+    (content) => {
+      expect(parseSessionReference(content)).toBeUndefined();
     }
   );
 });
@@ -699,6 +718,79 @@ describe("handleFeishuEvent receipt", () => {
       })
     );
     expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+  });
+
+  it("routes a private top-level message by an explicit session short id", async () => {
+    mocks.lookupThreadSession.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      ...thread,
+      sessionId: "session-two",
+      rootMessageId: "root-two",
+      targetLabel: "huangdong/second-repo",
+      harness: "codex",
+      actorId: "feishu:tenant-1:user-1",
+    });
+    mocks.findConversationSessionByShortId.mockResolvedValue({
+      sessionId: "session-two",
+      targetLabel: "huangdong/second-repo",
+      repositoryKey: "gitea-default:huangdong/second-repo",
+      model: "openai/gpt-5.6-luna",
+      harness: "codex",
+      rootMessageId: "root-two",
+      replyMode: "flat",
+      createdAt: 2,
+    });
+    const explicitReply = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          message_id: "explicit-short-id",
+          content: JSON.stringify({ text: "#A1B2C3 检查第二个会话" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(explicitReply, env, "trace-short-id");
+
+    expect(mocks.findConversationSessionByShortId).toHaveBeenCalledWith(
+      env,
+      { tenantKey: "tenant-1", chatId: "chat-1", actorId: "feishu:tenant-1:user-1" },
+      "A1B2C3"
+    );
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-two",
+        content: "检查第二个会话",
+        callbackContext: expect.objectContaining({ rootMessageId: "root-two" }),
+      })
+    );
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal or route an unknown private session short id", async () => {
+    mocks.findConversationSessionByShortId.mockResolvedValue(null);
+    const explicitReply = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          message_id: "unknown-short-id",
+          content: JSON.stringify({ text: "#DEADBE 继续处理" }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(explicitReply, env, "trace-unknown-short-id");
+
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ rootMessageId: "unknown-short-id" }),
+      "未找到会话 #DEADBE。请发送 /sessions 查看当前聊天的会话。"
+    );
   });
 
   it("does not reveal the bound repository before rejecting another actor", async () => {

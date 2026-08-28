@@ -9,6 +9,7 @@ import {
   buildWorkingCard,
 } from "../cards";
 import {
+  findConversationSessionByShortId,
   listConversationSessions,
   lookupThreadMessageAlias,
   lookupThreadSession,
@@ -36,6 +37,7 @@ import {
   listRepositoryTargets,
 } from "../targets";
 import type { Env } from "../types";
+import { parseSessionReference } from "../conversation/session-short-id";
 import { parseFeishuMessageText, type FeishuEventEnvelope } from "./payload";
 
 const log = createLogger("event-dispatcher");
@@ -115,6 +117,8 @@ export function parseRuntimeCommand(content: string): string | undefined {
   const match = /^\/([a-z0-9-]+)$/i.exec(content.trim());
   return match?.[1]?.toLowerCase();
 }
+
+export { parseSessionReference } from "../conversation/session-short-id";
 
 function runtimeCommandHelp(
   commands: readonly { slashName: string; available: boolean }[]
@@ -474,7 +478,7 @@ export async function handleFeishuEvent(
     );
     return;
   }
-  const content = parseFeishuMessageText(message.message_type, message.content);
+  let content = parseFeishuMessageText(message.message_type, message.content);
   if (!content) {
     log.warn("message.text_parse_failed", {
       trace_id: traceId,
@@ -484,6 +488,45 @@ export async function handleFeishuEvent(
     });
     await replySessionText(env, coordinates, "请在消息中写下要完成的开发任务。");
     return;
+  }
+
+  // Feishu private chats have no native thread picker. Allow an explicit
+  // short id to route a top-level message to one of the actor's existing
+  // sessions without changing the default "new top-level task" behavior.
+  const explicitReference =
+    !message.root_id && !message.parent_id && !message.thread_id
+      ? parseSessionReference(content)
+      : undefined;
+  if (explicitReference && !existing) {
+    const referenced = await findConversationSessionByShortId(
+      env,
+      { tenantKey: coordinates.tenantKey, chatId: coordinates.chatId, actorId: actor },
+      explicitReference.shortId
+    );
+    if (!referenced?.rootMessageId) {
+      await replySessionText(
+        env,
+        coordinates,
+        `未找到会话 #${explicitReference.shortId}。请发送 /sessions 查看当前聊天的会话。`
+      );
+      return;
+    }
+    coordinates = {
+      ...coordinates,
+      rootMessageId: referenced.rootMessageId,
+      ...(referenced.threadId ? { threadId: referenced.threadId } : {}),
+      replyMode: referenced.replyMode ?? (coordinates.chatType === "group" ? "thread" : "flat"),
+    };
+    existing = await lookupThreadSession(env, coordinates);
+    if (!existing) {
+      await replySessionText(
+        env,
+        coordinates,
+        `会话 #${explicitReference.shortId} 已不存在，请发送新的顶层任务创建会话。`
+      );
+      return;
+    }
+    content = explicitReference.prompt;
   }
 
   const slashName = parseRuntimeCommand(content);

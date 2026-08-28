@@ -6,6 +6,7 @@ import {
 } from "@open-inspect/shared/types/runtime-launch";
 import { z } from "zod";
 import type { Env } from "../types";
+import { sessionShortId } from "./session-short-id";
 
 const THREAD_TTL_SECONDS = 7 * 24 * 60 * 60;
 const THREAD_MESSAGE_ALIAS_TTL_SECONDS = THREAD_TTL_SECONDS;
@@ -326,6 +327,23 @@ export async function listConversationSessions(
   const value = await createKvCacheStore(env.FEISHU_KV).get(sessionIndexKey(input), "json");
   const parsed = conversationSessionIndexSchema.safeParse(value);
   return parsed.success ? parsed.data : [];
+}
+
+/**
+ * Resolve an explicit short id only within the actor's chat index. Returning
+ * null for a collision is safer than routing to an arbitrary session.
+ */
+export async function findConversationSessionByShortId(
+  env: Pick<Env, "FEISHU_KV">,
+  input: Pick<FeishuConversationCoordinates, "tenantKey" | "chatId"> & { actorId: string },
+  shortId: string
+): Promise<FeishuConversationSessionSummary | null> {
+  const normalized = shortId.trim().toUpperCase();
+  if (!/^[0-9A-F]{6}$/.test(normalized)) return null;
+  const matches = (await listConversationSessions(env, input)).filter(
+    (session) => sessionShortId(session.sessionId) === normalized
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export async function clearThreadSession(

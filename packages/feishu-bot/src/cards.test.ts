@@ -357,5 +357,6 @@ describe("Feishu completion cards", () => {
     expect(serialized).toContain("codex/b");
     expect(serialized).toContain("工作中");
     expect(serialized).toContain("已完成");
+    expect(serialized).toContain("#短编号 请求");
   });
 });
