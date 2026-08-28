@@ -845,6 +845,14 @@ feishu_error_code
   `/status`，回执和状态结果正常，Cloudflare Worker 日志仅记录入口与 `message.received`，未再出现
   `event.dispatch` 错误。
 
+### 7.14 最新生产回执冒烟（2026-08-29）
+
+- 在已绑定 Gitea `huangdong/chatbi` 的飞书工作台话题中再次发送
+  `/status`（06:04，飞书网页）。机器人先回“已收到命令 /status，正在处理”，随后在同一话题返回
+  `huangdong/chatbi@main`、Codex、`codex:openai:subscription`、 `openai/gpt-5.6-luna`、会话
+  `completed` 和沙盒 `stopped`。
+- 本次没有重新出现代码源/仓库选择卡，也没有创建新会话；因此确认当前生产版本的命令回执、稳定 UUID 和已绑定 Gitea 话题路由仍然正常。该冒烟不替代完成定义中尚未完成的跨用户、原生手机 App 和生产回滚演练。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
