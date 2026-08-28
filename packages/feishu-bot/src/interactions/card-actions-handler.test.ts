@@ -139,6 +139,33 @@ describe("handleFeishuCardAction topic binding", () => {
     );
   });
 
+  it("rejects an unexpired card when another actor clicks it", async () => {
+    const crossActorPayload = {
+      ...payload,
+      header: { event_id: "action-cross-actor", tenant_key: "tenant" },
+      event: {
+        ...payload.event,
+        operator: { operator_id: { open_id: "other-user" } },
+      },
+    };
+
+    const result = await handleFeishuCardAction(
+      crossActorPayload,
+      {} as never,
+      "trace-cross-actor-card"
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      content: "该选择已过期或无权操作，请重新发起请求。",
+    });
+    expect(mocks.getPendingRequest).toHaveBeenCalledWith(expect.anything(), pendingId);
+    expect(mocks.lookupThreadSession).not.toHaveBeenCalled();
+    expect(mocks.listRepositoryCatalog).not.toHaveBeenCalled();
+    expect(mocks.startNewSession).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).not.toHaveBeenCalled();
+  });
+
   it("blocks a second repository choice while the first session is starting", async () => {
     mocks.claimThreadSelection.mockResolvedValue(false);
 
