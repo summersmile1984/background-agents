@@ -513,13 +513,22 @@ flag 关闭时出站 body 与当前生产等价。
   `POST /sandboxes` 连续返回
   `reset guest time failed:ttrpc err: Receive packet timeout`，即模板“可构建”不等于“可恢复创建”。同期已知模板
   `tpl-a0ff1eda32964a68940db1bb` 能正常创建，因此生产通过 Terraform run `33180831569`
-  回滚到旧模板，避免把不稳定模板暴露给用户。宿主 relay 与控制面代码仍已部署，但生产沙盒镜像尚未切换到
-  `48936883`。
+  回滚到旧模板，避免把不稳定模板暴露给用户。宿主 relay 与控制面代码仍已部署，期间生产沙盒镜像保持旧版本，未影响已有会话。
 - 随后使用同一源码、关闭 BuildKit provenance/SBOM attestation 的镜像构建验证：模板
   `tpl-d979943f4f7940968f3e4075` 成功 `READY`，直接 `POST /sandboxes` 返回 HTTP 201（sandbox
   `d0f95a6ece3a43bcbddb9ff0ab81c0cb`），并已立即删除探针。故构建脚本现在显式使用
-  `docker build --provenance=false --sbom=false`；在把该模板提升到生产前，仍需完成桥接、Codex
-  MCP 鉴权和视觉回归验收。
+  `docker build --provenance=false --sbom=false`。随后用同一脚本重新构建为单架构 manifest（digest
+  `sha256:4e0fb201bbd5d2f17bd25206c8d4219013ac768c2950d7d2ed05d00b7db41db1`），模板
+  `tpl-464c46bfbf24455cbf3256bc` 成功 `READY`，直接 `POST /sandboxes` 返回 HTTP 201（sandbox
+  `f2d5a618dfc448aca1bc3e3a572cd0aa`），并已删除探针。
+- commit `6b448eb6` 的 CI run `33182063247` 与 Terraform run `33182063477`
+  均成功；确认单架构模板可以恢复创建后，更新生产 secret `E2B_TEMPLATE_ID` 并执行 Terraform workflow
+  `33182599342`，Validate/Apply 均成功。当前新会话使用
+  `tpl-464c46bfbf24455cbf3256bc`，已有会话仍留在其原模板，不做热迁移。
+- 用 create-time 环境做的最小启动探针证明 `envd /health` 可达（HTTP
+  204），但没有真实 session 的控制面凭据时，Codex
+  supervisor 不会形成完整桥接，CDP/MCP 端口未进入可用态，探针随后按 TTL 清理。因此这只证明模板恢复和 launcher/envd 路径，不计入 Codex
+  MCP 鉴权、桥接、截图/preview 或飞书视觉 E2E；这些仍需使用真实会话完成。
 
 ## 8. 自动测试矩阵
 
