@@ -577,6 +577,18 @@ flag 关闭时出站 body 与当前生产等价。
   flag 的回滚演练。当前环境只有一个飞书身份，且 `huangdong/chatbi`
   没有仓库声明的视觉验证服务；这些项目需在具备相应 fixture/账号时单独验收。
 
+### 7.6 现场诊断：视觉请求排队（2026-08-28 17:20 UTC）
+
+- 通过 Feishu bot 的只读 service-auth 请求读取生产 session `60239e8f...`
+  的消息状态：旧的“截个图发给我”消息仍为 `processing`，新的“截图验证当前已绑定的 Gitea 页面”消息为
+  `pending`。因此新消息已经进入正确的同一话题和同一 session，但被会话的单并发队列按顺序等待，不是仓库选择或 thread 路由失败。
+- 旧消息的事件流在 `aio_browser/browser_screenshot` tool-call 后没有对应的
+  `tool_result`/`execution_complete`；sandbox 最近仍上报
+  `ready`，说明当前可见症状是 Harness/浏览器工具调用卡住，而不是 Feishu 回执丢失。生产默认执行超时为 90 分钟，故该 processing 消息在超时前会继续阻塞后续 prompt。
+- 本次检查没有停止任务、重放消息或发送新的 Feishu 内容。恢复测试前应由用户在 Web/Feishu 对该旧任务执行一次显式 Stop（或等待受控超时），然后重新发送视觉请求；重新验证时应优先让平台视觉验证器生成 artifact，避免把
+  `aio_browser` 手工截图调用当作完成证据。
+- 该结果进一步说明完成定义中的“截图/preview 回到正确话题”尚未通过；当前可证明的是回执、仓库绑定、队列隔离和生产健康状态。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
