@@ -20,6 +20,12 @@ legacy `owner/name` lookup for pre-migration sessions. This keeps Gitea and GitH
 identical paths from sharing an image and allows the per-repository development environment to be
 reused after a session restart (`12bf0478`).
 
+The sandbox launch/build paths also enforce proxy-credential precedence: when a server-side Git
+proxy base URL is present, legacy snapshot or provider clone tokens are omitted from the sandbox
+environment even if an older caller supplies both values (`44967329`). The sandbox receives only the
+short-lived repository capability, keeping Gitea PATs in the control plane during fresh, restore,
+and image-build flows.
+
 ## Executive Summary
 
 Open-Inspect should support GitHub and Gitea in the same installation by introducing an explicit
