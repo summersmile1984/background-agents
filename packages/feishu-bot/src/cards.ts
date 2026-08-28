@@ -485,6 +485,7 @@ export function buildCompletionCard(input: {
         input.harness ? `Harness：\`${input.harness}\`` : undefined,
         input.model ? `模型：\`${input.model}\`` : undefined,
         input.reasoningEffort ? `Effort：\`${input.reasoningEffort}\`` : undefined,
+        input.previewUrl ? `预览：${input.previewUrl}` : undefined,
         "",
         body.slice(0, 3000),
       ]

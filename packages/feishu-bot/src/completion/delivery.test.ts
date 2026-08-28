@@ -127,6 +127,27 @@ describe("Feishu completion delivery", () => {
     );
   });
 
+  it("rewrites loopback URLs in the agent response to the public preview", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "预览：http://127.0.0.1:4173/responsive",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    vi.mocked(env.CONTROL_PLANE.fetch).mockResolvedValue(
+      Response.json({
+        tunnelUrls: { "4173": "https://preview.example/sandbox/sandbox-1/4173/" },
+      })
+    );
+
+    await processFeishuCompletion(job, env);
+
+    const card = JSON.stringify(vi.mocked(replySessionCard).mock.calls[0]?.[2]);
+    expect(card).toContain("https://preview.example/sandbox/sandbox-1/4173/responsive");
+    expect(card).not.toContain("http://127.0.0.1:4173");
+  });
+
   it("keeps completion cards and media inside the stored native topic", async () => {
     vi.mocked(extractAgentResponse).mockResolvedValue({
       textContent: "Done in topic",

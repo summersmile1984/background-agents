@@ -143,6 +143,21 @@ describe("Feishu repository cards", () => {
   });
 });
 
+describe("Feishu completion cards", () => {
+  it("shows the externally reachable preview URL", () => {
+    const card = buildCompletionCard({
+      sessionId: "session-1",
+      targetLabel: "gitea · huangdong/chatbi",
+      textContent: "Done",
+      success: true,
+      webAppUrl: "https://open-inspect.example",
+      previewUrl: "https://preview.example/sandbox/sandbox-1/4173/",
+    });
+
+    expect(JSON.stringify(card)).toContain("预览：https://preview.example/sandbox/sandbox-1/4173/");
+  });
+});
+
 describe("Feishu runtime launch cards", () => {
   const repository = target(1);
   const harness = {

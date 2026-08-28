@@ -68,6 +68,32 @@ function pullRequestUrl(
   return undefined;
 }
 
+/**
+ * Harnesses commonly report their local dev URL in the final response. Replace
+ * only loopback host/port prefixes with the already-validated public tunnel;
+ * preserve the path so `/responsive` and similar routes remain usable.
+ */
+function rewriteLoopbackPreviewLinks(text: string, previewUrl: string | undefined): string {
+  if (!previewUrl) return text;
+  let tunnel: URL;
+  try {
+    tunnel = new URL(previewUrl);
+  } catch {
+    return text;
+  }
+  if (tunnel.protocol !== "https:") return text;
+
+  const portMatches = [...tunnel.pathname.matchAll(/(?:^|\/)(\d+)(?:\/|$)/g)];
+  const portSegment = portMatches[portMatches.length - 1]?.[1];
+  if (!portSegment) return text;
+  const tunnelPrefix = tunnel.href.replace(/\/$/, "");
+  const loopbackPrefix = new RegExp(
+    `https?://(?:127\\.0\\.0\\.1|localhost|0\\.0\\.0\\.0):${portSegment}(?=/|$)`,
+    "gi"
+  );
+  return text.replace(loopbackPrefix, tunnelPrefix);
+}
+
 export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env): Promise<void> {
   const coordinates: FeishuConversationCoordinates = {
     tenantKey: job.tenantKey,
@@ -89,6 +115,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       job.traceId
     );
     const previewUrl = await fetchPreviewUrl(env, job.sessionId, job.traceId);
+    const responseText = rewriteLoopbackPreviewLinks(response.textContent, previewUrl);
     const completed = job.success && response.success;
     await updateThreadSession(env, coordinates, {
       state: completed ? "completed" : "failed",
@@ -99,7 +126,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       buildCompletionCard({
         sessionId: job.sessionId,
         targetLabel: job.targetLabel,
-        textContent: response.textContent,
+        textContent: responseText,
         success: job.success && response.success,
         error: response.error || job.error,
         webAppUrl: env.WEB_APP_URL,
