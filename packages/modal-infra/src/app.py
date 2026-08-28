@@ -57,8 +57,11 @@ github_app_secrets = modal.Secret.from_name(
 #   MODAL_API_SECRET: verify requests from control plane to Modal endpoints
 # Optional keys (add to the same secret as needed):
 #   ALLOWED_CONTROL_PLANE_HOSTS: comma-separated list of permitted callback hosts
-#   SCM_PROVIDER: "github" (default) or "gitlab" — selects the clone credential type
-#   GITLAB_ACCESS_TOKEN: GitLab PAT used as clone credential when SCM_PROVIDER=gitlab
+#   SCM_PROVIDER: "github" (default), "gitlab", or "gitea" — selects the
+#       legacy clone credential behavior. Gitea restores must use the
+#       control-plane Git proxy capability; no Gitea PAT is read here.
+#   GITLAB_ACCESS_TOKEN: GitLab PAT used as a legacy direct clone credential
+#       when SCM_PROVIDER=gitlab
 internal_api_secret = modal.Secret.from_name(
     "internal-api",
     required_keys=["MODAL_API_SECRET"],
