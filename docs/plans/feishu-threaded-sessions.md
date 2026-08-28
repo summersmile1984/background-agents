@@ -547,6 +547,20 @@ flag 关闭时出站 body 与当前生产等价。
   claim 保证最终只创建一个 session，但 UI 后续应增加“卡片已过期/当前步骤”提示或禁用旧卡，降低人工误点风险。
 - 本轮只验证消息回执、Gitea 目录分页、仓库绑定、Harness/模型/Effort 选择和完成消息；截图、preview、PR、跨用户及手机端遮挡仍不计入通过项。
 
+### 7.4 冷目录与历史卡片修复发布（2026-08-29）
+
+- `e9313599` 将 Control
+  Plane 的 SCM 目录写入改为 8 路有界并发，保持上游仓库顺序并避免无限制 D1 写入突发；Feishu
+  pending 记录新增单调
+  `selectionRevision`，每次代码源、仓库、Harness、模型或 Effort 选择都会推进版本，旧卡的回调在服务端拒绝。旧版无该字段的卡仍按兼容路径处理。
+- 本地验证：Feishu bot 102 项、Control Plane 单元 2857 项、Control
+  Plane 集成 875 项、全仓 typecheck/lint 均通过。新增回归覆盖有界并发目录写入、选择版本递增和旧卡拒绝。
+- GitHub Actions CI `33189747266` 与 Terraform `33189746847` 均成功；生产 Feishu Worker 版本
+  `7c748f35-f860-4823-bc17-e92787dbf7ba`、Control Plane 版本
+  `c723361d-b90d-452a-a429-9718f80722f6`，Feishu `/healthz` 返回 `ok=true`。
+- 已有生产话题继续沿用 `huangdong/chatbi`
+  的同一 session；服务启动验证显示仓库未修改，但该仓库的 README 依赖 PostgreSQL/Cube，生产 sandbox 镜像没有 Docker，因此只能启动前端临时服务，数据库相关功能不计入本轮通过项。
+
 ## 8. 自动测试矩阵
 
 ### 8.1 Unit
