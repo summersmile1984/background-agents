@@ -215,6 +215,42 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("normalizes Feishu topic-group events to the group routing surface", async () => {
+    mocks.replySessionText.mockResolvedValueOnce({
+      messageId: "receipt-topic-group",
+      threadId: "thread-topic-group",
+    });
+    const topicGroupEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "topic_group" as const,
+          mentions: [{ id: { open_id: "bot-1" } }],
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const groupEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_THREAD_REPLIES_ENABLED: "true",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(topicGroupEvent, groupEnv, "trace-topic-group");
+
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      groupEnv,
+      expect.objectContaining({ chatType: "group", replyMode: "thread" }),
+      expect.stringContaining("已收到")
+    );
+    expect(mocks.storePendingRequest).toHaveBeenCalledWith(
+      groupEnv,
+      expect.objectContaining({ chatType: "group", replyMode: "thread" })
+    );
+  });
+
   it("accepts the rich-text payload produced by a topic-group root", async () => {
     const groupEvent = {
       ...event,

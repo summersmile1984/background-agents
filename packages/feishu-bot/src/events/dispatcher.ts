@@ -48,15 +48,15 @@ function messageCoordinates(
   const message = event.event?.message;
   const tenantKey = event.header?.tenant_key;
   if (!message?.chat_id || !message.message_id || !message.chat_type || !tenantKey) return null;
+  const chatType = message.chat_type === "p2p" ? "p2p" : "group";
   const replyMode =
-    message.thread_id ||
-    (message.chat_type === "group" && env.FEISHU_THREAD_REPLIES_ENABLED === "true")
+    message.thread_id || (chatType === "group" && env.FEISHU_THREAD_REPLIES_ENABLED === "true")
       ? "thread"
       : "flat";
   return {
     tenantKey,
     chatId: message.chat_id,
-    chatType: message.chat_type,
+    chatType,
     rootMessageId: message.root_id || message.message_id,
     ...(message.thread_id ? { threadId: message.thread_id } : {}),
     replyMode,
@@ -237,7 +237,7 @@ export async function handleFeishuEvent(
   });
   const actor = actorId(coordinates.tenantKey, openId);
   let mentioned = false;
-  if (message?.chat_type === "group") {
+  if (coordinates.chatType === "group") {
     if (env.FEISHU_TRIGGERS_ENABLED !== "true") return;
     try {
       mentioned = await isGroupMentionForBot(payload, env);
@@ -249,7 +249,7 @@ export async function handleFeishuEvent(
       });
       return;
     }
-  } else if (message?.chat_type !== "p2p") {
+  } else if (coordinates.chatType !== "p2p") {
     return;
   }
   let existing: FeishuThreadSession | null;
@@ -265,7 +265,7 @@ export async function handleFeishuEvent(
       reply_mode: coordinates.replyMode,
       error: error instanceof Error ? error : new Error(String(error)),
     });
-    if (message?.chat_type === "group" && !mentioned) return;
+    if (coordinates.chatType === "group" && !mentioned) return;
     await replySessionText(
       env,
       coordinates,
@@ -280,7 +280,7 @@ export async function handleFeishuEvent(
         replyMode: "thread",
       })) ?? existing;
   }
-  if (message?.chat_type === "group") {
+  if (coordinates.chatType === "group") {
     const boundFollowUp =
       env.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED === "true" && existing?.actorId === actor;
     if (!mentioned && !boundFollowUp) return;

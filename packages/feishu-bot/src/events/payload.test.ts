@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseFeishuMessageText } from "./payload";
+import { feishuEventEnvelopeSchema, parseFeishuMessageText } from "./payload";
 
 describe("parseFeishuMessageText", () => {
   it("parses an ordinary text message", () => {
@@ -38,5 +38,23 @@ describe("parseFeishuMessageText", () => {
   it("rejects unsupported and malformed messages", () => {
     expect(parseFeishuMessageText("image", JSON.stringify({ image_key: "img" }))).toBeNull();
     expect(parseFeishuMessageText("post", "not-json")).toBeNull();
+  });
+
+  it("accepts topic-group message events for the dispatcher normalizer", () => {
+    const parsed = feishuEventEnvelopeSchema.safeParse({
+      header: { event_type: "im.message.receive_v1", tenant_key: "tenant" },
+      event: {
+        sender: { sender_type: "user", sender_id: { open_id: "user" } },
+        message: {
+          chat_id: "chat",
+          chat_type: "topic_group",
+          message_id: "message",
+          message_type: "text",
+          content: JSON.stringify({ text: "检查项目" }),
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
   });
 });

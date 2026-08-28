@@ -25,7 +25,10 @@ export const feishuEventEnvelopeSchema = z.object({
       message: z
         .object({
           chat_id: nonEmpty.optional(),
-          chat_type: z.enum(["p2p", "group"]).optional(),
+          // Feishu uses `topic_group` for topic-group chats. Internally this
+          // is normalized to the same group routing surface as ordinary
+          // groups, while preserving the provider payload compatibility.
+          chat_type: z.enum(["p2p", "group", "topic_group"]).optional(),
           message_id: nonEmpty.optional(),
           root_id: nonEmpty.optional(),
           parent_id: nonEmpty.optional(),
