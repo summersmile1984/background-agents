@@ -10,6 +10,7 @@ def clear_clone_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in [
         "SCM_PROVIDER",
         "GITLAB_ACCESS_TOKEN",
+        "GITEA_ACCESS_TOKEN",
         "GITHUB_APP_ID",
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_APP_INSTALLATION_ID",
@@ -26,6 +27,20 @@ def test_resolve_clone_token_uses_gitlab_access_token(monkeypatch):
 
 def test_resolve_clone_token_returns_none_for_missing_gitlab_token(monkeypatch):
     monkeypatch.setenv("SCM_PROVIDER", "gitlab")
+
+    assert resolve_clone_token() is None
+
+
+def test_resolve_clone_token_does_not_fall_back_to_github_for_gitea(monkeypatch):
+    monkeypatch.setenv("SCM_PROVIDER", "gitea")
+    monkeypatch.setenv("GITHUB_APP_ID", "123")
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "private-key")
+    monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
+
+    def fail_if_called(**_kwargs):
+        raise AssertionError("Gitea restore must use the server-side proxy")
+
+    monkeypatch.setattr("sandbox_runtime.auth.generate_installation_token", fail_if_called)
 
     assert resolve_clone_token() is None
 
