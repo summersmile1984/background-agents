@@ -549,6 +549,22 @@ async def test_vcs_env_vars_gitlab(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_vcs_env_vars_gitea_requires_server_side_proxy(monkeypatch):
+    """Gitea must not silently inherit the deployment's GitHub identity."""
+    captured = {}
+    monkeypatch.setattr("src.sandbox.manager.modal.Sandbox.create", _fake_sandbox_create(captured))
+    monkeypatch.setenv("SCM_PROVIDER", "gitea")
+
+    with pytest.raises(ValueError, match="requires the server-side Git proxy"):
+        await SandboxManager().create_sandbox(
+            SandboxConfig(
+                repo_owner="acme",
+                repo_name="repo",
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_vcs_env_vars_bitbucket(monkeypatch):
     """SCM_PROVIDER=bitbucket → bitbucket.org + x-token-auth, no token in env."""
     captured = {}
