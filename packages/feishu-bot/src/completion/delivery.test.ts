@@ -172,4 +172,38 @@ describe("Feishu completion delivery", () => {
     expect(card).toContain("codex");
     expect(card).toContain("high");
   });
+
+  it("keeps a pull-request action on the same topic as the completion card", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "PR created",
+      toolCalls: [],
+      artifacts: [{ type: "pr", url: "https://gitea.example/huangdong/chatbi/pulls/3" }],
+      mediaArtifacts: [],
+      success: true,
+    });
+    const topicJob: FeishuCompletionJob = {
+      ...job,
+      chatType: "group",
+      threadId: "thread-pr",
+      replyMode: "thread",
+      branch: "codex/chatbi-pr",
+      harness: "codex",
+    };
+
+    await processFeishuCompletion(topicJob, env);
+
+    expect(replySessionCard).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        rootMessageId: "root-1",
+        threadId: "thread-pr",
+        replyMode: "thread",
+      }),
+      expect.any(Object),
+      topicJob.deliveryId
+    );
+    expect(JSON.stringify(vi.mocked(replySessionCard).mock.calls[0]?.[2])).toContain(
+      "https://gitea.example/huangdong/chatbi/pulls/3"
+    );
+  });
 });
