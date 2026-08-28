@@ -444,10 +444,6 @@ flag 关闭时出站 body 与当前生产等价。
   `parent_id`，也能回到原 session。别名不保存消息正文或密钥，沿用线程 TTL，并在 KV 写入失败时不阻断原消息投递；相关回归后本地 Feishu
   bot 测试为 99 项。
 
-- 进一步为机器人发出的回执、工作卡、完成卡和截图建立了按租户/会话隔离的短期消息别名；私聊引用机器人卡片时，即使事件只携带该卡片的
-  `parent_id`，也能回到原 session。别名不保存消息正文或密钥，沿用线程 TTL，并在 KV 写入失败时不阻断原消息投递；相关回归后本地 Feishu
-  bot 测试为 99 项。
-
 - 部署 commit：`98e049005f863b16731d52da3781ad94615b2ea0`；Feishu Worker version：
   `69d6a408-0881-43df-bf44-88882362f86a`；Terraform 与 CI 均通过。
 - 生产绑定：`rootMessageId=om_x100b663b27bdcc80c2ac06358227de0`、
