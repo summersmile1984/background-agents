@@ -23,8 +23,8 @@ reused after a session restart (`12bf0478`).
 The sandbox launch/build paths also enforce proxy-credential precedence: when a server-side Git
 proxy base URL is present, legacy snapshot or provider clone tokens are omitted from the sandbox
 environment even if an older caller supplies both values (`44967329`). The sandbox receives only the
-short-lived repository capability, keeping Gitea PATs in the control plane during fresh, restore,
-and image-build flows.
+short-lived repository capability through `SCM_GIT_CAPABILITY` (never the legacy `VCS_CLONE_TOKEN`),
+keeping Gitea PATs in the control plane during fresh, restore, and image-build flows (`ce15c38b`).
 
 ## Executive Summary
 
