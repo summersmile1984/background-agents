@@ -207,6 +207,48 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("accepts the rich-text payload produced by a topic-group root", async () => {
+    const groupEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: {
+          ...event.event.message,
+          chat_type: "group" as const,
+          message_type: "post",
+          mentions: [{ id: { open_id: "bot-1" } }],
+          content: JSON.stringify({
+            title: "",
+            content: [
+              [
+                { tag: "at", user_id: "bot-1", user_name: "代码智能体" },
+                { tag: "text", text: " 帮我看看 chatbi 项目", style: [] },
+              ],
+            ],
+          }),
+        },
+      },
+    } satisfies FeishuEventEnvelope;
+    const groupEnv = {
+      ...env,
+      FEISHU_TRIGGERS_ENABLED: "true",
+      FEISHU_THREAD_REPLIES_ENABLED: "true",
+      FEISHU_BOT_OPEN_ID: "bot-1",
+    };
+
+    await handleFeishuEvent(groupEvent, groupEnv, "trace-group-post");
+
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      groupEnv,
+      expect.any(Object),
+      expect.stringContaining("已收到")
+    );
+    expect(mocks.storePendingRequest).toHaveBeenCalledWith(
+      groupEnv,
+      expect.objectContaining({ content: "帮我看看 chatbi 项目" })
+    );
+  });
+
   it("ignores an unbound unmentioned group message before catalog discovery", async () => {
     const groupEvent = {
       ...event,

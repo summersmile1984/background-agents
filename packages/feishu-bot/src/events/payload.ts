@@ -67,3 +67,52 @@ export function parseFeishuText(content: string | undefined): string | null {
     return null;
   }
 }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parsePostRows(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!Array.isArray(row)) return [];
+    const text = row
+      .flatMap((element) => {
+        if (!isRecord(element)) return [];
+        // Mentions are routing metadata, not part of the coding prompt.
+        if (element.tag === "at") return [];
+        return typeof element.text === "string" ? [element.text] : [];
+      })
+      .join("")
+      .trim();
+    return text ? [text] : [];
+  });
+}
+
+function parseFeishuPostValue(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const direct = [
+    ...(typeof value.title === "string" && value.title.trim() ? [value.title.trim()] : []),
+    ...parsePostRows(value.content),
+  ];
+  if (direct.length > 0) return direct;
+
+  // Older/localized rich-text payloads wrap locale documents below `post`.
+  if (!isRecord(value.post)) return [];
+  return Object.values(value.post).flatMap(parseFeishuPostValue);
+}
+
+/** Extract a user prompt from the Feishu message types used by topic and flat chats. */
+export function parseFeishuMessageText(
+  messageType: string | undefined,
+  content: string | undefined
+): string | null {
+  if (messageType === "text") return parseFeishuText(content);
+  if (messageType !== "post" || !content) return null;
+  try {
+    const text = parseFeishuPostValue(JSON.parse(content)).join("\n").trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}

@@ -26,7 +26,7 @@ import {
   listRepositoryTargets,
 } from "../targets";
 import type { Env } from "../types";
-import { parseFeishuText, type FeishuEventEnvelope } from "./payload";
+import { parseFeishuMessageText, type FeishuEventEnvelope } from "./payload";
 
 const log = createLogger("event-dispatcher");
 
@@ -177,6 +177,15 @@ export async function handleFeishuEvent(
   const openId = sender?.sender_id?.open_id;
   const messageId = message?.message_id;
   if (!coordinates || !messageId || !openId || sender?.sender_type === "app") return;
+  log.info("message.received", {
+    trace_id: traceId,
+    message_id: messageId,
+    chat_id: coordinates.chatId,
+    chat_type: coordinates.chatType,
+    message_type: message?.message_type || "unknown",
+    root_message_id: coordinates.rootMessageId,
+    ...(coordinates.threadId ? { thread_id: coordinates.threadId } : {}),
+  });
   const actor = actorId(coordinates.tenantKey, openId);
   let mentioned = false;
   if (message?.chat_type === "group") {
@@ -227,7 +236,13 @@ export async function handleFeishuEvent(
       env.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED === "true" && existing?.actorId === actor;
     if (!mentioned && !boundFollowUp) return;
   }
-  if (message?.message_type !== "text") {
+  if (message?.message_type !== "text" && message?.message_type !== "post") {
+    log.warn("message.unsupported_type", {
+      trace_id: traceId,
+      message_id: messageId,
+      chat_type: coordinates.chatType,
+      message_type: message?.message_type || "unknown",
+    });
     await replySessionText(
       env,
       coordinates,
@@ -235,8 +250,14 @@ export async function handleFeishuEvent(
     );
     return;
   }
-  const content = parseFeishuText(message.content);
+  const content = parseFeishuMessageText(message.message_type, message.content);
   if (!content) {
+    log.warn("message.text_parse_failed", {
+      trace_id: traceId,
+      message_id: messageId,
+      chat_type: coordinates.chatType,
+      message_type: message.message_type,
+    });
     await replySessionText(env, coordinates, "请在消息中写下要完成的开发任务。");
     return;
   }
