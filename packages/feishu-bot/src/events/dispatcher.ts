@@ -49,11 +49,14 @@ function actorId(tenantKey: string, openId: string): string {
 
 /**
  * Feishu retries a request with the same event ID, while the reply endpoint
- * deduplicates a UUID for one hour. Keep the acknowledgement keys short and
- * deterministic so a transient 429/5xx cannot create duplicate receipts.
+ * deduplicates a UUID for one hour. Generate one valid UUID per logical
+ * delivery so a transient 429/5xx cannot create duplicate receipts.
  */
-function deliveryIdempotencyKey(messageId: string, kind: string): string {
-  return `feishu:${messageId}:${kind}`.slice(0, 64);
+function deliveryIdempotencyKey(_messageId: string, _kind: string): string {
+  // Feishu validates this field as a UUID. Generate it once per logical
+  // delivery so the bounded retry in replyFeishuMessage reuses the same value
+  // without sending the old colon-delimited event key that Feishu rejects.
+  return crypto.randomUUID();
 }
 
 function messageCoordinates(
