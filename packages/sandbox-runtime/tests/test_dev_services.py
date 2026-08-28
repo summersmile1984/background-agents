@@ -56,6 +56,26 @@ def test_postgres_command_drops_to_postgres_when_root(
     )
 
 
+@pytest.mark.asyncio
+async def test_start_writes_empty_metadata_without_environment_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    metadata_path = tmp_path / "services.json"
+    monkeypatch.setattr("sandbox_runtime.dev_services.DEV_SERVICE_METADATA_PATH", metadata_path)
+
+    service_manager = manager(tmp_path)
+    assert await service_manager.start((), tmp_path) is True
+    metadata = json.loads(metadata_path.read_text())
+    assert metadata["version"] == 1
+    assert metadata["sandboxId"] == "sandbox-test"
+    assert metadata["manifestPath"] is None
+    assert metadata["services"] == []
+    assert metadata["generatedAt"]
+
+    await service_manager.stop()
+    assert not metadata_path.exists()
+
+
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

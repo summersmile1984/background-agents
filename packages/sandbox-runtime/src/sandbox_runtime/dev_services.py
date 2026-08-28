@@ -59,6 +59,13 @@ class DevServiceManager:
     async def start(self, repositories: tuple[object, ...], workdir: Path) -> bool:
         self.manifest_path = find_environment_manifest(repositories, workdir)
         if self.manifest_path is None:
+            # Visual verification and snapshot consumers use this file as the
+            # authoritative, sandbox-scoped service registry even when a
+            # repository does not declare any managed services.  Always write
+            # an empty registry so callers receive a structured
+            # `service_not_found`/`config_missing` result instead of a raw
+            # FileNotFoundError from the verifier.
+            self._write_metadata()
             return True
         try:
             manifest = load_environment_manifest(self.manifest_path)
