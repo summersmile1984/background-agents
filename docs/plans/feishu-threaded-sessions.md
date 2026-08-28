@@ -386,7 +386,17 @@ flag 关闭时出站 body 与当前生产等价。
   `updatedAt`/`lastMessageId`，且没有再次发送仓库选择卡。
 - 生产 Worker 绑定显示 `FEISHU_THREAD_REPLIES_ENABLED=true`、
   `FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED=true`；completion 日志记录相同的 root/thread/session 坐标并成功投递。
-- 本轮只证明“同一话题续办不重选仓库、不换 session”。双话题 GitHub/Gitea 并行、截图/preview/PR 归属、跨用户、旧卡生产重放、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
+- 后续部署 commit `b13d0e958d1a85ae097bb3f28378ba169c01fe01`，Feishu Worker version
+  `194c541d-9aad-4c0f-8555-adadc1696145`。16:16 再次在同一话题发送不带 @ 的 follow-up；回执明确显示“本话题沿用已绑定仓库，无需重新选择”，并在同一
+  `#95AC9C` 完成卡返回 `feishu-parallel-gitea-ok`。日志记录 `mapping_found=true`，Control
+  Plane 将 prompt 派发给原
+  `sessionId=d0ecc91821aa7dcf8d8da93bb81b8599`；KV 的 root/thread/repository/session 坐标保持不变，D1 显示
+  `message_count=9`、`provider=gitea`、`repo=huangdong/chatbi`、`status=completed`。
+- 16:06 重放同话题 10:50 的旧仓库选择卡，服务端返回“该选择已过期或无权操作”，没有创建 session；本次实际命中pending 过期校验，不能替代仍待执行的未过期旧卡/跨用户负向用例。
+- 16:09 创建 GitHub 测试话题后，代码源卡正确列出 GitHub 与 Gitea，GitHub 仓库按钮分页也正常；但指定的
+  `summersmile1984/n9n` 不在 App 返回的全部 24 个 GitHub 仓库中，已登录 GitHub API 和
+  `git ls-remote` 均返回 404，因此没有误选其他仓库或宣称双 SCM E2E 已完成。
+- 本轮证明“同一话题续办不重选仓库、不换 session”和旧卡无法控制 session。双话题 GitHub/Gitea 并行、截图/preview/PR 归属、跨用户、未过期旧卡、私聊双 session、手机端和回滚演练仍按下文 Runbook 验收。
 
 ## 8. 自动测试矩阵
 
