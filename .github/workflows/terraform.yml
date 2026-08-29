@@ -38,6 +38,25 @@ on:
       - "packages/web/**"
       - ".github/workflows/terraform.yml"
   workflow_dispatch: # Allow manual trigger
+    inputs:
+      feishu_thread_replies_enabled:
+        description: "Feishu native topic replies (inherit uses the repository secret)"
+        required: true
+        default: inherit
+        type: choice
+        options:
+          - inherit
+          - "true"
+          - "false"
+      feishu_bound_thread_followups_enabled:
+        description: "Feishu bound-topic follow-ups without @ (inherit uses the repository secret)"
+        required: true
+        default: inherit
+        type: choice
+        options:
+          - inherit
+          - "true"
+          - "false"
 
 permissions:
   contents: read
@@ -227,8 +246,8 @@ jobs:
           TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
           TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
           TF_VAR_feishu_media_delivery_enabled: "${{ secrets.FEISHU_MEDIA_DELIVERY_ENABLED || 'false' }}"
-          TF_VAR_feishu_thread_replies_enabled: "${{ secrets.FEISHU_THREAD_REPLIES_ENABLED || 'false' }}"
-          TF_VAR_feishu_bound_thread_followups_enabled: "${{ secrets.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED || 'false' }}"
+          TF_VAR_feishu_thread_replies_enabled: "${{ github.event_name == 'workflow_dispatch' && inputs.feishu_thread_replies_enabled != 'inherit' && inputs.feishu_thread_replies_enabled || secrets.FEISHU_THREAD_REPLIES_ENABLED || 'false' }}"
+          TF_VAR_feishu_bound_thread_followups_enabled: "${{ github.event_name == 'workflow_dispatch' && inputs.feishu_bound_thread_followups_enabled != 'inherit' && inputs.feishu_bound_thread_followups_enabled || secrets.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED || 'false' }}"
           TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
@@ -411,8 +430,8 @@ jobs:
           TF_VAR_feishu_bot_open_id: ${{ secrets.FEISHU_BOT_OPEN_ID }}
           TF_VAR_feishu_triggers_enabled: "${{ secrets.FEISHU_TRIGGERS_ENABLED || 'false' }}"
           TF_VAR_feishu_media_delivery_enabled: "${{ secrets.FEISHU_MEDIA_DELIVERY_ENABLED || 'false' }}"
-          TF_VAR_feishu_thread_replies_enabled: "${{ secrets.FEISHU_THREAD_REPLIES_ENABLED || 'false' }}"
-          TF_VAR_feishu_bound_thread_followups_enabled: "${{ secrets.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED || 'false' }}"
+          TF_VAR_feishu_thread_replies_enabled: "${{ github.event_name == 'workflow_dispatch' && inputs.feishu_thread_replies_enabled != 'inherit' && inputs.feishu_thread_replies_enabled || secrets.FEISHU_THREAD_REPLIES_ENABLED || 'false' }}"
+          TF_VAR_feishu_bound_thread_followups_enabled: "${{ github.event_name == 'workflow_dispatch' && inputs.feishu_bound_thread_followups_enabled != 'inherit' && inputs.feishu_bound_thread_followups_enabled || secrets.FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED || 'false' }}"
           TF_VAR_cloudflare_feishu_custom_domain: ${{ secrets.CLOUDFLARE_FEISHU_CUSTOM_DOMAIN }}
           TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           TF_VAR_token_encryption_key: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
