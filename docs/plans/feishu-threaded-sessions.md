@@ -956,6 +956,22 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
 - 新增 queue/alarm 回归覆盖 fresh
   pending、deadline 安排和超时失败；本地 control-plane 定向测试 67 项、全局 typecheck/lint 均通过。这个修复解决“沙盒起不来但会话永远挂起”的生命周期缺口，但不替代 provider 本身的连接超时和错误回执。
 
+### 7.21 CubeSandbox create-time 环境变量上限（2026-08-29）
+
+- 生产旧会话的浏览器日志确认了一条此前未覆盖的启动根因：CubeSandbox 在 `POST /sandboxes` 的 `envs`
+  字段拒绝了 5316 bytes 的 `CODEX_AUTH_JSON`，返回 `env var value too large`；这不是 Cloudflare
+  Tunnel 或 WebSocket 不稳定。
+- E2B provider 的 Cube create-time 路径现在会按 UTF-8 字节把超过 3500 bytes 的环境值拆成
+  `OI_E2B_ENV_CHUNK_*` 保留键；新的 `oi-launch`
+  在启动 supervisor 前按键名还原并清理传输块。块名使用原始环境键的十六进制编码，不建立可能再次超限的集中 manifest；缺块、重复块或非法块名会 fail-closed。受控的用户同名 chunk 键也会在拆分前清理，不能覆盖系统传输。
+- Managed E2B 的 secure envd 文件上传路径不变；只有 `E2B_USE_CREATE_TIME_ENV=true`
+  的 Cube 兼容路径启用该传输兼容层。新增 control-plane
+  70 项定向测试和 sandbox-runtime 启动器恢复/负向测试，避免将完整认证材料写入日志。
+- 该修复需要重新构建并注册包含新版 `oi-launch.py`
+  的 Cube 模板；仅发布 Worker 代码不会更新已注册的旧模板。生产验证应创建一个使用 Codex
+  subscription 的新会话，确认 E2B create 返回成功、
+  `Sandbox status: Ready`，并在 supervisor 日志中只看到已还原后的 harness 启动，不回显认证材料。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：

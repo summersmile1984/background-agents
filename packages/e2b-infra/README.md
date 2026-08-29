@@ -16,6 +16,9 @@ the template image, not runtime operations.
   waits for the control plane to drop `/tmp/oi-session.env` (via envd), loads it, and `exec`s the
   supervisor (`python -m sandbox_runtime.entrypoint`) with that env +
   `HOME=/home/user`/`PYTHONPATH`/`NODE_PATH`.
+- In CubeSandbox's create-time `envs` mode, values over 3500 UTF-8 bytes are sent as reserved
+  `OI_E2B_ENV_CHUNK_*` variables and reassembled by `oi-launch.py` before the supervisor starts.
+  Rebuild the Cube template whenever this launcher changes.
 - **`build-template.py`** — stages `sandbox_runtime`, then builds the template programmatically via
   the **E2B Template SDK** (`Template().from_dockerfile(...).copy(...).set_start_cmd(...)`),
   authenticated with the runtime API key. Used both for manual builds and by the Terraform module.

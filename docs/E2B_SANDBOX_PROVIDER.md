@@ -138,6 +138,14 @@ start the supervisor from that create-time environment. The control plane delibe
 secure envd upload path in this mode because Cube does not return an E2B envd access token. The
 session still receives a fresh `SANDBOX_AUTH_TOKEN` and the same normalized launch specification.
 
+Cube's create-time API limits the size of an individual environment value. The control plane keeps
+the `envs` contract compatible by splitting values larger than 3500 UTF-8 bytes into reserved
+`OI_E2B_ENV_CHUNK_*` variables; `oi-launch` reassembles and removes those transport variables before
+starting the supervisor. This is particularly important for Codex subscription `auth.json`, which is
+commonly larger than the limit. Missing, duplicate, malformed, or incomplete chunks fail closed. The
+Cube template must be rebuilt after changing `oi-launch.py`; updating the Worker alone cannot
+retrofit an already-registered template.
+
 ### Runtime-Owned Browser on Cube
 
 When `AIO_BROWSER_ENABLED=1`, browser startup is part of supervisor readiness:

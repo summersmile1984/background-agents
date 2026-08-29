@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeHmacHex } from "@open-inspect/shared/auth";
-import { deriveVncPassword } from "../sandbox-env";
+import {
+  deriveVncPassword,
+  E2B_CREATE_TIME_ENV_CHUNK_PREFIX,
+  E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES,
+} from "../sandbox-env";
 import { E2BSandboxProvider, type E2BProviderConfig } from "./e2b-provider";
 import { SandboxProviderError } from "../provider";
 import {
@@ -423,6 +427,39 @@ describe("E2BSandboxProvider", () => {
     );
     expect(client.writeSessionEnv).not.toHaveBeenCalled();
     expect(client.killSandbox).not.toHaveBeenCalled();
+  });
+
+  it("chunks oversized create-time secrets so CubeSandbox accepts Codex auth", async () => {
+    const client = mockClient({
+      createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+    });
+    const authJson = `${"a".repeat(5000)}🙂`;
+
+    await provider.createSandbox({
+      ...baseCreateConfig,
+      userEnvVars: { CODEX_AUTH_JSON: authJson },
+    });
+
+    const request = vi.mocked(client.createSandbox).mock.calls[0][0];
+    const env = request.envVars!;
+    const chunks = Object.entries(env)
+      .filter(([key]) => key.startsWith(E2B_CREATE_TIME_ENV_CHUNK_PREFIX))
+      .sort(([left], [right]) => left.localeCompare(right));
+
+    expect(env).not.toHaveProperty("CODEX_AUTH_JSON");
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every(
+        ([, value]) =>
+          new TextEncoder().encode(value).byteLength <= E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES
+      )
+    ).toBe(true);
+    expect(chunks.map(([, value]) => value).join("")).toBe(authJson);
+    expect(client.writeSessionEnv).not.toHaveBeenCalled();
   });
 
   it("429 maps to a TRANSIENT SandboxProviderError (not counted toward the circuit breaker)", async () => {

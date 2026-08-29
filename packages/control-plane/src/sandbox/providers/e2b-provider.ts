@@ -16,6 +16,7 @@ import {
   buildSandboxEnvVars,
   deriveCodeServerPassword,
   deriveVncPassword,
+  prepareE2BCreateTimeEnv,
   scmCloneIdentityForConfig,
 } from "../sandbox-env";
 import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
@@ -128,10 +129,14 @@ export class E2BSandboxProvider implements SandboxProvider {
           envVars.VCS_CLONE_BASE_URL = `${config.controlPlaneUrl.replace(/\/+$/, "")}/git/${encodeURIComponent(config.sessionId)}`;
         }
       }
+      // CubeSandbox enforces a per-value limit on its create-time `envs`
+      // payload. Split oversized secrets (notably Codex auth.json) into
+      // reserved chunks that the template launcher reassembles before exec.
+      const createTimeEnvVars = useCreateTimeEnv ? prepareE2BCreateTimeEnv(envVars) : undefined;
       const metadata = this.buildMetadata(config);
       const sandbox = await this.client.createSandbox({
         templateID: this.client.config.templateId,
-        ...(useCreateTimeEnv ? { envVars, envVarsField: "envs" as const } : {}),
+        ...(useCreateTimeEnv ? { envVars: createTimeEnvVars, envVarsField: "envs" as const } : {}),
         metadata,
         timeoutSeconds,
         autoPause: this.providerConfig.autoPause,

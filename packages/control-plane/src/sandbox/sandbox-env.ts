@@ -191,6 +191,18 @@ export const SCM_GIT_CAPABILITY_ENV_VAR = "SCM_GIT_CAPABILITY";
 /** Host-owned JSON policy consumed by the runtime visual verifier. */
 export const VISUAL_VERIFICATION_POLICY_ENV_VAR = "OPENINSPECT_VISUAL_VERIFICATION_POLICY";
 
+/**
+ * CubeSandbox rejects a create-time environment value above roughly 4 KiB.
+ * Keep chunks below that limit with room for provider-side encoding overhead.
+ * This applies only to the Cube-compatible create-time path; managed E2B uses
+ * the authenticated envd file upload and does not need chunking.
+ */
+export const E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES = 3500;
+/** Prefix reserved for values split across CubeSandbox create-time env vars. */
+export const E2B_CREATE_TIME_ENV_CHUNK_PREFIX = "OI_E2B_ENV_CHUNK_";
+/** Marker removed by the launcher after it has reassembled the chunks. */
+export const E2B_CREATE_TIME_ENV_CHUNKED_MARKER = "OI_E2B_ENV_CHUNKED";
+
 /** Host/username pair git pairs with the brokered clone token in the sandbox. */
 export interface ScmCloneIdentity {
   /** `VCS_HOST` — hostname the credential helper and clone URLs target. */
@@ -284,6 +296,62 @@ export function applyScmCloneEnv(
   if (cloneToken) {
     envVars[VCS_CLONE_TOKEN_ENV_VAR] = cloneToken;
   }
+}
+
+function encodeEnvKey(key: string): string {
+  return Array.from(new TextEncoder().encode(key), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function splitUtf8(value: string, maxBytes: number): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  let currentBytes = 0;
+  const encoder = new TextEncoder();
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+    if (current && currentBytes + characterBytes > maxBytes) {
+      chunks.push(current);
+      current = "";
+      currentBytes = 0;
+    }
+    current += character;
+    currentBytes += characterBytes;
+  }
+  if (current || value.length === 0) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Split oversized values for CubeSandbox's create-time `envs` request.
+ *
+ * The launcher reconstructs these values before starting the supervisor. The
+ * original key is encoded in each chunk name so no potentially large manifest
+ * env var is required (and a malformed/missing chunk can fail closed in the
+ * launcher). Reserved chunk keys supplied by a user are discarded first.
+ */
+export function prepareE2BCreateTimeEnv(envVars: Record<string, string>): Record<string, string> {
+  const prepared = { ...envVars };
+  delete prepared[E2B_CREATE_TIME_ENV_CHUNKED_MARKER];
+  for (const key of Object.keys(prepared)) {
+    if (key.startsWith(E2B_CREATE_TIME_ENV_CHUNK_PREFIX)) delete prepared[key];
+  }
+
+  const oversized = Object.entries(prepared).filter(
+    ([, value]) => new TextEncoder().encode(value).byteLength > E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES
+  );
+  if (oversized.length === 0) return prepared;
+
+  for (const [key, value] of oversized) {
+    delete prepared[key];
+    const encodedKey = encodeEnvKey(key);
+    splitUtf8(value, E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES).forEach((chunk, index) => {
+      prepared[`${E2B_CREATE_TIME_ENV_CHUNK_PREFIX}${encodedKey}_${index}`] = chunk;
+    });
+  }
+  prepared[E2B_CREATE_TIME_ENV_CHUNKED_MARKER] = "1";
+  return prepared;
 }
 
 /**

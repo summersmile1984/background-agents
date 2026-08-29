@@ -22,6 +22,8 @@ import time
 
 SESSION_ENV_PATH = "/tmp/oi-session.env"
 CREATE_TIME_ENV_MARKER = "OI_USE_CREATE_TIME_ENV"
+CREATE_TIME_ENV_CHUNKED_MARKER = "OI_E2B_ENV_CHUNKED"
+CREATE_TIME_ENV_CHUNK_PREFIX = "OI_E2B_ENV_CHUNK_"
 ENVD_HOST = "127.0.0.1"
 ENVD_PORT = 49983
 POLL_INTERVAL_SECONDS = 0.3
@@ -61,13 +63,48 @@ def _load_create_time_env() -> dict[str, str] | None:
     return {str(k): str(v) for k, v in parsed.items()}
 
 
+def _restore_chunked_env(environment: dict[str, str]) -> None:
+    """Reassemble values split for CubeSandbox's create-time env limit."""
+    chunk_keys = [key for key in environment if key.startswith(CREATE_TIME_ENV_CHUNK_PREFIX)]
+    if not chunk_keys:
+        environment.pop(CREATE_TIME_ENV_CHUNKED_MARKER, None)
+        return
+
+    chunks: dict[str, dict[int, str]] = {}
+    for key in chunk_keys:
+        suffix = key[len(CREATE_TIME_ENV_CHUNK_PREFIX) :]
+        encoded_key, separator, raw_index = suffix.rpartition("_")
+        if not separator or not encoded_key or not raw_index.isdigit():
+            raise ValueError(f"malformed split environment key: {key}")
+        try:
+            original_key = bytes.fromhex(encoded_key).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as error:
+            raise ValueError(f"malformed split environment key: {key}") from error
+        index = int(raw_index)
+        values = chunks.setdefault(original_key, {})
+        if index in values:
+            raise ValueError(f"duplicate split environment chunk: {key}")
+        values[index] = environment[key]
+
+    for original_key, indexed_chunks in chunks.items():
+        indexes = sorted(indexed_chunks)
+        if indexes != list(range(len(indexes))):
+            raise ValueError(f"incomplete split environment value: {original_key}")
+        environment[original_key] = "".join(indexed_chunks[index] for index in indexes)
+
+    for key in chunk_keys:
+        environment.pop(key, None)
+    environment.pop(CREATE_TIME_ENV_CHUNKED_MARKER, None)
+
+
 def main() -> None:
     # Poll indefinitely. E2B runs this start command once at build, snapshots it
     # mid-poll, and resumes it on each create — so a wall-clock deadline measured
     # here would be relative to *build* time and expire before any create. The
     # real bounds are E2B's sandbox TTL and the control plane's connecting-timeout
     # (which stops the sandbox if the bridge never phones home).
-    if os.environ.get(CREATE_TIME_ENV_MARKER) == "1":
+    use_create_time_env = os.environ.get(CREATE_TIME_ENV_MARKER) == "1"
+    if use_create_time_env:
         _log("using create-time session environment")
         session_env = {}
     else:
@@ -101,7 +138,13 @@ def main() -> None:
                     _log("session env is not a JSON object — retrying")
         time.sleep(POLL_INTERVAL_SECONDS)
 
+    if not use_create_time_env:
+        _restore_chunked_env(session_env)
     env = {**os.environ, **STATIC_ENV}
+    if use_create_time_env:
+        # Cube injects create-time variables into os.environ before starting
+        # this launcher, so restore chunks after merging that layer.
+        _restore_chunked_env(env)
     for k, v in session_env.items():
         env[str(k)] = str(v)
 

@@ -8,6 +8,9 @@ import {
   buildSessionConfig,
   deriveCodeServerPassword,
   deriveVncPassword,
+  E2B_CREATE_TIME_ENV_CHUNKED_MARKER,
+  E2B_CREATE_TIME_ENV_CHUNK_PREFIX,
+  E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES,
   IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_KEY,
   IMAGE_BUILD_MODE_ENV_VAR,
   imageBuildSandboxIdentity,
@@ -16,6 +19,7 @@ import {
   scmCloneIdentity,
   scmCloneIdentityForConfig,
   VISUAL_VERIFICATION_POLICY_ENV_VAR,
+  prepareE2BCreateTimeEnv,
 } from "./sandbox-env";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -374,6 +378,38 @@ describe("buildSandboxEnvVars", () => {
     expect(envVars.LLM_KEY).toBe("sk-provider");
     expect(envVars.SANDBOX_ID).toBe("sandbox-456");
     expect(envVars).not.toHaveProperty("IGNORED");
+  });
+});
+
+describe("prepareE2BCreateTimeEnv", () => {
+  it("splits oversized UTF-8 values into bounded reserved chunks", () => {
+    const source = {
+      CODEX_AUTH_JSON: `${"a".repeat(5000)}🙂`,
+      SMALL: "value",
+      [E2B_CREATE_TIME_ENV_CHUNKED_MARKER]: "user-override",
+      [`${E2B_CREATE_TIME_ENV_CHUNK_PREFIX}user`]: "user-override",
+    };
+
+    const prepared = prepareE2BCreateTimeEnv(source);
+    const chunks = Object.entries(prepared)
+      .filter(([key]) => key.startsWith(E2B_CREATE_TIME_ENV_CHUNK_PREFIX))
+      .sort(([left], [right]) => left.localeCompare(right));
+
+    expect(prepared).not.toHaveProperty("CODEX_AUTH_JSON");
+    expect(prepared).toMatchObject({ SMALL: "value", [E2B_CREATE_TIME_ENV_CHUNKED_MARKER]: "1" });
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every(
+        ([, value]) =>
+          new TextEncoder().encode(value).byteLength <= E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES
+      )
+    ).toBe(true);
+    expect(chunks.map(([, value]) => value).join("")).toBe(source.CODEX_AUTH_JSON);
+  });
+
+  it("does not rewrite values under the provider limit", () => {
+    const source = { CODEX_AUTH_JSON: "short", SMALL: "value" };
+    expect(prepareE2BCreateTimeEnv(source)).toEqual(source);
   });
 });
 
