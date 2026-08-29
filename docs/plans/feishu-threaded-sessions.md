@@ -894,6 +894,11 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
 - Cloudflare Workers Observability 的最近 1 小时窗口显示 Feishu Worker
   `31 Success / 0 Errors`；这只代表当前窗口，不覆盖历史上已经记录的旧错误。Control Plane
   `/health`、Feishu Worker `/healthz` 和生产 Web 首页随后均返回 HTTP 200。
+- 将同一查询窗口扩大到最近 24 小时后，观测到
+  `470 Success / 2 Errors`；两条错误均为 05:29 和 05:34 的旧 `FeishuApiError`（HTTP 400、错误码
+  `99992402`、
+  `field validation failed`），调用栈指向旧的消息回复幂等键格式。它们发生在标准 UUID 幂等键修复之前；修复后的最近 1 小时保持
+  `0 Errors`，没有新的同类错误。
 - 生产 Web 的 Source Control 设置页显示 GitHub（默认）与 Gitea 两个持久连接；Gitea 连接状态为
   `healthy`，刚通过设置页的只读 `Test` 操作重新检测，版本为
   `23.8.0`，凭据显示为已存储，能力包含仓库、分支和 Pull Request。页面同时保留已禁用的临时 E2E
