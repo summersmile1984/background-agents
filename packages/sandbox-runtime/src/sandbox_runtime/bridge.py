@@ -1132,16 +1132,33 @@ class AgentBridge:
     ) -> AsyncIterator[dict[str, Any]]:
         driver = self._ensure_harness_driver()
         previous_session_id = self.agent_session_id
-        async for event in driver.stream_prompt(
-            HarnessPrompt(
+        try:
+            # OpenCode's SSE adapter already enforces this deadline internally.
+            # Native harnesses expose independent SDK/RPC streams, so apply the
+            # same sandbox budget here; a stalled MCP/browser call must not keep
+            # a prompt processing forever.
+            async with asyncio.timeout(self.prompt_max_duration_seconds):
+                async for event in driver.stream_prompt(
+                    HarnessPrompt(
+                        message_id=message_id,
+                        content=content,
+                        model=model,
+                        reasoning_effort=reasoning_effort,
+                        attachments=attachments,
+                    )
+                ):
+                    yield event
+        except TimeoutError as error:
+            self.log.error(
+                "bridge.harness_prompt_timeout",
+                harness=self.agent_harness.value,
+                timeout_ms=int(self.prompt_max_duration_seconds * 1000),
                 message_id=message_id,
-                content=content,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                attachments=attachments,
             )
-        ):
-            yield event
+            await self._stop_harness(reason="prompt_max_duration_timeout")
+            raise RuntimeError(
+                f"Prompt exceeded max duration of {self.prompt_max_duration_seconds:.0f}s."
+            ) from error
         self.agent_session_id = driver.session_id
         await self._save_session_id()
         if self.agent_session_id and self.agent_session_id != previous_session_id:
@@ -1194,7 +1211,29 @@ class AgentBridge:
         if self.agent_harness == AgentHarness.OPENCODE:
             await self._request_opencode_stop(reason="command")
         elif self._harness_driver:
-            await self._harness_driver.stop(reason="command")
+            await self._stop_harness(reason="command")
+
+    async def _stop_harness(self, *, reason: str) -> None:
+        """Interrupt a native harness without allowing cleanup to hang the bridge."""
+        if not self._harness_driver:
+            return
+        try:
+            async with asyncio.timeout(self.prompt_cleanup_timeout_seconds):
+                await self._harness_driver.stop(reason=reason)
+        except TimeoutError:
+            self.log.warn(
+                "bridge.harness_stop_timeout",
+                harness=self.agent_harness.value,
+                timeout_ms=int(self.prompt_cleanup_timeout_seconds * 1000),
+                reason=reason,
+            )
+        except Exception as error:
+            self.log.warn(
+                "bridge.harness_stop_failed",
+                harness=self.agent_harness.value,
+                reason=reason,
+                exc=error,
+            )
 
     async def _handle_snapshot(self) -> None:
         """Handle snapshot command - prepare for snapshot."""

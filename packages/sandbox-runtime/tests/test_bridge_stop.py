@@ -9,11 +9,12 @@ import asyncio
 import contextlib
 import json
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from sandbox_runtime.bridge import AgentBridge
+from sandbox_runtime.types import AgentHarness
 from tests.conftest import MockResponse, wire_opencode_transport
 
 
@@ -70,6 +71,10 @@ def create_sse_event(event_type: str, properties: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+async def _async_noop(*_args, **_kwargs):
+    return None
+
+
 @pytest.fixture
 def bridge() -> AgentBridge:
     """Create a bridge instance for testing."""
@@ -120,6 +125,64 @@ class TestHandleStop:
         await bridge._handle_stop()
 
         mock_task.cancel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_native_harness_prompt_timeout_interrupts_driver(self):
+        """A native SDK/MCP call must not remain processing past the sandbox budget."""
+
+        class HangingDriver:
+            harness = AgentHarness.CODEX
+            session_id = "thread-1"
+
+            def __init__(self):
+                self.stop_reasons: list[str] = []
+
+            async def start(self, existing_session_id=None):
+                return self.session_id
+
+            async def stream_prompt(self, _prompt):
+                await asyncio.sleep(3600)
+                if False:  # pragma: no cover - keep this an async generator
+                    yield {}
+
+            async def stop(self, *, reason: str):
+                self.stop_reasons.append(reason)
+                return True
+
+            async def close(self):
+                return None
+
+        native_bridge = AgentBridge(
+            sandbox_id="test-sandbox",
+            session_id="test-session",
+            control_plane_url="http://localhost:8787",
+            auth_token="test-token",
+            agent_harness=AgentHarness.CODEX,
+        )
+        driver = HangingDriver()
+        native_bridge._harness_driver = driver
+        native_bridge._ensure_agent_session = _async_noop
+        native_bridge._configure_git_identity = _async_noop
+        native_bridge._send_event = AsyncMock()
+        native_bridge.prompt_max_duration_seconds = 0.01
+        native_bridge.prompt_cleanup_timeout_seconds = 0.1
+
+        await native_bridge._handle_prompt(
+            {
+                "messageId": "native-timeout",
+                "content": "hang",
+                "author": {"gitIdentity": {"mode": "agent-only"}},
+            }
+        )
+
+        assert driver.stop_reasons == ["prompt_max_duration_timeout"]
+        events = [call.args[0] for call in native_bridge._send_event.await_args_list]
+        assert events[-1] == {
+            "type": "execution_complete",
+            "messageId": "native-timeout",
+            "success": False,
+            "error": "Prompt exceeded max duration of 0s.",
+        }
 
     @pytest.mark.asyncio
     async def test_prompt_task_cleared_on_completion(self, bridge: AgentBridge):

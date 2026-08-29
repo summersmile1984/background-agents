@@ -908,6 +908,19 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   Harness，Codex 模型列表和 Effort 按钮。卡片全部使用直接按钮，不依赖会唤起输入法的静态下拉框。
 - 本次复核未改变仓库、会话或连接配置，仅补充运行证据；跨用户未过期旧卡片和原生手机 App 真机验收仍保持未完成状态。
 
+### 7.17 原生 Harness 浏览器调用超时保护（2026-08-29）
+
+- 现场复核发现 Codex 通过 `aio_browser/browser_screenshot` 发起的 MCP 调用没有返回 `tool_result`
+  时，原生 Harness 流会一直保持 processing；OpenCode 的 SSE 路径已有时限，但 Codex/Claude/DeepSeek 的 SDK/RPC 流此前没有共享该沙盒预算。
+- `AgentBridge` 现在对所有非 OpenCode Harness 流应用与沙盒相同的提示时限；超时会记录
+  `bridge.harness_prompt_timeout`、在清理预算内尝试中断 Harness，并返回明确的
+  `Prompt exceeded max duration` 终态。手工 `/stop`
+  的原生 Harness 中断也使用有界清理，不会因 SDK/RPC 无响应而阻塞 WebSocket 命令处理。
+- 新增回归覆盖卡住的原生 Harness 流、限时中断和 `execution_complete`
+  失败事件；sandbox-runtime 全量回归为 894 项通过、1 项按环境跳过。该修复解决“无限 processing”风险，但不把
+  `aio_browser`
+  手工截图调用当作视觉 artifact 证据；截图/preview 仍应走平台 visual-verification 流程，当前 Gitea 话题的手工调用已停止并标记为 cancelled。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
