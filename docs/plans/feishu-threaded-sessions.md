@@ -827,7 +827,7 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
 - 新增回归测试覆盖两个 rollout flag 关闭时的既有话题：带 `root_id`/`thread_id`
   的消息仍路由到原 session 和原话题，不触发仓库发现或新沙盒创建；完成回调也继续遵循 session 中已保存的 reply
   mode。
-- 该契约保证关闭 Feishu 线程 rollout 不会主动停止既有 sandbox，用户仍可从 Web 接管；生产环境实际翻转 flag 的演练仍需单独安排，以免影响当前租户的在线任务。
+- 该契约保证关闭 Feishu 线程 rollout 不会主动停止既有 sandbox。生产环境实际翻转 flag 的演练已在 7.15 完成；Web 接管仍需在有效的 Web 登录态下单独复测，以免把登录失效误判为接管成功。
 
 ### 7.12 Gitea 沙盒通知路由修复（2026-08-29）
 
@@ -866,7 +866,26 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `completed` 和沙盒 `stopped`。
 - 本次没有重新出现代码源/仓库选择卡，也没有创建新会话；因此确认当前生产版本的命令回执、稳定 UUID 和已绑定 Gitea 话题路由仍然正常。记录该验证的提交
   `0c8c60b6` 已通过 CI run
-  `33215313654`。该冒烟不替代完成定义中尚未完成的跨用户、原生手机 App 和生产回滚演练。
+  `33215313654`。该冒烟不替代完成定义中尚未完成的跨用户和原生手机 App 验收。
+
+### 7.15 生产 rollout 回滚演练（2026-08-29）
+
+- 通过 `.github/workflows/terraform.yml` 的 `workflow_dispatch` 将
+  `feishu_thread_replies_enabled=false` 和 `feishu_bound_thread_followups_enabled=false`
+  同时部署；Terraform run `33223314026` 的 Check Secrets、Validate 和 Apply 全部成功。
+- 关闭开关期间，在已绑定的 Gitea `huangdong/chatbi` 话题发送不带提及的 `/status`，事件
+  `96a3b0de6789f976fa06d6bcc75c12ba` 返回 `SUCCESS`（770
+  ms）且没有业务回执，符合关闭 bound-follow-up 后必须提及机器人的契约；随后发送带机器人提及的只读续办消息，事件
+  `89ea58ce0132e5a44536ad00d24bd6f0` 返回 `SUCCESS`（565
+  ms），飞书回执为“已收到，正在继续处理huangdong/chatbi。本话题沿用已绑定仓库，无需重新选择”，没有新建会话或触发仓库选择。
+- 随后以 `inherit` 恢复 repository secret 中的生产值，Terraform run `33223854185`
+  全部成功。恢复后在同一话题发送 `/status`，收到命令回执及
+  `huangdong/chatbi@main`、Codex、`completed`、沙盒 `ready` 状态（事件
+  `5c1c891d8ee5dce1fc7d8673eb471f7c`，`SUCCESS`，1233
+  ms）；证明关闭开关没有停止既有session，恢复后原生话题续办仍可用。
+- 该演练只改变 Feishu rollout flags，没有清理 KV、删除会话或修改仓库；Control Plane `/health`
+  和Feishu `/healthz` 在演练后均返回 HTTP
+  200。当前浏览器的 Open-Inspect 登录态已过期，打开 Web 会话页会跳转登录，因此 Web 接管证据仍待重新登录后补测。
 
 ## 12. 完成定义
 
@@ -883,7 +902,8 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
 - [x] 私聊两个 session 不依赖隐式当前会话且可以显式续办（可用 `#短编号 请求` 指定）；
 - [x] 飞书 Web 桌面与窄屏响应式视口截图验证通过；
 - [ ] 原生飞书手机 App 的键盘遮挡与按钮操作仍待真机验收；
-- [ ] 关闭 rollout flag 的回滚演练不停止既有 sandbox，Web 仍可接管；
+- [ ] 关闭 rollout
+      flag 的回滚演练不停止既有 sandbox，Web 仍可接管（回滚和话题续办已验证，Web 接管待有效登录态复测）；
 - [x] `docs/integrations/FEISHU.md` 与飞书后台权限说明已更新。
 
 ## 13. 明确不改的边界
