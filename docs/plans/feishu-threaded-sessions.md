@@ -917,9 +917,19 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `bridge.harness_prompt_timeout`。两种超时都会在清理预算内尝试中断 Harness，并返回明确的终态。手工
   `/stop` 的原生 Harness 中断也使用有界清理，不会因 SDK/RPC 无响应而阻塞 WebSocket 命令处理。
 - 新增回归覆盖卡住的原生 Harness 流、限时中断和 `execution_complete`
-  失败事件；sandbox-runtime 全量回归为 894 项通过、1 项按环境跳过。该修复解决“无限 processing”风险，但不把
+  失败事件；sandbox-runtime 全量回归为 895 项通过、1 项按环境跳过。该修复解决“无限 processing”风险，但不把
   `aio_browser`
   手工截图调用当作视觉 artifact 证据；截图/preview 仍应走平台 visual-verification 流程，当前 Gitea 话题的手工调用已停止并标记为 cancelled。
+
+### 7.18 新鲜飞书网页版生产回归（2026-08-29）
+
+- 在新打开且保持登录态的飞书网页版中进入「Open-Inspect 工作台」，打开已绑定 `huangdong/chatbi`
+  的话题并发送 `/status`。机器人先返回“已收到命令 /status，正在处理”，随后在同一话题返回
+  `huangdong/chatbi@main`、Codex、`codex:openai:subscription`、`openai/gpt-5.6-luna`、会话
+  `completed` 和沙盒 `ready`；这次没有重新选择代码源/仓库，也没有创建新会话。
+- 同时复核生产端点：Control Plane `/health`、Feishu Worker `/healthz` 和 Web 首页均为 HTTP 200；本地
+  `npm run typecheck`、`npm run lint` 和 Feishu bot 125 项测试通过，工作区干净。
+- 该回归证明最新原生 Harness 超时修复已部署且不影响已绑定 Gitea 话题的续办路径；跨用户/未过期旧卡片以及原生飞书手机 App 真机验收仍按完成定义保持未完成。
 
 ## 12. 完成定义
 
