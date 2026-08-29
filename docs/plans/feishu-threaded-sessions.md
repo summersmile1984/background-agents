@@ -755,6 +755,17 @@ feishu_error_code
 - 若必须回退 Worker 版本，旧代码会忽略可选 callback 字段并 flat 回复，功能降级但不破坏 Control Plane
   session。
 
+#### 可重复的生产演练入口
+
+`.github/workflows/terraform.yml` 的 `workflow_dispatch` 提供两个显式输入：
+`feishu_thread_replies_enabled` 和 `feishu_bound_thread_followups_enabled`。每个输入都可选
+`inherit`（沿用同名 repository secret）、`true` 或 `false`；默认值为
+`inherit`，因此手动触发不会意外改变当前生产开关。要演练回滚时，在 GitHub Actions 的 Terraform
+workflow 中将相应输入设为 `false`，等待 Apply 和健康检查完成，再用 `inherit`（或显式
+`true`）恢复。演练期间不清空 KV、不停止 sandbox，并用已有 Web
+session 接管检查验证既有话题仍可工作；完成后记录 Apply run、两个 `/health`
+端点和 Feishu 话题回执，避免只凭 workflow 成功状态判定回滚完成。
+
 ### 7.8 生产视觉截图与预览回传（2026-08-28）
 
 - 在已登录的飞书网页端创建新的顶层话题，发送只读视觉验收请求：GitHub
