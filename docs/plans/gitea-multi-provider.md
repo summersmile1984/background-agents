@@ -26,6 +26,11 @@ environment even if an older caller supplies both values (`44967329`). The sandb
 short-lived repository capability through `SCM_GIT_CAPABILITY` (never the legacy `VCS_CLONE_TOKEN`),
 keeping Gitea PATs in the control plane during fresh, restore, and image-build flows (`ce15c38b`).
 
+Default-connection promotion is also transactional: when an operator marks a newly created Gitea
+connection as default, the route inserts it as non-default and then calls the store's atomic
+`setDefault` operation. This avoids colliding with the partial unique index that permits only one
+default connection, while ensuring the previous default is cleared (`c705794b`).
+
 Legacy restore code also fails closed for `SCM_PROVIDER=gitea`: it will not fall back to a
 deployment GitHub App token when a proxy capability is absent. A Gitea restore must therefore be
 launched with the server-side proxy contract, rather than relying on a direct-clone token.
