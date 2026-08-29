@@ -931,6 +931,18 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `npm run typecheck`、`npm run lint` 和 Feishu bot 125 项测试通过，工作区干净。
 - 该回归证明最新原生 Harness 超时修复已部署且不影响已绑定 Gitea 话题的续办路径；跨用户/未过期旧卡片以及原生飞书手机 App 真机验收仍按完成定义保持未完成。
 
+### 7.19 Gitea 真实视觉回归与声明门禁（2026-08-29）
+
+- 在同一已绑定的 Gitea `huangdong/chatbi`
+  话题再次发起只读视觉请求。飞书先收到工作回执，随后在约 4 分钟内收到完成卡；原生 Codex
+  stream 没有再次出现无限 `processing`。Harness 实际启动了 `web` 服务并生成桌面 `1440×900` 和手机
+  `390×844` 两张截图，工作区保持干净。
+- 平台 visual-verification 最终返回
+  `blocked`：`Repository verification declaration is missing`。原因是 `chatbi` 当前没有
+  `.openinspect/verification.yaml`，因此 host
+  policy 不会把任意仓库的手工服务/路径当作可审核的正式 artifact；完成卡同时明确显示该阻断，不能记为“视觉验证通过”。
+- 该结果验证了两件事：原生 Harness 超时保护已经在生产真实 Gitea 路径生效；若要让任意 Gitea 仓库把截图作为正式 artifact 回传，必须先在仓库提交受 allowlist 约束的 environment/verification 声明，或在后续 Feishu 交互中增加显式的受限 ad-hoc 场景选择。当前实现选择 fail-closed，不自动猜测服务名、路径或开放任意仓库端口。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
