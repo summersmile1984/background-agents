@@ -73,6 +73,10 @@ from .visual_verification_store import load_stored_visual_verification
 configure_logging()
 
 
+class _HarnessInactivityTimeout(Exception):
+    """Raised when a native harness emits no event within the stream budget."""
+
+
 def parse_prompt_git_author(author_data: object) -> GitUser | None:
     """Parse the control plane's explicit Git author mode without inference."""
     if not isinstance(author_data, dict):
@@ -1135,10 +1139,10 @@ class AgentBridge:
         try:
             # OpenCode's SSE adapter already enforces this deadline internally.
             # Native harnesses expose independent SDK/RPC streams, so apply the
-            # same sandbox budget here; a stalled MCP/browser call must not keep
-            # a prompt processing forever.
+            # same sandbox budget and inactivity guard here; a stalled MCP/browser
+            # call must not keep a prompt processing forever.
             async with asyncio.timeout(self.prompt_max_duration_seconds):
-                async for event in driver.stream_prompt(
+                stream = driver.stream_prompt(
                     HarnessPrompt(
                         message_id=message_id,
                         content=content,
@@ -1146,8 +1150,35 @@ class AgentBridge:
                         reasoning_effort=reasoning_effort,
                         attachments=attachments,
                     )
-                ):
-                    yield event
+                )
+                try:
+                    iterator = stream.__aiter__()
+                    while True:
+                        try:
+                            event = await asyncio.wait_for(
+                                iterator.__anext__(), timeout=self.sse_inactivity_timeout
+                            )
+                        except StopAsyncIteration:
+                            break
+                        except TimeoutError as error:
+                            raise _HarnessInactivityTimeout from error
+                        yield event
+                finally:
+                    aclose = getattr(stream, "aclose", None)
+                    if aclose:
+                        with contextlib.suppress(Exception):
+                            await aclose()
+        except _HarnessInactivityTimeout as error:
+            self.log.error(
+                "bridge.harness_inactivity_timeout",
+                harness=self.agent_harness.value,
+                timeout_ms=int(self.sse_inactivity_timeout * 1000),
+                message_id=message_id,
+            )
+            await self._stop_harness(reason="harness_inactivity_timeout")
+            raise RuntimeError(
+                f"Harness stream inactive for {self.sse_inactivity_timeout:.0f}s."
+            ) from error
         except TimeoutError as error:
             self.log.error(
                 "bridge.harness_prompt_timeout",

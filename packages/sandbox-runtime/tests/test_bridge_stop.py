@@ -185,6 +185,63 @@ class TestHandleStop:
         }
 
     @pytest.mark.asyncio
+    async def test_native_harness_inactivity_timeout_interrupts_driver(self):
+        """A silent native SDK/MCP stream must fail before the total prompt budget."""
+
+        class QuietDriver:
+            harness = AgentHarness.CODEX
+            session_id = "thread-1"
+
+            def __init__(self):
+                self.stop_reasons: list[str] = []
+
+            async def stream_prompt(self, _prompt):
+                yield {"type": "token", "messageId": "native-inactive", "content": "started"}
+                await asyncio.sleep(3600)
+
+            async def stop(self, *, reason: str):
+                self.stop_reasons.append(reason)
+                return True
+
+        native_bridge = AgentBridge(
+            sandbox_id="test-sandbox",
+            session_id="test-session",
+            control_plane_url="http://localhost:8787",
+            auth_token="test-token",
+            agent_harness=AgentHarness.CODEX,
+        )
+        driver = QuietDriver()
+        native_bridge._harness_driver = driver
+        native_bridge._ensure_agent_session = _async_noop
+        native_bridge._configure_git_identity = _async_noop
+        native_bridge._send_event = AsyncMock()
+        native_bridge.prompt_max_duration_seconds = 1
+        native_bridge.prompt_cleanup_timeout_seconds = 0.1
+        native_bridge.sse_inactivity_timeout = 0.01
+
+        await native_bridge._handle_prompt(
+            {
+                "messageId": "native-inactive",
+                "content": "wait",
+                "author": {"gitIdentity": {"mode": "agent-only"}},
+            }
+        )
+
+        assert driver.stop_reasons == ["harness_inactivity_timeout"]
+        events = [call.args[0] for call in native_bridge._send_event.await_args_list]
+        assert events[0] == {
+            "type": "token",
+            "messageId": "native-inactive",
+            "content": "started",
+        }
+        assert events[-1] == {
+            "type": "execution_complete",
+            "messageId": "native-inactive",
+            "success": False,
+            "error": "Harness stream inactive for 0s.",
+        }
+
+    @pytest.mark.asyncio
     async def test_prompt_task_cleared_on_completion(self, bridge: AgentBridge):
         """After a prompt completes normally, _current_prompt_task should be None."""
         http_client = bridge.http_client
