@@ -9,7 +9,7 @@ export interface AlarmHandlerDeps {
   repository: MessageRepository;
   messageQueue: Pick<
     SessionMessageQueue,
-    "failStuckProcessingMessage" | "recoverStopConfirmationTimeout"
+    "failStuckProcessingMessage" | "failStuckPendingMessage" | "recoverStopConfirmationTimeout"
   >;
   lifecycleManager: Pick<SandboxLifecycleManager, "handleAlarm">;
   alarmScheduler: AlarmScheduler;
@@ -33,6 +33,10 @@ export function createAlarmHandler(deps: AlarmHandlerDeps): AlarmHandler {
   return {
     async handle(): Promise<void> {
       await deps.messageQueue.recoverStopConfirmationTimeout();
+      // A prompt can remain pending while a provider spawn fails before the
+      // sandbox WebSocket ever connects. Bound that wait before lifecycle
+      // handling so the session cannot remain active indefinitely.
+      await deps.messageQueue.failStuckPendingMessage();
       // Execution timeout check: if a message has been in 'processing' longer than
       // the configured timeout, fail it. This is idempotent - if the message was
       // already failed (by onSandboxTerminating or a prior alarm),

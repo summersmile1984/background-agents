@@ -396,6 +396,7 @@ flag 关闭时出站 body 与当前生产等价。
 - [x] 已发布群全部消息权限；
 - [x] 已开启 bound follow-up，并验证已绑定话题内不 @ 续办；
 - [x] 已验证一个话题只绑定一次仓库；旧仓库卡和并发选择由服务端拒绝；
+- [x] 无沙盒时的 pending prompt 有独立派发 deadline，启动失败不会把会话永久留在 Running；
 - [ ] 在生产验证跨用户和未过期旧卡片负向路径（未绑定、未 @ 群消息忽略已在 7.1 验证）；
 - [ ] 完成飞书手机端验收（Web、飞书桌面/网页已验证）；
 - [x] 已观察错误率后扩大应用可见范围；当前窗口与历史边界记录见 7.16，继续保留运行监控。
@@ -942,6 +943,18 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `.openinspect/verification.yaml`，因此 host
   policy 不会把任意仓库的手工服务/路径当作可审核的正式 artifact；完成卡同时明确显示该阻断，不能记为“视觉验证通过”。
 - 该结果验证了两件事：原生 Harness 超时保护已经在生产真实 Gitea 路径生效；若要让任意 Gitea 仓库把截图作为正式 artifact 回传，必须先在仓库提交受 allowlist 约束的 environment/verification 声明，或在后续 Feishu 交互中增加显式的受限 ad-hoc 场景选择。当前实现选择 fail-closed，不自动猜测服务名、路径或开放任意仓库端口。
+
+### 7.20 无沙盒时的 pending prompt 超时（2026-08-29）
+
+- 复核生产会话列表时发现，部分旧会话长期显示 `Running`，详情里仍有等待沙盒连接的 `pending`
+  prompt。原因是 provider 启动失败只会把 sandbox 标为 `failed`，原有闹钟只检查 `processing`
+  prompt；如果 WebSocket 从未建立，队列项就没有终态。
+- `SessionMessageQueue` 现在为无沙盒派发路径安排独立的 15 分钟 deadline；Durable Object
+  alarm 在生命周期检查前调用
+  `failStuckPendingMessage()`。超时后以明确错误完成该消息、广播队列/空闲状态、同步 session 状态，并为后续 queued
+  prompt 安排下一次 deadline。沙盒在期限内连接时仍按原路径正常派发，不改变 provider 重试语义。
+- 新增 queue/alarm 回归覆盖 fresh
+  pending、deadline 安排和超时失败；本地 control-plane 定向测试 67 项、全局 typecheck/lint 均通过。这个修复解决“沙盒起不来但会话永远挂起”的生命周期缺口，但不替代 provider 本身的连接超时和错误回执。
 
 ## 12. 完成定义
 

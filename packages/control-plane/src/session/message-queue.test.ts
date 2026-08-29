@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { fingerprintWebPrompt, SessionMessageQueue } from "./message-queue";
+import {
+  fingerprintWebPrompt,
+  PENDING_PROMPT_DISPATCH_TIMEOUT_MS,
+  SessionMessageQueue,
+} from "./message-queue";
 import { AttachmentClaimConflictError } from "./session-attachment-repository";
 import type { SessionAttachmentRepository } from "./session-attachment-repository";
 import type { ServerMessage } from "@open-inspect/shared/types/server-messages";
@@ -1085,14 +1089,71 @@ describe("SessionMessageQueue", () => {
       expect(deadline).toBeLessThanOrEqual(Date.now() + EXECUTION_TIMEOUT_MS);
     });
 
-    it("does not schedule when the prompt is deferred for sandbox spawn", async () => {
+    it("schedules the dispatch deadline when the prompt is deferred for sandbox spawn", async () => {
       const h = buildQueue();
-      h.repository.getNextPendingMessage.mockReturnValue(createMessage());
+      const before = Date.now();
+      h.repository.getNextPendingMessage.mockReturnValue(createMessage({ created_at: before }));
 
       await h.queue.processMessageQueue();
 
-      expect(h.getAlarm).not.toHaveBeenCalled();
-      expect(h.setAlarm).not.toHaveBeenCalled();
+      expect(h.getAlarm).toHaveBeenCalledOnce();
+      expect(h.setAlarm).toHaveBeenCalledOnce();
+      const deadline = h.setAlarm.mock.calls[0][0];
+      expect(deadline).toBeGreaterThanOrEqual(before + PENDING_PROMPT_DISPATCH_TIMEOUT_MS);
+      expect(deadline).toBeLessThanOrEqual(Date.now() + PENDING_PROMPT_DISPATCH_TIMEOUT_MS);
+    });
+  });
+
+  describe("pending dispatch timeout", () => {
+    it("keeps a fresh pending prompt and schedules its deadline", async () => {
+      const h = buildQueue();
+      const createdAt = Date.now();
+      h.repository.getNextPendingMessage.mockReturnValue(createMessage({ created_at: createdAt }));
+
+      await h.queue.failStuckPendingMessage();
+
+      expect(h.repository.recordMessageCompletion).not.toHaveBeenCalled();
+      expect(h.setAlarm).toHaveBeenCalledWith(createdAt + PENDING_PROMPT_DISPATCH_TIMEOUT_MS);
+      expect(h.sessionStatus.reconcileAfterExecution).not.toHaveBeenCalled();
+    });
+
+    it("fails a pending prompt that never got a sandbox connection", async () => {
+      const h = buildQueue();
+      const createdAt = Date.now() - PENDING_PROMPT_DISPATCH_TIMEOUT_MS - 1;
+      h.repository.getNextPendingMessage.mockReturnValue(
+        createMessage({ id: "msg-stuck-pending", created_at: createdAt })
+      );
+
+      await h.queue.failStuckPendingMessage();
+
+      expect(h.repository.recordMessageCompletion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "execution_complete",
+          messageId: "msg-stuck-pending",
+          success: false,
+          error: "Sandbox did not become available before the dispatch deadline",
+        }),
+        expect.any(Number),
+        "pending"
+      );
+      expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
+      expect(h.sessionStatus.reconcileAfterExecution).toHaveBeenCalledWith(false);
+    });
+
+    it("does not expire queued work while a sandbox is connected", async () => {
+      const h = buildQueue();
+      h.repository.getNextPendingMessage.mockReturnValue(
+        createMessage({
+          id: "msg-waiting-behind-long-run",
+          created_at: Date.now() - PENDING_PROMPT_DISPATCH_TIMEOUT_MS - 1,
+        })
+      );
+      h.wsManager.getSandboxSocket.mockReturnValue({ readyState: 1 } as WebSocket);
+
+      await h.queue.failStuckPendingMessage();
+
+      expect(h.repository.recordMessageCompletion).not.toHaveBeenCalled();
+      expect(h.sessionStatus.reconcileAfterExecution).not.toHaveBeenCalled();
     });
   });
 

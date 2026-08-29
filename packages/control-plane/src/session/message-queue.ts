@@ -50,6 +50,13 @@ import {
 } from "./session-attachment-resolver";
 import { parsePersistedSandboxSettings } from "../sandbox/settings";
 
+/**
+ * Maximum time a queued prompt may wait for a sandbox WebSocket before it is
+ * failed. A provider can legitimately spend several minutes booting an image,
+ * but an unavailable provider must not leave a session permanently active.
+ */
+export const PENDING_PROMPT_DISPATCH_TIMEOUT_MS = 15 * 60 * 1000;
+
 interface PromptMessageData {
   clientRequestId?: string;
   content: string;
@@ -395,6 +402,7 @@ export class SessionMessageQueue {
 
     const sandboxWs = this.wsManager.getSandboxSocket();
     if (!sandboxWs) {
+      await this.schedulePendingPromptDeadline(message.created_at);
       this.log.info("prompt.dispatch", {
         event: "prompt.dispatch",
         message_id: message.id,
@@ -573,6 +581,64 @@ export class SessionMessageQueue {
       message_id: awaitingStop.id,
     });
     await this.sandboxLifecycle.terminateUnresponsiveSandbox("stop_confirmation_timeout");
+  }
+
+  /**
+   * Fail the oldest prompt that has waited too long for a sandbox connection.
+   *
+   * A provider spawn failure is represented by a terminal sandbox state, while
+   * the prompt remains pending so a later message can normally retry the
+   * spawn. That is useful for transient failures, but without a deadline the
+   * prompt can pin the session in `active` forever. The alarm handler calls this
+   * method before lifecycle processing, so the pending message is settled even
+   * when the sandbox never connects.
+   */
+  async failStuckPendingMessage(): Promise<void> {
+    // A connected sandbox can legitimately spend longer than this deadline on
+    // the prompt ahead of the queue. Only expire pending work while there is no
+    // connection capable of receiving it.
+    if (this.wsManager.getSandboxSocket()) return;
+
+    const pending = this.messageRepository.getNextPendingMessage();
+    if (!pending) return;
+
+    const now = Date.now();
+    const deadline = pending.created_at + PENDING_PROMPT_DISPATCH_TIMEOUT_MS;
+    if (now < deadline) {
+      await this.alarmScheduler.scheduleAlarm(deadline);
+      return;
+    }
+
+    if (
+      !this.failMessage(
+        pending,
+        "Sandbox did not become available before the dispatch deadline",
+        now,
+        "pending"
+      )
+    ) {
+      return;
+    }
+
+    this.log.warn("Pending prompt dispatch timed out", {
+      event: "prompt.dispatch_timeout",
+      message_id: pending.id,
+      elapsed_ms: Math.max(0, now - pending.created_at),
+      timeout_ms: PENDING_PROMPT_DISPATCH_TIMEOUT_MS,
+    });
+    this.messenger.broadcast({ type: "processing_status", isProcessing: false });
+    this.broadcastPromptQueue();
+    await this.sessionStatus.reconcileAfterExecution(false);
+
+    // If more prompts remain queued, give the next one its own bounded wait
+    // instead of allowing the first timeout to consume the only alarm wake-up.
+    const nextPending = this.messageRepository.getNextPendingMessage();
+    if (nextPending) await this.schedulePendingPromptDeadline(nextPending.created_at);
+  }
+
+  private async schedulePendingPromptDeadline(createdAt: number): Promise<void> {
+    const deadline = createdAt + PENDING_PROMPT_DISPATCH_TIMEOUT_MS;
+    await this.alarmScheduler.scheduleAlarm(Math.max(Date.now(), deadline));
   }
 
   async resumeAfterSandboxTermination(): Promise<void> {
