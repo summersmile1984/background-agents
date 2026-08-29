@@ -661,8 +661,10 @@ terraform -chdir=terraform/environments/production fmt -check -recursive
 npm run test:integration -w @open-inspect/control-plane
 ```
 
-本方案不改 Python sandbox；如果实施时发现必须修改
-`packages/modal-infra`，需停止并重新审查边界，而不是顺手扩大变更。
+本方案不改 Python sandbox 内的 Harness 协议或业务行为；为支持连接级 SCM Git Proxy，允许
+`packages/modal-infra`、sandbox-runtime 和各 sandbox
+provider 只增加环境变量传递与 fail-closed 校验。该 plumbing 不读取或持久化 Gitea
+PAT，PAT 仍只在 Control Plane。
 
 ## 9. 真实飞书 E2E Runbook
 
@@ -875,7 +877,9 @@ feishu_error_code
 
 ## 13. 明确不改的边界
 
-- 不修改 sandbox 镜像、E2B/Modal provider、Harness provider 或 Git credential broker；
+- 不改变 sandbox 镜像内的 Harness 协议、Harness provider 行为或 Git credential
+  broker 的授权语义；E2B/Modal 等 provider 只负责透传连接级 proxy
+  identity/capability，并在缺失代理时对 Gitea fail closed；
 - 不把飞书 tenant token、SCM PAT、LLM key 或 `SANDBOX_AUTH_TOKEN` 发送给 Harness；
 - 不允许已运行 session 更换 repo/branch/Harness；
 - 不为聊天平台建立新的 agent 协议；
