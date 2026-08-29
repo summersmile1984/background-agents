@@ -895,8 +895,9 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `31 Success / 0 Errors`；这只代表当前窗口，不覆盖历史上已经记录的旧错误。Control Plane
   `/health`、Feishu Worker `/healthz` 和生产 Web 首页随后均返回 HTTP 200。
 - 生产 Web 的 Source Control 设置页显示 GitHub（默认）与 Gitea 两个持久连接；Gitea 连接状态为
-  `healthy`，检测版本为 `23.8.0`，凭据显示为已存储，能力包含仓库、分支和 Pull
-  Request。页面同时保留已禁用的临时 E2E Gitea 连接，未参与默认路由。
+  `healthy`，刚通过设置页的只读 `Test` 操作重新检测，版本为
+  `23.8.0`，凭据显示为已存储，能力包含仓库、分支和 Pull Request。页面同时保留已禁用的临时 E2E
+  Gitea 连接，未参与默认路由。
 - 飞书工作台当前话题的可见卡片链确认：Gitea 代码源列出 64 个仓库并分页显示
   `huangdong/chatbi`；随后可见 OpenCode、Codex、Claude Code、DeepSeek
   Harness，Codex 模型列表和 Effort 按钮。卡片全部使用直接按钮，不依赖会唤起输入法的静态下拉框。
