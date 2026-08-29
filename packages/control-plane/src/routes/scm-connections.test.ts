@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   secrets: new Map<string, string>(),
   probe: vi.fn(),
   preflightReady: true,
+  setDefaultId: null as string | null,
 }));
 
 vi.mock("../db/scm-backfill", async (importOriginal) => {
@@ -125,7 +126,16 @@ vi.mock("../db/scm-connections", async (importOriginal) => {
         mocks.records.set(id, { ...record, enabled: false, isDefault: false, health: "disabled" });
         return true;
       }
-      async setDefault() {}
+      async setDefault(id: string) {
+        mocks.setDefaultId = id;
+        const current = mocks.records.get(id);
+        if (current) mocks.records.set(id, { ...current, isDefault: true });
+        for (const [otherId, other] of mocks.records) {
+          if (otherId !== id && other.isDefault) {
+            mocks.records.set(otherId, { ...other, isDefault: false });
+          }
+        }
+      }
     },
     ScmConnectionCredentialStore: class {
       async has(id: string) {
@@ -190,6 +200,7 @@ describe("SCM connection routes", () => {
       visibleRepositoryCount: 3,
     });
     mocks.preflightReady = true;
+    mocks.setDefaultId = null;
   });
 
   afterEach(() => {
@@ -256,6 +267,56 @@ describe("SCM connection routes", () => {
         apiBaseUrl: "https://gitea.example.com/root/api/v1",
       })
     );
+  });
+
+  it("promotes a requested Gitea connection without colliding with the existing default", async () => {
+    const now = Date.now();
+    mocks.records.set("scm_github_default", {
+      id: "scm_github_default",
+      provider: "github",
+      displayName: "GitHub",
+      baseUrl: "https://github.com",
+      apiBaseUrl: "https://api.github.com",
+      cloneBaseUrl: "https://github.com",
+      authMode: "github_app",
+      credentialSource: "worker_binding",
+      credentialRef: "github_app",
+      username: "x-access-token",
+      enabled: true,
+      isDefault: true,
+      health: "healthy",
+      capabilities: {
+        listRepositories: true,
+        listBranches: true,
+        createPullRequest: true,
+        draftPullRequest: true,
+        userOAuth: true,
+        webhooks: true,
+        commitSigning: true,
+        repositoryById: true,
+      },
+      version: null,
+      revision: 1,
+      lastCheckedAt: now,
+      lastErrorCode: null,
+      createdBy: "system",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const response = await dispatch("POST", "/scm/connections", {
+      provider: "gitea",
+      displayName: "Team Gitea",
+      baseUrl: "https://gitea.example.com",
+      username: "agent-bot",
+      accessToken: "top-secret-pat",
+      isDefault: true,
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.setDefaultId).toBe("scm_generated");
+    expect(mocks.records.get("scm_generated")?.isDefault).toBe(true);
+    expect(mocks.records.get("scm_github_default")?.isDefault).toBe(false);
   });
 
   it("requires deployment-admin authority for secret writes", async () => {

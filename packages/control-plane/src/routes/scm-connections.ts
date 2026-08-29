@@ -308,6 +308,13 @@ async function createConnection(
         );
       }
     }
+    // A partial unique index permits only one default connection. Insert the
+    // new record as non-default when replacing an existing default, then use
+    // the store's transactional setter to clear the old default and promote
+    // this connection. Inserting `is_default = 1` directly would fail with a
+    // constraint error before the requested Make default action can run.
+    const shouldBecomeDefault =
+      parsed.data.isDefault === true || !existing.some((item) => item.enabled && item.isDefault);
     const connection = await store.createWithEncryptedServiceCredential(
       {
         id: `scm_${generateId()}`,
@@ -319,7 +326,7 @@ async function createConnection(
         username: probe.serviceUser,
         capabilities: GITEA_CAPABILITIES,
         enabled: true,
-        isDefault: parsed.data.isDefault === true || existing.length === 0,
+        isDefault: shouldBecomeDefault && existing.length === 0,
         createdBy: ctx.principal.userId,
       },
       parsed.data.accessToken,
@@ -330,6 +337,9 @@ async function createConnection(
       checkedAt: probe.checkedAt,
       errorCode: null,
     });
+    if (shouldBecomeDefault && !connection.isDefault) {
+      await store.setDefault(connection.id);
+    }
     const refreshed = (await store.get(connection.id))!;
     logger.info("scm_connection.created", {
       event: "scm_connection.created",
