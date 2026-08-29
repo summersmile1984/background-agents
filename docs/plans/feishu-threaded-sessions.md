@@ -889,6 +889,19 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `Connection status: Connected`、`Sandbox status: Ready`；发送只读探针并收到
   `WEB_ROLLBACK_TAKEOVER_OK`，因此 Web 接管链路也已实际验证。
 
+### 7.16 当前生产复核（2026-08-29）
+
+- Cloudflare Workers Observability 的最近 1 小时窗口显示 Feishu Worker
+  `31 Success / 0 Errors`；这只代表当前窗口，不覆盖历史上已经记录的旧错误。Control Plane
+  `/health`、Feishu Worker `/healthz` 和生产 Web 首页随后均返回 HTTP 200。
+- 生产 Web 的 Source Control 设置页显示 GitHub（默认）与 Gitea 两个持久连接；Gitea 连接状态为
+  `healthy`，检测版本为 `23.8.0`，凭据显示为已存储，能力包含仓库、分支和 Pull
+  Request。页面同时保留已禁用的临时 E2E Gitea 连接，未参与默认路由。
+- 飞书工作台当前话题的可见卡片链确认：Gitea 代码源列出 64 个仓库并分页显示
+  `huangdong/chatbi`；随后可见 OpenCode、Codex、Claude Code、DeepSeek
+  Harness，Codex 模型列表和 Effort 按钮。卡片全部使用直接按钮，不依赖会唤起输入法的静态下拉框。
+- 本次复核未改变仓库、会话或连接配置，仅补充运行证据；跨用户未过期旧卡片和原生手机 App 真机验收仍保持未完成状态。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
