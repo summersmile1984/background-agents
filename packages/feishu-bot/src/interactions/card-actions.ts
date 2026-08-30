@@ -174,7 +174,6 @@ export async function handleFeishuCardAction(
     return { ok: false, content: "请求无效，请重新发起。" };
   }
   const { value, targetKey, tenantKey, chatId, openId, actionId } = action;
-  if (!(await claimCardActionOnce(env, actionId))) return { ok: true, content: "该操作已处理。" };
   let pending = await getPendingRequest(env, value.pendingId);
   const actor = actorId(tenantKey, openId);
   if (
@@ -191,6 +190,10 @@ export async function handleFeishuCardAction(
   ) {
     return { ok: false, content: "这张卡片已过期，请使用该话题中最新的选择卡。" };
   }
+  // Validate the opaque pending record and actor before consuming the action
+  // idempotency key. An unauthorized replay of a captured card callback must
+  // not be able to burn the legitimate actor's one-shot action.
+  if (!(await claimCardActionOnce(env, actionId))) return { ok: true, content: "该操作已处理。" };
   const coordinates = {
     tenantKey: pending.tenantKey,
     chatId: pending.chatId,

@@ -166,6 +166,40 @@ describe("handleFeishuCardAction topic binding", () => {
     expect(mocks.replySessionText).not.toHaveBeenCalled();
   });
 
+  it("does not let an unauthorized replay consume the owner's action", async () => {
+    const claimed = new Set<string>();
+    mocks.claimCardActionOnce.mockImplementation(async (_env, actionId: string) => {
+      if (claimed.has(actionId)) return false;
+      claimed.add(actionId);
+      return true;
+    });
+    const crossActorPayload = {
+      ...payload,
+      header: { event_id: "action-owner-replay", tenant_key: "tenant" },
+      event: {
+        ...payload.event,
+        operator: { operator_id: { open_id: "other-user" } },
+      },
+    };
+
+    await expect(
+      handleFeishuCardAction(crossActorPayload, {} as never, "trace-owner-replay-unauthorized")
+    ).resolves.toEqual({
+      ok: false,
+      content: "该选择已过期或无权操作，请重新发起请求。",
+    });
+
+    const ownerPayload = {
+      ...payload,
+      header: { event_id: "action-owner-replay", tenant_key: "tenant" },
+    };
+    await expect(
+      handleFeishuCardAction(ownerPayload, {} as never, "trace-owner-replay-owner")
+    ).resolves.toEqual({ ok: true, content: "已开始创建会话。" });
+    expect(mocks.startNewSession).toHaveBeenCalledOnce();
+    expect(mocks.claimCardActionOnce).toHaveBeenCalledOnce();
+  });
+
   it("blocks a second repository choice while the first session is starting", async () => {
     mocks.claimThreadSelection.mockResolvedValue(false);
 
