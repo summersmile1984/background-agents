@@ -53,6 +53,8 @@ CAPTURE_ROOT = Path("/tmp/oi-visual")
 COMMAND_OUTPUT_LIMIT_BYTES = 64 * 1024
 READINESS_RETRY_SECONDS = 0.25
 MAX_REDIRECTS = 5
+DEFAULT_AD_HOC_VIEWPORT_WIDTH = 1440
+DEFAULT_AD_HOC_VIEWPORT_HEIGHT = 900
 BROWSER_ENVIRONMENT_KEYS = {
     "AGENT_BROWSER_EXECUTABLE_PATH",
     "CHROME_PATH",
@@ -416,6 +418,24 @@ def select_scenarios(
                 ),
             )
         ]
+    # The Web toggle and chat clients intentionally send `{}` for a plain
+    # user-requested screenshot. Resolve that request against the sole
+    # supervised HTTP service below; it never opens an arbitrary host/port.
+    if request.reason == "user_requested" and not request.scenario_ids:
+        return [
+            SelectedScenario(
+                service="auto",
+                base_path="/",
+                scenario=VerificationScenario(
+                    id="ad-hoc",
+                    path="/",
+                    viewport=VerificationViewport(
+                        width=DEFAULT_AD_HOC_VIEWPORT_WIDTH,
+                        height=DEFAULT_AD_HOC_VIEWPORT_HEIGHT,
+                    ),
+                ),
+            )
+        ]
     if not policy.allow_repository_declaration:
         return []
     manifest_path = repository_root / VERIFICATION_MANIFEST_RELATIVE_PATH
@@ -454,6 +474,25 @@ def _select_manifest_scenarios(
 def resolve_service(
     metadata: DevServiceMetadata, name: str, policy: VisualVerificationPolicy
 ) -> DevServiceEntry:
+    if name == "auto":
+        candidates = [
+            service
+            for service in metadata.services
+            if service.kind == "process"
+            and service.state == "ready"
+            and service.primary_url
+            and (not policy.allowed_service_names or service.name in policy.allowed_service_names)
+        ]
+        if len(candidates) == 0:
+            raise VerificationBlocked(
+                "service_not_found", "No ready supervised HTTP service is available"
+            )
+        if len(candidates) > 1:
+            raise VerificationBlocked(
+                "service_ambiguous",
+                "Name the supervised service when more than one HTTP service is ready",
+            )
+        return candidates[0]
     if policy.allowed_service_names and name not in policy.allowed_service_names:
         raise VerificationBlocked("service_not_allowed", "Service is not allowed by host policy")
     matches = [service for service in metadata.services if service.name == name]
@@ -724,11 +763,11 @@ async def upload_capture(
     return artifact_id
 
 
-def _scenario_source(selected: SelectedScenario) -> str:
+def _scenario_source(selected: SelectedScenario, service_name: str | None = None) -> str:
     base = "/" + "/".join(part for part in selected.base_path.split("/") if part)
     suffix = "/".join(part for part in selected.scenario.path.split("/") if part)
     path = f"{base.rstrip('/')}/{suffix}" if suffix else (base or "/")
-    return f"{selected.service}:{path}"
+    return f"{service_name or selected.service}:{path}"
 
 
 async def run_selected_scenario(
@@ -746,6 +785,7 @@ async def run_selected_scenario(
     started = time.monotonic()
     scenario = selected.scenario
     service = resolve_service(metadata, selected.service, policy)
+    resolved_service_name = service.name
     target = build_target_url(service, selected.base_path, scenario.path)
     readiness_started = time.monotonic()
     try:
@@ -761,7 +801,7 @@ async def run_selected_scenario(
             outcome="blocked",
             started=readiness_started,
             scenario_id=scenario.id,
-            service_name=selected.service,
+            service_name=resolved_service_name,
             failure_code=problem.code,
         )
         raise
@@ -771,7 +811,7 @@ async def run_selected_scenario(
         outcome="ready",
         started=readiness_started,
         scenario_id=scenario.id,
-        service_name=selected.service,
+        service_name=resolved_service_name,
     )
     navigation_started = time.monotonic()
     try:
@@ -800,7 +840,7 @@ async def run_selected_scenario(
             outcome="blocked",
             started=navigation_started,
             scenario_id=scenario.id,
-            service_name=selected.service,
+            service_name=resolved_service_name,
             failure_code=problem.code,
         )
         raise
@@ -810,7 +850,7 @@ async def run_selected_scenario(
         outcome="passed",
         started=navigation_started,
         scenario_id=scenario.id,
-        service_name=selected.service,
+        service_name=resolved_service_name,
     )
     assertion_started = time.monotonic()
     try:
@@ -822,7 +862,7 @@ async def run_selected_scenario(
             outcome="blocked",
             started=assertion_started,
             scenario_id=scenario.id,
-            service_name=selected.service,
+            service_name=resolved_service_name,
             failure_code=problem.code,
         )
         raise
@@ -833,7 +873,7 @@ async def run_selected_scenario(
         outcome="failed" if assertion_failures else "passed",
         started=assertion_started,
         scenario_id=scenario.id,
-        service_name=selected.service,
+        service_name=resolved_service_name,
         assertion_count=len(assertions),
         assertion_failure_count=assertion_failures,
     )
@@ -867,7 +907,7 @@ async def run_selected_scenario(
             outcome="blocked",
             started=capture_started,
             scenario_id=scenario.id,
-            service_name=selected.service,
+            service_name=resolved_service_name,
             failure_code=problem.code,
             capture_attempt_count=capture_attempt + 1,
         )
@@ -878,7 +918,7 @@ async def run_selected_scenario(
         outcome="passed",
         started=capture_started,
         scenario_id=scenario.id,
-        service_name=selected.service,
+        service_name=resolved_service_name,
         capture_bytes=capture_bytes,
         capture_attempt_count=capture_attempt + 1,
     )
@@ -900,7 +940,7 @@ async def run_selected_scenario(
             outcome="blocked",
             started=upload_started,
             scenario_id=scenario.id,
-            service_name=selected.service,
+            service_name=resolved_service_name,
             failure_code=problem.code,
             capture_bytes=capture_bytes,
             artifact_count=0,
@@ -912,7 +952,7 @@ async def run_selected_scenario(
         outcome="uploaded",
         started=upload_started,
         scenario_id=scenario.id,
-        service_name=selected.service,
+        service_name=resolved_service_name,
         capture_bytes=capture_bytes,
         artifact_count=1,
     )
@@ -920,7 +960,7 @@ async def run_selected_scenario(
     return {
         "id": scenario.id,
         "status": status,
-        "source": _scenario_source(selected),
+        "source": _scenario_source(selected, resolved_service_name),
         "viewport": scenario.viewport.model_dump(),
         "assertions": assertions,
         "artifactIds": [artifact_id],

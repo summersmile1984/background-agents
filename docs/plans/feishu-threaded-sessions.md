@@ -942,7 +942,10 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   `blocked`：`Repository verification declaration is missing`。原因是 `chatbi` 当前没有
   `.openinspect/verification.yaml`，因此 host
   policy 不会把任意仓库的手工服务/路径当作可审核的正式 artifact；完成卡同时明确显示该阻断，不能记为“视觉验证通过”。
-- 该结果验证了两件事：原生 Harness 超时保护已经在生产真实 Gitea 路径生效；若要让任意 Gitea 仓库把截图作为正式 artifact 回传，必须先在仓库提交受 allowlist 约束的 environment/verification 声明，或在后续 Feishu 交互中增加显式的受限 ad-hoc 场景选择。当前实现选择 fail-closed，不自动猜测服务名、路径或开放任意仓库端口。
+- 该结果验证了两件事：原生 Harness 超时保护已经在生产真实 Gitea 路径生效；现在普通的用户视觉请求会在仓库没有
+  `verification.yaml` 时使用固定 `/` 路径和 `1440×900`
+  viewport，并只在沙盒存在**唯一一个已就绪的受管 HTTP 服务**时自动解析服务名。多个服务时仍必须使用仓库声明（或显式受限的 ad-hoc 请求），否则返回
+  `service_ambiguous`；当前实现继续 fail-closed，不开放任意仓库端口。
 
 ### 7.20 无沙盒时的 pending prompt 超时（2026-08-29）
 
@@ -1032,6 +1035,20 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   字段校验失败），没有新的错误事件；这两条历史记录不作为当前发布失败证据。
 - 飞书 Web 工作台只读复核确认：同一话题的仓库绑定提示、后续卡片和视觉图片仍在原话题；本次没有重放卡片或发送新的外部消息。
 - 仍未改变完成定义：跨用户/未过期卡片的真实拒绝路径需要第二个飞书身份，键盘遮挡与按钮操作需要原生手机 App；窄屏网页截图不能替代这两项证据。
+
+### 7.27 未声明仓库的安全视觉默认场景（2026-08-30）
+
+- 之前 `huangdong/chatbi` 的真实 Gitea 视觉请求虽然启动了 `web` 服务，却因仓库没有
+  `.openinspect/verification.yaml`
+  被阻断。根因是 Web/Feishu 的显式视觉开关只发送空 selection，运行时无法选出场景。
+- 现在 `user_requested` 且没有 `scenarioIds`/`adHoc` 时，sandbox-runtime 创建固定的 `ad-hoc`
+  场景：服务名为内部 `auto`，路径 `/`，viewport `1440×900`。`resolve_service` 只接受唯一一个
+  `process + ready + primaryUrl` 服务，并继续执行 `allowedServiceNames`、loopback
+  origin、重定向和上传大小校验。
+- 发现零个服务返回 `service_not_found`；发现多个可用服务返回
+  `service_ambiguous`，要求仓库声明或显式受限 `adHoc`
+  选择。这样可覆盖普通单 Web 服务仓库，同时不开放任意端口或外部 URL。
+- 新增单服务通过、多服务阻断回归；sandbox-runtime 全部 899 项测试、mypy（62 个源文件）和 Ruff 均通过。
 
 ## 12. 完成定义
 

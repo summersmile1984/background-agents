@@ -106,11 +106,13 @@ class FakeRunner(JsonCommandRunner):
         opened_url: str | None = None,
         invalid_captures: int = 0,
         browser_crashes: int = 0,
+        capture_size: tuple[int, int] = (800, 600),
     ) -> None:
         self.assertion_passes = assertion_passes
         self.opened_url = opened_url
         self.invalid_captures = invalid_captures
         self.browser_crashes = browser_crashes
+        self.capture_size = capture_size
         self.current_url = ""
         self.commands: list[list[str]] = []
         self.environments: list[dict[str, str]] = []
@@ -169,7 +171,7 @@ class FakeRunner(JsonCommandRunner):
                 self.invalid_captures -= 1
                 path.write_bytes(b"not-a-png")
             else:
-                path.write_bytes(png_bytes(800, 600))
+                path.write_bytes(png_bytes(*self.capture_size))
             data = {"path": str(path)}
         else:
             data = {}
@@ -250,7 +252,20 @@ def verification_request(*, declared: bool = False) -> VisualVerificationRequest
     )
 
 
-def verification_environment(*, allow_repository: bool = False) -> dict[str, str]:
+def plain_user_verification_request() -> VisualVerificationRequest:
+    return VisualVerificationRequest.model_validate(
+        {
+            "version": 1,
+            "sessionId": "session-1",
+            "messageId": "message-1",
+            "reason": "user_requested",
+        }
+    )
+
+
+def verification_environment(
+    *, allow_repository: bool = False, allowed_service_names: list[str] | None = None
+) -> dict[str, str]:
     return {
         **os.environ,
         "SANDBOX_ID": "sandbox-1",
@@ -263,7 +278,9 @@ def verification_environment(*, allow_repository: bool = False) -> dict[str, str
                 "maxCaptures": 4,
                 "timeoutMs": 30_000,
                 "maxUploadBytes": 10 * 1024 * 1024,
-                "allowedServiceNames": ["web"],
+                "allowedServiceNames": (
+                    ["web"] if allowed_service_names is None else allowed_service_names
+                ),
                 "allowRepositoryDeclaration": allow_repository,
                 "allowVideo": False,
                 "completionBehavior": "report_only",
@@ -273,7 +290,11 @@ def verification_environment(*, allow_repository: bool = False) -> dict[str, str
 
 
 async def run_with_fixture(
-    tmp_path: Path, runner: FakeRunner, *, declared: bool = False
+    tmp_path: Path,
+    runner: FakeRunner,
+    *,
+    declared: bool = False,
+    request: VisualVerificationRequest | None = None,
 ) -> tuple[dict[str, Any], int]:
     context_path = tmp_path / "prompt.json"
     metadata_path = tmp_path / "services.json"
@@ -296,7 +317,7 @@ scenarios:
     with ReadyServer() as server:
         write_metadata(metadata_path, "sandbox-1", server.port)
         return await execute_visual_verification(
-            verification_request(declared=declared),
+            request or verification_request(declared=declared),
             environment=verification_environment(allow_repository=declared),
             repository_root=tmp_path,
             metadata_path=metadata_path,
@@ -333,6 +354,53 @@ async def test_visual_verification_passes_only_after_upload(tmp_path: Path, capl
     }
     assert all("url" not in record.__dict__ for record in stage_records)
     assert all("artifact_id" not in record.__dict__ for record in stage_records)
+
+
+async def test_plain_user_request_uses_the_sole_supervised_service(tmp_path: Path) -> None:
+    report, exit_code = await run_with_fixture(
+        tmp_path,
+        FakeRunner(capture_size=(1440, 900)),
+        request=plain_user_verification_request(),
+    )
+
+    assert exit_code == EXIT_PASSED, json.dumps(report, indent=2)
+    assert report["status"] == "passed"
+    assert report["scenarios"][0]["source"] == "web:/"
+    assert report["scenarios"][0]["viewport"] == {"width": 1440, "height": 900}
+
+
+async def test_plain_user_request_blocks_when_services_are_ambiguous(tmp_path: Path) -> None:
+    context_path = tmp_path / "prompt.json"
+    metadata_path = tmp_path / "services.json"
+    write_prompt_context(PromptContext("session-1", "message-1", "sandbox-1"), context_path)
+    with ReadyServer() as first, ReadyServer() as second:
+        write_metadata(metadata_path, "sandbox-1", first.port)
+        payload = json.loads(metadata_path.read_text())
+        payload["services"].append(
+            {
+                **payload["services"][0],
+                "name": "api",
+                "pid": 124,
+                "ports": [second.port],
+                "primaryUrl": f"http://127.0.0.1:{second.port}",
+                "port": second.port,
+            }
+        )
+        metadata_path.write_text(json.dumps(payload))
+        metadata_path.chmod(0o600)
+        report, exit_code = await execute_visual_verification(
+            plain_user_verification_request(),
+            environment=verification_environment(allowed_service_names=[]),
+            repository_root=tmp_path,
+            metadata_path=metadata_path,
+            prompt_context_path=context_path,
+            runner=FakeRunner(),
+            agent_browser_executable="/fake/agent-browser",
+            upload_executable="/fake/upload-media",
+        )
+
+    assert exit_code == EXIT_BLOCKED
+    assert report["failure"]["code"] == "service_ambiguous"
 
 
 @pytest.mark.parametrize(

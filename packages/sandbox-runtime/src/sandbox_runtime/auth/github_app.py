@@ -59,7 +59,11 @@ def get_installation_token(jwt_token: str, installation_id: str) -> str:
     with httpx.Client() as client:
         response = client.post(url, headers=headers)
         response.raise_for_status()
-        return response.json()["token"]
+        payload = response.json()
+        token = payload.get("token") if isinstance(payload, dict) else None
+        if not isinstance(token, str):
+            raise RuntimeError("GitHub installation token response is invalid")
+        return token
 
 
 def generate_installation_token(

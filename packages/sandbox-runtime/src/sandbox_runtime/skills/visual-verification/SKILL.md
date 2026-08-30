@@ -39,11 +39,15 @@ The task is not complete until all of these are true:
 
 ## Required Workflow
 
-1. Ensure the repository service is declared in `.openinspect/environment.yaml` and is ready.
+1. Ensure the repository service is declared in `.openinspect/environment.yaml` and is ready. A
+   plain user request may omit a verification manifest when exactly one supervised HTTP service is
+   ready; the verifier then uses that service, `/`, and `1440x900`.
 2. Prefer repository scenarios in `.openinspect/verification.yaml` when host policy allows them.
 3. Build the request from the active prompt context and pipe it to `oi-visual-verify`.
 4. Parse only the final JSON object; report its status, scenario, viewport, and artifact IDs.
-5. If the command is disabled or blocked, say exactly what remains unverified.
+5. If more than one service is ready, name it with an explicit bounded `adHoc` request or use a
+   repository scenario; never guess a port or an external host.
+6. If the command is disabled or blocked, say exactly what remains unverified.
 
 Explicit one-page verification example:
 
