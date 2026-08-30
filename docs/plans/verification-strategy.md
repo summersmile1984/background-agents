@@ -256,6 +256,8 @@ cleanup result / rollback result / known exception
   bot 和基础设施 workspace 均完成生产构建；仅保留 Next.js `middleware` 弃用提示）。
 - 通过：`npm test`（196 个文件、2879 个测试）。
 - 通过：`npm run test:integration -w @open-inspect/control-plane`（70 个文件、875 个测试）。
+- GitHub Actions CI run `33320712977` 对 commit `80e0ebc9` 成功；TypeScript、Web、bot、Control
+  Plane（含两组集成）、sandbox-runtime、modal-infra、provider-infra 的检查和测试均为 success。
 - 通过：`packages/sandbox-runtime`
   pytest（899 通过、1 个需真实浏览器的测试跳过），mypy、Ruff 和 format
   check 均通过；仅有 pydantic 的 forward-reference warning。
