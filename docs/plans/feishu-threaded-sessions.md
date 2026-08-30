@@ -1050,6 +1050,11 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   选择。这样可覆盖普通单 Web 服务仓库，同时不开放任意端口或外部 URL。
 - 新增单服务通过、多服务阻断回归；sandbox-runtime 全部 899 项测试、mypy（62 个源文件）和 Ruff 均通过。
 
+### 7.28 部署回归记录（2026-08-30）
+
+- commit `d7924298` 的 CI `33304689931` 与 Terraform Apply `33304689904` 均成功；部署后Control Plane
+  `/health`、Feishu Worker `/healthz`、Web 首页和 Gitea `/api/v1/version` 均返回 HTTP 200。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
