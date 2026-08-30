@@ -4,7 +4,7 @@
 > Plane 的统一 session/artifact 协议。原生群话题和并行 session 路由已经实现并受灰度开关控制；生产验收进度以
 > [飞书并行线程会话实施方案](../plans/feishu-threaded-sessions.md) 为准。
 >
-> 当前发布支持范围为飞书 Web（桌面浏览器及窄屏响应式视口）；原生手机 App 不属于本次发布验收条件。
+> 当前发布支持范围为飞书 Web（桌面浏览器及窄屏响应式视口）；原生手机 App 和第二个飞书身份的生产负向验收不属于本次发布条件。
 
 Open-Inspect 的飞书集成是一个独立的 Cloudflare Worker。它不会将飞书 App Secret、飞书 tenant access
 token、GitHub/Gitea PAT 或 sandbox capability 发送到浏览器或沙盒。
@@ -121,7 +121,7 @@ connection 的变化不会分叉飞书消息协议。
 3. 分别完成 GitHub 和 Gitea 任务；确认 clone、commit、push、PR 和结果链接全程使用该 session 固定的 connection。
 4. 创建两个群顶层任务，发送“会话列表”确认都能打开；按
    [并行线程 E2E Runbook](../plans/feishu-threaded-sessions.md#9-真实飞书-e2e-runbook)
-   验证两个话题、两个 session、两个沙盒和两个分支。分别在两个话题 follow-up，确认不会串线；让另一测试用户点击旧卡片或续办，确认被拒绝。
+   验证两个话题、两个 session、两个沙盒和两个分支。分别在两个话题 follow-up，确认不会串线；另一测试用户点击旧卡片或续办的验证为可选项。
 5. 发起“视觉验证”任务；确认完成卡显示验证状态和截图数量、截图图片回复原主题、预览按钮打开正确的沙盒和端口。重复投递完成回调，确认不重复发送图片。
 6. 将机器人加到测试群，在配置 bot open ID 后启用群 @；确认未绑定普通消息不触发。分别验证 mention
    follow-up 模式和授权后的 bound-thread follow-up 模式。
