@@ -27,6 +27,40 @@ const ALLOWED_MODELS = new Set([
   "gpt-5.1-codex",
 ]);
 
+// OpenCode's built-in OpenAI catalog can lag the Codex subscription catalog.
+// Keep the provider-qualified model contract usable even when one of the
+// subscription models is not present in that built-in list. The prompt bridge
+// still sends the native model ID (without the `openai/` prefix) to the Codex
+// endpoint through this provider.
+const CODEX_MODEL_NAMES = {
+  "gpt-5.1-codex-max": "GPT 5.1 Codex Max",
+  "gpt-5.1-codex-mini": "GPT 5.1 Codex Mini",
+  "gpt-5.4": "GPT 5.4",
+  "gpt-5.5": "GPT 5.5",
+  "gpt-5.6-sol": "GPT 5.6 Sol",
+  "gpt-5.6-terra": "GPT 5.6 Terra",
+  "gpt-5.6-luna": "GPT 5.6 Luna",
+  "gpt-5.3-codex": "GPT 5.3 Codex",
+  "gpt-5.3-codex-spark": "GPT 5.3 Codex Spark",
+  "gpt-5.1-codex": "GPT 5.1 Codex",
+};
+
+function ensureCodexModels(provider) {
+  for (const modelId of ALLOWED_MODELS) {
+    if (provider.models[modelId]) continue;
+    provider.models[modelId] = {
+      name: CODEX_MODEL_NAMES[modelId] || modelId,
+      attachment: false,
+      reasoning: true,
+      temperature: false,
+      options: {},
+      variants: {},
+      limit: { context: 1000000, output: 1000000 },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    };
+  }
+}
+
 // In-memory token cache (reset on sandbox restart - fresh refresh via bridge)
 let cachedAccessToken = null;
 let cachedAccountId = null;
@@ -122,32 +156,10 @@ export const CodexAuthProxy = async (input) => {
           }
         }
 
-        // Inject GPT 5.3 Codex models if missing
-        if (!provider.models["gpt-5.3-codex"]) {
-          provider.models["gpt-5.3-codex"] = {
-            name: "GPT 5.3 Codex",
-            attachment: false,
-            reasoning: false,
-            temperature: false,
-            options: {},
-            variants: {},
-            limit: { context: 1000000, output: 1000000 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          };
-        }
-
-        if (!provider.models["gpt-5.3-codex-spark"]) {
-          provider.models["gpt-5.3-codex-spark"] = {
-            name: "GPT 5.3 Codex Spark",
-            attachment: false,
-            reasoning: false,
-            temperature: false,
-            options: {},
-            variants: {},
-            limit: { context: 1000000, output: 1000000 },
-            cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          };
-        }
+        // OpenCode's catalog may omit newer Codex models; fill all allowed
+        // subscription IDs after filtering so the selected model remains
+        // launchable instead of failing with "Model not found".
+        ensureCodexModels(provider);
 
         // Zero out costs (Codex is subscription-based)
         for (const model of Object.values(provider.models)) {
