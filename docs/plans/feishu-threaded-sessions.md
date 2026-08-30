@@ -1007,15 +1007,16 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   revision，再消费幂等键；未授权重放不会影响发起人随后点击同一张卡片。
 - 新增回归覆盖“未授权重放 → 同一 action ID 由发起人继续点击”的顺序，Feishu
   bot 测试为 126 项通过；shared 构建、Feishu typecheck 和全仓 lint 通过。
-- 提交 `14d0cb0b` 已推送到 `main`，CI 与 Terraform 生产发布由 GitHub
-  Actions 自动执行中。该修复不改变卡片协议、线程路由或 PAT/LLM 凭据边界。
+- 提交 `14d0cb0b` 已推送到 `main`；Terraform 生产发布 `33302763121`
+  已成功。该修复不改变卡片协议、线程路由或 PAT/LLM 凭据边界。
 
 ### 7.25 移动端卡片首屏操作优化（2026-08-30）
 
 - 选择代码源、仓库、Harness、模型和 Effort 的卡片现在将直接按钮置于说明文字之前，窄屏或输入法仍占据下半屏时，关键操作优先出现在首屏；说明、仓库计数和分页提示仍保留在按钮之后。
 - 继续使用普通按钮而非
   `select_static`，因此不会主动唤起手机搜索键盘；新增卡片结构回归断言确保仓库操作位于首个卡片元素。
-- 提交 `00305f30` 已推送到 `main`；Feishu bot
+- 提交 `00305f30` 已推送到 `main`；Terraform 生产发布 `33303080810` 已成功，Control Plane、Feishu
+  Worker 和 Web 健康检查均返回 HTTP 200。Feishu bot
   127 项测试、typecheck、Prettier 和 ESLint 均通过。原生飞书手机 App 真机验收仍需真实设备完成，不能由网页窄屏模拟替代。
 
 ## 12. 完成定义
