@@ -38,6 +38,7 @@ import { buildAgentRuntimeReadiness } from "./readiness";
 import { loadEffectiveAgentRuntimeSecrets } from "./selection";
 import {
   buildRuntimeHarnessOptions,
+  configuredOpenCodeProviders,
   RUNTIME_CAPABILITY_CATALOG_VERSION,
   RUNTIME_RESOLVER_VERSION,
 } from "./capabilities";
@@ -644,6 +645,14 @@ export async function resolveRuntimeLaunchDraft(input: {
     codexSubscriptionConfigured: Boolean(
       effectiveSecrets.CODEX_AUTH_JSON || effectiveSecrets.CODEX_ACCESS_TOKEN
     ),
+    configuredOpenCodeProviders: configuredOpenCodeProviders({
+      openAiApiKeyConfigured: Boolean(effectiveSecrets.OPENAI_API_KEY),
+      openAiOAuthConfigured: Boolean(effectiveSecrets.OPENAI_OAUTH_REFRESH_TOKEN),
+      anthropicApiKeyConfigured: Boolean(
+        input.env.ANTHROPIC_API_KEY || effectiveSecrets.ANTHROPIC_API_KEY
+      ),
+      xiaomiApiKeyConfigured: Boolean(input.env.XIAOMI_API_KEY || effectiveSecrets.XIAOMI_API_KEY),
+    }),
   });
   const issues: RuntimeSelectionIssue[] = [];
   const layers: RuntimeConfigurationLayer[] = storedConfigurations.flatMap(

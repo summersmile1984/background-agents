@@ -133,4 +133,31 @@ describe("assertAgentRuntimeSelection", () => {
       code: "MODEL_INCOMPATIBLE",
     });
   });
+
+  it("rejects OpenCode OpenAI models when only native Codex auth is present", async () => {
+    await expect(
+      assertAgentRuntimeSelection({
+        db,
+        env,
+        harness: "opencode",
+        model: "openai/gpt-5.6-luna",
+        effectiveSecrets: { CODEX_AUTH_JSON: "native-codex-login" },
+      })
+    ).rejects.toMatchObject({
+      code: "CREDENTIAL_MISSING",
+      message: expect.stringContaining("select Codex"),
+    });
+  });
+
+  it("accepts OpenCode OpenAI models with a managed OAuth refresh token", async () => {
+    await expect(
+      assertAgentRuntimeSelection({
+        db,
+        env,
+        harness: "opencode",
+        model: "openai/gpt-5.6-luna",
+        effectiveSecrets: { OPENAI_OAUTH_REFRESH_TOKEN: "managed-refresh" },
+      })
+    ).resolves.toBeUndefined();
+  });
 });

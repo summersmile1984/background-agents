@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRuntimeHarnessOptions } from "./capabilities";
+import { buildRuntimeHarnessOptions, configuredOpenCodeProviders } from "./capabilities";
 
 const readiness = [
   {
@@ -93,5 +93,30 @@ describe("runtime capability catalog", () => {
 
     expect(codexModels).not.toContain("openai/gpt-5.3-codex");
     expect(codexModels).toContain("openai/gpt-5.6-luna");
+  });
+
+  it("filters OpenCode models whose direct provider credentials are absent", () => {
+    const options = buildRuntimeHarnessOptions({
+      readiness,
+      enabledModels: ["openai/gpt-5.6-luna", "anthropic/claude-sonnet-4-6", "xiaomi/mimo-v2.5"],
+      configuredOpenCodeProviders: configuredOpenCodeProviders({
+        xiaomiApiKeyConfigured: true,
+      }),
+    });
+    const openCode = options.find((option) => option.harness === "opencode")!;
+    const models = openCode.routes.find(
+      (route) => route.routeId === "opencode:any:configured-provider"
+    )!.models;
+    expect(models.find((model) => model.model === "openai/gpt-5.6-luna")).toMatchObject({
+      ready: false,
+      disabledReason: "openai provider credentials are not configured for OpenCode",
+    });
+    expect(models.find((model) => model.model === "anthropic/claude-sonnet-4-6")).toMatchObject({
+      ready: false,
+      disabledReason: "anthropic provider credentials are not configured for OpenCode",
+    });
+    expect(models.find((model) => model.model === "xiaomi/mimo-v2.5")).toMatchObject({
+      ready: true,
+    });
   });
 });

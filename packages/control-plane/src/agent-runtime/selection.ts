@@ -169,6 +169,19 @@ export async function assertAgentRuntimeSelection(input: {
     return;
   }
 
+  // OpenCode's OpenAI route is backed by either an API key or the managed
+  // OAuth plugin. Native Codex login material (CODEX_AUTH_JSON/
+  // CODEX_ACCESS_TOKEN) is deliberately not treated as OpenCode auth: it is
+  // consumed by the Codex app-server and would otherwise leave an OpenCode
+  // turn looking selectable until it fails inside the sandbox.
+  if (input.harness === "opencode" && provider === "openai") {
+    if (secrets.OPENAI_API_KEY || secrets.OPENAI_OAUTH_REFRESH_TOKEN) return;
+    throw new AgentRuntimeSelectionError(
+      "CREDENTIAL_MISSING",
+      "OpenCode OpenAI models require an OpenAI API key or managed OAuth credential; select Codex for a ChatGPT subscription"
+    );
+  }
+
   if (input.harness !== "codex" && input.harness !== "claude") return;
 
   if (input.harness === "codex" && provider === "openai") {

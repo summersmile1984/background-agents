@@ -8,6 +8,7 @@ import { agentHarnessSchema, type AgentHarness } from "@open-inspect/shared/type
 import { buildAgentRuntimeReadiness } from "../agent-runtime/readiness";
 import {
   buildRuntimeHarnessOptions,
+  configuredOpenCodeProviders,
   RUNTIME_CAPABILITY_CATALOG_VERSION,
 } from "../agent-runtime/capabilities";
 import { buildRuntimeCommandOptions } from "../agent-runtime/commands";
@@ -203,6 +204,12 @@ async function getReadiness(env: Env, ctx: UserRouteContext): Promise<Response> 
           credential.configured &&
           (credential.kind === "codex-auth-json" || credential.kind === "codex-access-token")
       ),
+      configuredOpenCodeProviders: configuredOpenCodeProviders({
+        openAiApiKeyConfigured: Boolean(secrets.OPENAI_API_KEY),
+        openAiOAuthConfigured: Boolean(secrets.OPENAI_OAUTH_REFRESH_TOKEN),
+        anthropicApiKeyConfigured: Boolean(env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY),
+        xiaomiApiKeyConfigured: Boolean(env.XIAOMI_API_KEY || secrets.XIAOMI_API_KEY),
+      }),
     }),
     hostRelay,
     canManage,
@@ -246,6 +253,12 @@ async function getCatalog(env: Env, ctx: { db: UserRouteContext["db"] }): Promis
           credential.configured &&
           (credential.kind === "codex-auth-json" || credential.kind === "codex-access-token")
       ),
+      configuredOpenCodeProviders: configuredOpenCodeProviders({
+        openAiApiKeyConfigured: Boolean(secrets.OPENAI_API_KEY),
+        openAiOAuthConfigured: Boolean(secrets.OPENAI_OAUTH_REFRESH_TOKEN),
+        anthropicApiKeyConfigured: Boolean(env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY),
+        xiaomiApiKeyConfigured: Boolean(env.XIAOMI_API_KEY || secrets.XIAOMI_API_KEY),
+      }),
     }),
     // Keep channel adapters on the same command vocabulary as the Web UI.
     // Draft context deliberately exposes only commands that are meaningful

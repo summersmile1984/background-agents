@@ -282,6 +282,25 @@ function providerForModel(model: string): string {
   return model.split("/", 1)[0] ?? "";
 }
 
+/**
+ * Providers that OpenCode can use directly from the per-session environment.
+ * Native harness credentials (for example CODEX_AUTH_JSON) are intentionally
+ * not included: they are consumed by the native harness and do not configure
+ * OpenCode's provider plugin.
+ */
+export function configuredOpenCodeProviders(input: {
+  openAiApiKeyConfigured?: boolean;
+  openAiOAuthConfigured?: boolean;
+  anthropicApiKeyConfigured?: boolean;
+  xiaomiApiKeyConfigured?: boolean;
+}): ReadonlySet<string> {
+  const providers = new Set<string>();
+  if (input.openAiApiKeyConfigured || input.openAiOAuthConfigured) providers.add("openai");
+  if (input.anthropicApiKeyConfigured) providers.add("anthropic");
+  if (input.xiaomiApiKeyConfigured) providers.add("xiaomi");
+  return providers;
+}
+
 function routeOwnsModel(route: RouteDefinition, model: string): boolean {
   const provider = providerForModel(model);
   if (route.provider === "any") return provider !== "deepseek";
@@ -328,6 +347,7 @@ function buildModelOptions(input: {
   routeMessage?: string;
   enabledModels: ReadonlySet<string>;
   codexSubscriptionConfigured: boolean;
+  configuredOpenCodeProviders?: ReadonlySet<string>;
 }): RuntimeModelOption[] {
   return MODEL_OPTIONS.flatMap((group) =>
     group.models
@@ -342,20 +362,34 @@ function buildModelOptions(input: {
       )
       .map((model): RuntimeModelOption => {
         const enabled = input.enabledModels.has(model.id);
+        const provider = providerForModel(model.id);
+        const missingOpenCodeProvider =
+          input.route.harness === "opencode" &&
+          input.route.provider === "any" &&
+          input.configuredOpenCodeProviders &&
+          input.configuredOpenCodeProviders.size > 0 &&
+          (provider === "openai" || provider === "anthropic" || provider === "xiaomi") &&
+          !input.configuredOpenCodeProviders.has(provider);
+        const modelReady = !missingOpenCodeProvider;
+        const modelDisabledReason = missingOpenCodeProvider
+          ? `${provider} provider credentials are not configured for OpenCode`
+          : undefined;
         return {
           model: model.id,
           displayName: model.name,
           description: model.description,
           category: group.category,
           routeId: input.route.routeId,
-          provider: providerForModel(model.id),
+          provider,
           enabled,
-          ready: input.routeReady && enabled,
+          ready: input.routeReady && enabled && modelReady,
           ...(!input.routeReady
             ? { disabledReason: input.routeMessage ?? "Runtime route is not ready" }
-            : !enabled
-              ? { disabledReason: "Model is disabled in Settings → Models" }
-              : {}),
+            : !modelReady
+              ? { disabledReason: modelDisabledReason }
+              : !enabled
+                ? { disabledReason: "Model is disabled in Settings → Models" }
+                : {}),
           efforts: effortOptions(input.route.harness, model.id),
           supportsAttachments: true,
           supportsToolEvents: true,
@@ -370,6 +404,8 @@ export function buildRuntimeHarnessOptions(input: {
   enabledModels: readonly ValidModel[];
   /** True when native Codex will load ChatGPT login material instead of API-only auth. */
   codexSubscriptionConfigured?: boolean;
+  /** Providers backed by credentials that OpenCode can actually consume. */
+  configuredOpenCodeProviders?: ReadonlySet<string>;
 }): RuntimeHarnessOption[] {
   const readinessByHarness = new Map(input.readiness.map((entry) => [entry.harness, entry]));
   const enabledModels = new Set<string>(input.enabledModels);
@@ -390,6 +426,7 @@ export function buildRuntimeHarnessOptions(input: {
         routeMessage: routeState.message,
         enabledModels,
         codexSubscriptionConfigured: input.codexSubscriptionConfigured ?? false,
+        configuredOpenCodeProviders: input.configuredOpenCodeProviders,
       });
       return {
         routeId: route.routeId,

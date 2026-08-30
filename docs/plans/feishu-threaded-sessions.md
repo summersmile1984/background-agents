@@ -972,6 +972,21 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   subscription 的新会话，确认 E2B create 返回成功、
   `Sandbox status: Ready`，并在 supervisor 日志中只看到已还原后的 harness 启动，不回显认证材料。
 
+### 7.22 OpenCode 未配置 OpenAI 模型的提前门禁（2026-08-30）
+
+- 生产回归发现：当会话选择 OpenCode + `openai/gpt-5.6-luna`，但控制面只把 `CODEX_AUTH_JSON`
+  传给原生 Codex、没有 OpenCode 可消费的 OpenAI API key 或 managed OAuth refresh
+  token 时，旧实现仍会把该模型显示为可选；请求进入沙盒后才报“Model not found”，界面会长时间停留在
+  `Thinking...`。
+- 现在 runtime capability
+  catalog 会按实际可供 OpenCode 使用的 provider 凭据过滤 OpenAI、Anthropic 和 Xiaomi 模型；原生 Codex/Claude 登录材料不会冒充 OpenCode
+  provider。Control
+  Plane 在 prompt 入队前也会拒绝缺少 OpenAI 凭据的 OpenCode 模型，并提示 ChatGPT 订阅应选择 Codex
+  harness。
+- 这项门禁不改变 OpenCode 的其它 provider，也不影响原生 Codex
+  subscription 路由；新增 capability 与 selection 单测覆盖“仅有 CODEX_AUTH_JSON 时拒绝、managed
+  OAuth 时通过、MiMo 保持可用”。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
