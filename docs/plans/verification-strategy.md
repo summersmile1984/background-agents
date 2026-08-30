@@ -241,3 +241,43 @@ cleanup result / rollback result / known exception
 - 飞书部署、权限和 Web E2E： [FEISHU.md](../integrations/FEISHU.md)。
 - 控制面 API、artifact、preview 和凭据边界：
   [control-plane README](../../packages/control-plane/README.md)。
+
+## 9. 本轮执行记录（2026-08-30）
+
+基线 commit 为
+`fc8dd6be`（`docs: add verification strategy and boundary matrix`）。本轮没有改动业务代码；依赖修复只更新了 lockfile：`nanoid`
+从 `3.3.17` 升至 `3.3.18`，并同步了安全审计建议的 `brace-expansion` 版本。工作区其余内容保持不变。
+
+### 9.1 自动化和静态检查
+
+- 通过：`npm run typecheck`、`npm run lint`、`npm run format:check`、
+  `npm run test:lint-complexity`。
+- 通过：`npm run build`（Next.js Web、Control Plane、Feishu/Slack/GitHub/Linear
+  bot 和基础设施 workspace 均完成生产构建；仅保留 Next.js `middleware` 弃用提示）。
+- 通过：`npm test`（196 个文件、2879 个测试）。
+- 通过：`npm run test:integration -w @open-inspect/control-plane`（70 个文件、875 个测试）。
+- 通过：`packages/sandbox-runtime`
+  pytest（899 通过、1 个需真实浏览器的测试跳过），mypy、Ruff 和 format
+  check 均通过；仅有 pydantic 的 forward-reference warning。
+- 通过：`packages/modal-infra` pytest（200 个测试）；Ruff 和 format check 通过。Modal 主工程
+  `mypy src/` 仍有 27 个既有 strict-mode 错误（主要是 `web_api.py` 未标注参数、`manager.py`/
+  `build_session.py` 泛型缺失、`clone_token.py` 的 Any 返回值和 `sandbox/__init__.py`
+  返回注解），CI 当前对此 job 允许失败，未把它误报为类型安全通过。
+- `npm audit --omit=dev --audit-level=high` 通过（0 个生产高危项）。完整审计仍报告
+  `wrangler`/`@cloudflare/vitest-pool-workers` 链路中的 4 个开发依赖高危项，修复需要
+  `@cloudflare/vitest-pool-workers@0.22.x` 的破坏性升级；本轮不强制升级，保留为明确的开发依赖债务。
+- `npm run knip -- --no-exit-code`
+  退出码为 0；报告的 29 个未使用导出和 8 个未使用类型已登记为债务，未发现新增的关键路径误删。
+
+### 9.2 生产健康和飞书 Web 冒烟
+
+- 只读健康检查通过：Control Plane `/health`、Feishu bot `/healthz`、Web `/` 和
+  `https://gitea.aotsea.com/api/v1/version` 均返回 HTTP 200；Gitea 返回版本 `23.8.0`。
+- 在飞书 Web 的群组根时间线发送 `/status`
+  得到“当前话题还没有绑定会话”，且没有创建新沙盒；这是预期的未绑定负向边界，不是传输失败。
+- 在已绑定 `huangdong/chatbi@main` 的 `Open-Inspect 工作台` 话题中发送
+  `/status`，收到“已收到命令 /status，正在处理”以及状态卡：Harness `codex`、route
+  `codex:openai:subscription`、模型 `openai/gpt-5.6-luna`、会话 `completed`、沙盒
+  `stopped`。证明话题路由、命令解析和状态回执链路正常；本次没有提交、推送或创建 PR。
+- 生产浏览器验证范围仍为 Feishu
+  Web 桌面/窄屏和已有只读 session；原生移动 App、第二身份、未接入 Harness 不纳入通过条件。
