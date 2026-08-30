@@ -1019,6 +1019,20 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   Worker 和 Web 健康检查均返回 HTTP 200。Feishu bot
   127 项测试、typecheck、Prettier 和 ESLint 均通过。原生飞书手机 App 真机验收仍需真实设备完成，不能由网页窄屏模拟替代。
 
+### 7.26 全量回归与生产只读复核（2026-08-30）
+
+- 本地全量 TypeScript 测试通过：Web 1,107 项、Slack 432 项、Shared 653 项、Linear 217 项、GitHub bot
+  130 项、Feishu bot 127 项、Control Plane 2,879 项，共 5,545 项；Modal Python `pytest`
+  通过 200 项；全仓 `npm run typecheck` 通过，工作区保持干净。
+- GitHub Actions CI `33303283493`（commit `4b31f314`）及此前代码发布对应的 Terraform Apply
+  `33303080810` 均成功。生产只读探针继续返回：Control Plane `/health` 200、Feishu Worker `/healthz`
+  200、Web 首页 200、Gitea `/api/v1/version` 200。
+- Cloudflare Workers Observability 当前 24 小时筛选仍只看到 2 条 8 月 29 日历史
+  `FeishuApiError`（旧的 `reply_in_thread`
+  字段校验失败），没有新的错误事件；这两条历史记录不作为当前发布失败证据。
+- 飞书 Web 工作台只读复核确认：同一话题的仓库绑定提示、后续卡片和视觉图片仍在原话题；本次没有重放卡片或发送新的外部消息。
+- 仍未改变完成定义：跨用户/未过期卡片的真实拒绝路径需要第二个飞书身份，键盘遮挡与按钮操作需要原生手机 App；窄屏网页截图不能替代这两项证据。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
