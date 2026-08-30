@@ -987,6 +987,19 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
   subscription 路由；新增 capability 与 selection 单测覆盖“仅有 CODEX_AUTH_JSON 时拒绝、managed
   OAuth 时通过、MiMo 保持可用”。
 
+### 7.23 门禁发布后的生产 E2E（2026-08-30）
+
+- commit `b0d7612f` 的 CI 与 Terraform Apply 均成功；Control Plane、Feishu
+  Worker 和 Web 健康检查均返回 HTTP 200。生产 Web 模型菜单在没有 OpenCode
+  OpenAI 凭据时仅展示已配置的 MiMo 与 DeepSeek 路由，不再把 `openai/gpt-5.6-luna` 伪装成可用选项。
+- 新建只读会话 `28b635bb856f48860bd5bd479b741ac0`（GitHub
+  `summersmile1984/background-agents`、OpenCode、MiMo V2.5、high）使用模板
+  `tpl-53969f7d52dc4ea8999042ea` 启动 4 vCPU/约 8 GiB Cube 沙盒；日志确认 Chromium/CDP、Browser
+  MCP、OpenCode、bridge 和 WebSocket 均成功，`Sandbox status: Ready`。
+- 只读提示最终返回 `/workspace/background-agents`，`git status --short`
+  为空，约 71 秒完成；没有修改文件、提交或创建 PR。该回归覆盖“新模板 + create-time 环境 + OpenCode
+  MiMo 路由 + prompt 回传”，而不是仅验证健康接口。
+
 ## 12. 完成定义
 
 只有以下证据全部存在才能称为完成：
