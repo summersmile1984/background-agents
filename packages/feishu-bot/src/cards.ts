@@ -83,13 +83,6 @@ export function buildConnectionPickerCard(input: {
   const card = title("选择代码源");
   const selectionRevision = input.selectionRevision ?? 0;
   elements(card).push(
-    {
-      tag: "div",
-      text: {
-        tag: "lark_md",
-        content: "先点选代码源；下一步会显示该代码源的仓库。手机端无需打开搜索框。",
-      },
-    },
     ...input.connections.map((connection) =>
       buttonRow({
         label:
@@ -103,7 +96,14 @@ export function buildConnectionPickerCard(input: {
           selectionRevision,
         },
       })
-    )
+    ),
+    {
+      tag: "div",
+      text: {
+        tag: "lark_md",
+        content: "先点选代码源；下一步会显示该代码源的仓库。手机端无需打开搜索框。",
+      },
+    }
   );
   return card;
 }
@@ -151,13 +151,6 @@ export function buildRepositoryPickerCard(input: {
     });
   }
   elements(card).push(
-    {
-      tag: "div",
-      text: {
-        tag: "lark_md",
-        content: `代码源：**${input.connection.label}** · ${input.connection.repositoryCount} 个仓库 · 第 ${page + 1}/${pageCount} 页\n\n直接点选仓库，不会唤起手机输入法。`,
-      },
-    },
     ...visible.map((repository) =>
       buttonRow({
         label: `${repository.provider} · ${repository.fullName}`,
@@ -171,7 +164,14 @@ export function buildRepositoryPickerCard(input: {
         },
       })
     ),
-    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : [])
+    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : []),
+    {
+      tag: "div",
+      text: {
+        tag: "lark_md",
+        content: `代码源：**${input.connection.label}** · ${input.connection.repositoryCount} 个仓库 · 第 ${page + 1}/${pageCount} 页\n\n直接点选仓库，不会唤起手机输入法。`,
+      },
+    }
   );
   return card;
 }
@@ -199,13 +199,6 @@ export function buildRuntimeHarnessPickerCard(input: {
   const ready = input.harnesses.filter(
     (harness) => harness.ready && readyModels(harness).length > 0
   );
-  elements(card).push({
-    tag: "div",
-    text: {
-      tag: "lark_md",
-      content: `代码源：**${input.target.connectionLabel}**\n仓库：**${input.target.fullName}**\n\n选择本次会话使用的 Harness。设置由运行时能力目录校验，不会把密钥放进卡片。`,
-    },
-  });
   elements(card).push(
     ...ready.map((harness) =>
       buttonRow({
@@ -222,6 +215,13 @@ export function buildRuntimeHarnessPickerCard(input: {
       })
     )
   );
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: `代码源：**${input.target.connectionLabel}**\n仓库：**${input.target.fullName}**\n\n选择本次会话使用的 Harness。设置由运行时能力目录校验，不会把密钥放进卡片。`,
+    },
+  });
   const userSettings = ready
     .flatMap((harness) => harness.settings.filter((setting) => setting.visibility === "user"))
     .map((setting) => setting.label);
@@ -296,13 +296,6 @@ export function buildRuntimeModelPickerCard(input: {
       },
     });
   }
-  elements(card).push({
-    tag: "div",
-    text: {
-      tag: "lark_md",
-      content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n\n只显示当前部署已启用且凭据就绪的模型。第 ${page + 1}/${pageCount} 页`,
-    },
-  });
   elements(card).push(
     ...models.map((model) =>
       buttonRow({
@@ -319,7 +312,14 @@ export function buildRuntimeModelPickerCard(input: {
         },
       })
     ),
-    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : [])
+    ...(navigationActions.length > 0 ? [{ tag: "action", actions: navigationActions }] : []),
+    {
+      tag: "div",
+      text: {
+        tag: "lark_md",
+        content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n\n只显示当前部署已启用且凭据就绪的模型。第 ${page + 1}/${pageCount} 页`,
+      },
+    }
   );
   return card;
 }
@@ -336,13 +336,6 @@ export function buildRuntimeEffortPickerCard(input: {
   const card = title("选择 Effort");
   const selectionRevision = input.selectionRevision ?? 0;
   const efforts = input.model.efforts;
-  elements(card).push({
-    tag: "div",
-    text: {
-      tag: "lark_md",
-      content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n模型：**${input.model.displayName}**\n\n选择推理深度；没有该选项的模型将使用自身默认值。`,
-    },
-  });
   const effortButtons = efforts.map((effort) =>
     buttonRow({
       label: effort.label,
@@ -378,6 +371,13 @@ export function buildRuntimeEffortPickerCard(input: {
     })
   );
   elements(card).push(...effortButtons);
+  elements(card).push({
+    tag: "div",
+    text: {
+      tag: "lark_md",
+      content: `仓库：**${input.target.fullName}**\nHarness：**${input.harness.displayName}**\n模型：**${input.model.displayName}**\n\n选择推理深度；没有该选项的模型将使用自身默认值。`,
+    },
+  });
   const commandNames = (input.commands ?? [])
     .filter((command) => command.available)
     .map((command) => `/${command.slashName}`)

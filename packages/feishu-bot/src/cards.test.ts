@@ -141,6 +141,23 @@ describe("Feishu repository cards", () => {
     expect(serialized.match(/"action":"select_target"/g)).toHaveLength(2);
     expect(serialized).toContain("直接点选仓库，不会唤起手机输入法");
   });
+
+  it("puts repository actions before explanatory copy for small mobile viewports", () => {
+    const card = buildRepositoryPickerCard({
+      pendingId: "1cd968ae-f012-4a12-898e-f320808f1af7",
+      connection: {
+        id: "gitea-main",
+        label: "Gitea",
+        provider: "gitea",
+        repositoryCount: 2,
+        catalogStatus: "available",
+      },
+      repositories: [target(0), target(1)],
+      page: 0,
+    });
+
+    expect((card.elements as Array<{ tag?: string }>)[0]?.tag).toBe("action");
+  });
 });
 
 describe("Feishu completion cards", () => {
