@@ -23,6 +23,7 @@ const TIMEOUT_KILL_MS = 30_000;
 const TIMEOUT_GET_MS = 15_000;
 const TIMEOUT_SETTTL_MS = 15_000;
 const TIMEOUT_WRITE_FILE_MS = 30_000;
+const TIMEOUT_LOGS_MS = 15_000;
 
 const e2bSandboxDetailSchema = z.object({
   sandboxID: z.string(),
@@ -219,6 +220,19 @@ export class E2BRestClient {
     return this.requestJson("GET", `/sandboxes/${id}`, TIMEOUT_GET_MS, e2bSandboxDetailSchema);
   }
 
+  /**
+   * Read the provider's structured lifecycle logs as an opaque payload.
+   *
+   * CubeSandbox exposes this E2B-compatible endpoint and records the shim's
+   * start/exit events there. The provider deliberately treats the body as
+   * opaque text: Cube versions have used more than one JSON envelope, while
+   * the lifecycle markers themselves are stable. Callers must never log the
+   * returned value because sandbox output may contain user data or secrets.
+   */
+  async getSandboxLogs(id: string): Promise<string> {
+    return this.requestText("GET", `/v2/sandboxes/${id}/logs`, TIMEOUT_LOGS_MS);
+  }
+
   async pauseSandbox(id: string): Promise<void> {
     await this.requestVoid("POST", `/sandboxes/${id}/pause`, TIMEOUT_PAUSE_MS);
   }
@@ -294,6 +308,15 @@ export class E2BRestClient {
     options?: { body?: unknown; signal?: AbortSignal }
   ): Promise<void> {
     return this.send<void>(method, path, timeoutMs, options, () => {});
+  }
+
+  private requestText(
+    method: "GET" | "POST" | "DELETE",
+    path: string,
+    timeoutMs: number,
+    options?: { body?: unknown; signal?: AbortSignal }
+  ): Promise<string> {
+    return this.send(method, path, timeoutMs, options, (response) => response.text());
   }
 
   /**

@@ -42,6 +42,9 @@ function mockClient(overrides: Partial<E2BRestClient> = {}): E2BRestClient {
     connectSandbox: vi.fn(async (): Promise<void> => {}),
     killSandbox: vi.fn(async () => {}),
     setSandboxTimeout: vi.fn(async () => {}),
+    getSandboxLogs: vi.fn(async () =>
+      JSON.stringify({ logEntries: [{ message: "start container finish" }] })
+    ),
     getHostnameForPort: vi.fn((id: string, port: number) => `https://${port}-${id}.e2b.app`),
     ...overrides,
   } as unknown as E2BRestClient;
@@ -404,10 +407,16 @@ describe("E2BSandboxProvider", () => {
   it("uses create-time env without an envd token for an explicitly compatible backend", async () => {
     const client = mockClient({
       createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
+      getSandbox: vi.fn(async () => ({
+        sandboxID: "e2b-id",
+        templateID: "tmpl",
+        state: "running",
+      })),
     });
     const provider = new E2BSandboxProvider(client, {
       ...providerConfig,
       useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
     });
 
     await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
@@ -427,15 +436,80 @@ describe("E2BSandboxProvider", () => {
     );
     expect(client.writeSessionEnv).not.toHaveBeenCalled();
     expect(client.killSandbox).not.toHaveBeenCalled();
+    expect(client.getSandbox).toHaveBeenCalledWith("e2b-id");
+    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
+  });
+
+  it("kills and transparently replaces a Cube sandbox whose runtime exits after create", async () => {
+    const client = mockClient({
+      createSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "dead-id", templateID: "tmpl" })
+        .mockResolvedValueOnce({ sandboxID: "healthy-id", templateID: "tmpl" }),
+      getSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "dead-id", templateID: "tmpl", state: "running" })
+        .mockResolvedValueOnce({ sandboxID: "healthy-id", templateID: "tmpl", state: "running" }),
+      getSandboxLogs: vi
+        .fn()
+        .mockResolvedValueOnce('{"message":"wait container finish, exit code:0"}')
+        .mockResolvedValueOnce('{"message":"start container finish"}'),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
+      status: "running",
+      providerObjectId: "healthy-id",
+    });
+    expect(client.createSandbox).toHaveBeenCalledTimes(2);
+    expect(client.killSandbox).toHaveBeenCalledWith("dead-id");
+  });
+
+  it("fails quickly as transient after bounded Cube runtime replacement attempts", async () => {
+    const client = mockClient({
+      createSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "dead-1", templateID: "tmpl" })
+        .mockResolvedValueOnce({ sandboxID: "dead-2", templateID: "tmpl" }),
+      getSandbox: vi.fn(async () => ({
+        sandboxID: "dead",
+        templateID: "tmpl",
+        state: "running",
+      })),
+      getSandboxLogs: vi.fn(async () => '{"message":"TaskExit event"}'),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    await expect(provider.createSandbox(baseCreateConfig)).rejects.toMatchObject({
+      errorType: "transient",
+      message: expect.stringContaining("Cube runtime exited during startup"),
+    });
+    expect(client.createSandbox).toHaveBeenCalledTimes(2);
+    expect(client.killSandbox).toHaveBeenNthCalledWith(1, "dead-1");
+    expect(client.killSandbox).toHaveBeenNthCalledWith(2, "dead-2");
   });
 
   it("chunks oversized create-time secrets so CubeSandbox accepts Codex auth", async () => {
     const client = mockClient({
       createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
+      getSandbox: vi.fn(async () => ({
+        sandboxID: "e2b-id",
+        templateID: "tmpl",
+        state: "running",
+      })),
     });
     const provider = new E2BSandboxProvider(client, {
       ...providerConfig,
       useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
     });
     const authJson = `${"a".repeat(5000)}🙂`;
 

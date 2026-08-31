@@ -141,6 +141,16 @@ describe("E2BRestClient", () => {
     expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({ timeout: 7200 });
   });
 
+  it("reads v2 lifecycle logs as an opaque payload", async () => {
+    const client = new E2BRestClient(defaultConfig);
+    fetchSpy.mockResolvedValue(
+      jsonResponse({ logEntries: [{ timestamp: "now", message: "start container finish" }] })
+    );
+
+    await expect(client.getSandboxLogs("sb-1")).resolves.toContain("start container finish");
+    expect(fetchSpy.mock.calls[0][0]).toBe("https://api.e2b.app/v2/sandboxes/sb-1/logs");
+  });
+
   it("commands ignore whatever a success body contains", async () => {
     const client = new E2BRestClient(defaultConfig);
     fetchSpy.mockResolvedValue(jsonResponse({ unexpected: "payload" }));
