@@ -32,6 +32,10 @@ from .web_terminal import WebTerminal
 
 configure_logging()
 
+SESSION_STARTUP_MAX_ATTEMPTS = 5
+SESSION_STARTUP_RETRY_BASE_SECONDS = 2.0
+SESSION_STARTUP_RETRY_MAX_SECONDS = 60.0
+
 
 def build_supervisor(shutdown_event: asyncio.Event) -> SandboxSupervisor:
     """Consume process secrets and compose the production runtime."""
@@ -123,6 +127,47 @@ def install_signal_handlers(supervisor: SandboxSupervisor) -> None:
         loop.add_signal_handler(sig, supervisor.request_shutdown, sig)
 
 
+async def run_session_supervisor(supervisor: SandboxSupervisor) -> int:
+    """Run a session supervisor with bounded retries for early boot failures.
+
+    The bridge owns its own unbounded WebSocket reconnect loop after startup.
+    This outer retry covers failures that happen before the bridge exists, such
+    as a transient clone, managed-skills, browser, or harness initialization
+    failure. Reusing the composed supervisor keeps one-time credentials that
+    were consumed from the process environment available to later attempts.
+    """
+    for attempt in range(1, SESSION_STARTUP_MAX_ATTEMPTS + 1):
+        succeeded = await supervisor.run(
+            report_startup_failure=attempt == SESSION_STARTUP_MAX_ATTEMPTS
+        )
+        if succeeded:
+            return 0
+        if supervisor.shutdown_event.is_set():
+            return 0
+        if attempt == SESSION_STARTUP_MAX_ATTEMPTS:
+            supervisor.log.error(
+                "supervisor.startup_exhausted",
+                attempt=attempt,
+                max_attempts=SESSION_STARTUP_MAX_ATTEMPTS,
+            )
+            return 1
+
+        retry_delay_seconds = min(
+            SESSION_STARTUP_RETRY_BASE_SECONDS**attempt,
+            SESSION_STARTUP_RETRY_MAX_SECONDS,
+        )
+        supervisor.log.warn(
+            "supervisor.startup_retry",
+            attempt=attempt,
+            next_attempt=attempt + 1,
+            max_attempts=SESSION_STARTUP_MAX_ATTEMPTS,
+            delay_seconds=retry_delay_seconds,
+        )
+        await asyncio.sleep(retry_delay_seconds)
+
+    return 1
+
+
 async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Open-Inspect sandbox supervisor")
     parser.add_argument(
@@ -135,8 +180,7 @@ async def main(argv: list[str] | None = None) -> int:
     supervisor = build_supervisor(asyncio.Event())
     install_signal_handlers(supervisor)
     if not args.await_modal_image_build_token:
-        await supervisor.run()
-        return 0
+        return await run_session_supervisor(supervisor)
     return await run_modal_image_build(supervisor)
 
 

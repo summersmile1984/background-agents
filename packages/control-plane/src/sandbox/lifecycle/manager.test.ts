@@ -3753,3 +3753,68 @@ describe("SandboxLifecycleManager", () => {
     });
   });
 });
+
+describe("SandboxLifecycleManager runtime failure recovery", () => {
+  it("marks the sandbox failed, stops it, and resumes pending work", async () => {
+    const sandbox = createMockSandbox({ status: "connecting", spawn_failure_count: 0 });
+    const storage = createMockStorage(createMockSession(), sandbox);
+    const broadcaster = createMockBroadcaster();
+    const wsManager = createMockWebSocketManager(false);
+    const stopSandbox = vi.fn(async () => ({ success: true }));
+    const onSandboxTerminating = vi.fn(async () => {});
+    const onSandboxTerminated = vi.fn(async () => {});
+    const manager = new SandboxLifecycleManager(
+      createMockProvider({
+        capabilities: { supportsExplicitStop: true },
+        stopSandbox,
+      }),
+      storage,
+      broadcaster,
+      wsManager,
+      createMockAlarmScheduler(),
+      createMockIdGenerator(),
+      createTestConfig(),
+      { onSandboxTerminating, onSandboxTerminated }
+    );
+
+    await manager.handleRuntimeFailure("bridge could not connect");
+
+    expect(sandbox.status).toBe("failed");
+    expect(sandbox.spawn_failure_count).toBe(1);
+    expect(sandbox.last_spawn_error).toBe("bridge could not connect");
+    expect(stopSandbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerObjectId: "modal-obj-123",
+        sessionId: "test-session",
+        reason: "runtime_failure",
+      })
+    );
+    expect(wsManager.detachSandboxWebSocket).toHaveBeenCalledWith(1011, "Sandbox runtime failed");
+    expect(broadcaster.messages).toContainEqual({ type: "sandbox_status", status: "failed" });
+    expect(broadcaster.messages).toContainEqual({
+      type: "sandbox_error",
+      error: "bridge could not connect",
+    });
+    expect(onSandboxTerminating).toHaveBeenCalledOnce();
+    expect(onSandboxTerminated).toHaveBeenCalledOnce();
+  });
+
+  it("resets the runtime-failure circuit only after the bridge connects", () => {
+    const sandbox = createMockSandbox({ status: "connecting", spawn_failure_count: 2 });
+    const storage = createMockStorage(createMockSession(), sandbox);
+    const manager = new SandboxLifecycleManager(
+      createMockProvider(),
+      storage,
+      createMockBroadcaster(),
+      createMockWebSocketManager(true),
+      createMockAlarmScheduler(),
+      createMockIdGenerator(),
+      createTestConfig()
+    );
+
+    manager.onSandboxConnected();
+
+    expect(sandbox.spawn_failure_count).toBe(0);
+    expect(storage.calls).toContain("resetCircuitBreaker");
+  });
+});

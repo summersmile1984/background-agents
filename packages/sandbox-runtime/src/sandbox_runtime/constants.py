@@ -65,6 +65,11 @@ EXPECTED_TUNNEL_PORTS_ENV_VAR = "EXPECTED_TUNNEL_PORTS"
 # longer so deferred Queue finalization can snapshot it after this budget ends.
 IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_VAR = "OI_IMAGE_BUILD_EXECUTION_TIMEOUT_SECONDS"
 
+# A bridge process uses this exit code when the control plane rejects its
+# initial identity (401/403/404). The supervisor treats it as a terminal
+# runtime-start failure instead of repeatedly restarting the same bad process.
+BRIDGE_REJECTED_EXIT_CODE = 78
+
 # Boot warnings queued by the supervisor (which has no control-plane event
 # channel) and drained by the bridge as `warning` sandbox events after its
 # WebSocket handshake. JSONL: one {scope, message, repoOwner?, repoName?} per line.

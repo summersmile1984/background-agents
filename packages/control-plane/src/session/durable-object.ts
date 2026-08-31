@@ -319,6 +319,7 @@ export class SessionDO extends DurableObject<Env> {
     openaiTokenRefresh: (_request, _url, log) => this.sandboxHandler.openaiTokenRefresh(log),
     xaiTokenRefresh: (_request, _url, log) => this.sandboxHandler.xaiTokenRefresh(log),
     scmCredentials: (_request, _url, log) => this.sandboxHandler.scmCredentials(log),
+    runtimeError: (request) => this.handleRuntimeError(request),
     tunnelUrls: (_request, _url, log) => this.sandboxHandler.tunnelUrls(log),
     spawnContext: () => this.childSessionsHandler.getSpawnContext(),
     activePromptAuthor: () => this.childSessionsHandler.getActivePromptAuthor(),
@@ -1683,6 +1684,30 @@ export class SessionDO extends DurableObject<Env> {
    */
   private async processSandboxEvent(event: SandboxEvent): Promise<void> {
     await this.sandboxEventProcessor.processSandboxEvent(event);
+  }
+
+  private async handleRuntimeError(request: Request): Promise<Response> {
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
+    }
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      !("error" in raw) ||
+      typeof raw.error !== "string" ||
+      raw.error.trim().length === 0 ||
+      raw.error.length > 4096 ||
+      !("fatal" in raw) ||
+      raw.fatal !== true
+    ) {
+      return Response.json({ error: "Invalid runtime error" }, { status: 400 });
+    }
+
+    await this.lifecycleManager.handleRuntimeFailure(raw.error.trim());
+    return Response.json({ status: "accepted" }, { status: 202 });
   }
 
   /**

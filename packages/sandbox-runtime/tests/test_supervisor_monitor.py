@@ -1,8 +1,12 @@
 """Tests for SandboxSupervisor.monitor_processes bridge restart logic."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
+from sandbox_runtime.constants import BRIDGE_REJECTED_EXIT_CODE
 from sandbox_runtime.supervisor import SandboxSupervisor
 from tests.runtime_helpers import make_supervisor
 
@@ -76,6 +80,21 @@ class TestBridgeCrashRestart:
 
         supervisor.agent_bridge.start.assert_called_once()
         supervisor._report_fatal_error.assert_not_called()
+
+    async def test_bridge_rejection_reports_immediately_without_restart(self):
+        supervisor = _make_supervisor()
+        supervisor.opencode_server._opencode_process = _fake_process(returncode=None)
+        supervisor.agent_bridge._process = _fake_process(returncode=BRIDGE_REJECTED_EXIT_CODE)
+        supervisor.agent_bridge.start = AsyncMock()
+        supervisor._report_fatal_error = AsyncMock()
+
+        await supervisor.monitor_processes()
+
+        supervisor.agent_bridge.start.assert_not_awaited()
+        supervisor._report_fatal_error.assert_awaited_once_with(
+            "Bridge identity was rejected by the control plane"
+        )
+        assert supervisor.shutdown_event.is_set()
 
     async def test_bridge_crash_exceeds_max_restarts(self):
         supervisor = _make_supervisor()
@@ -214,3 +233,35 @@ class TestFatalErrorReporting:
         ]
         assert len(fatal_records) == 1
         assert fatal_records[0].error_message == "boom"
+
+    async def test_report_fatal_error_targets_the_session_runtime_route(self, monkeypatch):
+        requests: list[httpx.Request] = []
+
+        async def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(202, json={"status": "accepted"})
+
+        real_client = httpx.AsyncClient
+
+        def client_factory(*args, **kwargs):
+            return real_client(*args, transport=httpx.MockTransport(respond), **kwargs)
+
+        monkeypatch.setattr("sandbox_runtime.supervisor.httpx.AsyncClient", client_factory)
+        supervisor = make_supervisor(
+            {
+                "SANDBOX_ID": "test-sandbox",
+                "CONTROL_PLANE_URL": "https://control-plane.test",
+                "SANDBOX_AUTH_TOKEN": "tok",
+                "SESSION_CONFIG": json.dumps({"session_id": "session-123"}),
+            }
+        )
+
+        await supervisor._report_fatal_error("bridge could not connect")
+
+        assert len(requests) == 1
+        assert requests[0].url.path == "/sessions/session-123/runtime-error"
+        assert requests[0].headers["Authorization"] == "Bearer tok"
+        assert json.loads(requests[0].content) == {
+            "error": "bridge could not connect",
+            "fatal": True,
+        }

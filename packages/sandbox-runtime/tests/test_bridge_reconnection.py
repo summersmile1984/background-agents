@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sandbox_runtime.bridge import AgentBridge, SessionTerminatedError
+from sandbox_runtime.bridge import AgentBridge, SessionRejectedError, SessionTerminatedError
 from sandbox_runtime.git_signing import GitSigningError
 
 
@@ -161,6 +161,35 @@ class TestIsFatalConnectionError:
         assert bridge.git_signing.initialize.await_count == 2
         bridge._connect_and_run.assert_awaited_once()
         sleep.assert_awaited_once_with(bridge.RECONNECT_BACKOFF_BASE)
+
+    @pytest.mark.asyncio
+    async def test_run_returns_fatal_outcome_for_identity_rejection(self, bridge):
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock()
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = AsyncMock(side_effect=SessionRejectedError(403))
+
+        outcome = await bridge.run()
+
+        assert outcome == "fatal_error"
+        assert bridge.shutdown_event.is_set()
+        bridge.log.error.assert_called_once_with(
+            "bridge.rejected",
+            status=403,
+            detail="Session rejected by control plane (HTTP 403).",
+        )
+
+    @pytest.mark.asyncio
+    async def test_run_keeps_http_410_as_a_graceful_termination(self, bridge):
+        bridge.log = MagicMock()
+        bridge.git_signing.initialize = AsyncMock()
+        bridge._load_session_id = AsyncMock()
+        bridge._connect_and_run = AsyncMock(side_effect=SessionTerminatedError("gone"))
+
+        outcome = await bridge.run()
+
+        assert outcome == "session_terminated"
+        assert bridge.shutdown_event.is_set()
 
 
 class TestSessionTerminatedError:

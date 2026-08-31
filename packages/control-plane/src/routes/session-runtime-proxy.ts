@@ -190,6 +190,25 @@ async function handleCreatePR(
   });
 }
 
+async function handleRuntimeError(
+  request: Request,
+  _env: Env,
+  match: RegExpMatchArray,
+  ctx: SessionRouteContext
+): Promise<Response> {
+  const sessionId = getSessionId(match);
+  if (sessionId instanceof Response) return sessionId;
+
+  const body = await parseJsonBody<unknown>(request);
+  if (body instanceof Response) return body;
+
+  return ctx.sessionRuntime.fetch(sessionId, SessionInternalPaths.runtimeError, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 /**
  * Read a lifecycle-route body (title/archive/unarchive) under identity
  * enforcement. Lifecycle routes accept bodyless requests — a parse failure
@@ -335,6 +354,14 @@ export const sessionRuntimeProxyRoutes: Route[] = [
     internalPath: SessionInternalPaths.scmCredentials,
     runtimeMethod: "POST",
   }),
+  defineRoute(
+    SCM_AGNOSTIC_SANDBOX_ROUTE,
+    sessionRoute({
+      method: "POST",
+      pattern: parsePattern("/sessions/:id/runtime-error"),
+      handler: handleRuntimeError,
+    })
+  ),
   simpleProxyRoute({
     policy: SCM_AGNOSTIC_SANDBOX_FALLBACK_ROUTE,
     method: "GET",

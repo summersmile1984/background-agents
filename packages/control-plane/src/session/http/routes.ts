@@ -48,6 +48,7 @@ export interface SessionInternalRouteHandlers {
   openaiTokenRefresh: SessionInternalRouteHandler;
   xaiTokenRefresh: SessionInternalRouteHandler;
   scmCredentials: SessionInternalRouteHandler;
+  runtimeError: SessionInternalRouteHandler;
   tunnelUrls: SessionInternalRouteHandler;
   spawnContext: SessionInternalRouteHandler;
   activePromptAuthor: SessionInternalRouteHandler;
@@ -141,6 +142,11 @@ export function createSessionInternalRoutes(
       method: "POST",
       path: SessionInternalPaths.scmCredentials,
       handler: handlers.scmCredentials,
+    },
+    {
+      method: "POST",
+      path: SessionInternalPaths.runtimeError,
+      handler: handlers.runtimeError,
     },
     { method: "GET", path: SessionInternalPaths.tunnelUrls, handler: handlers.tunnelUrls },
     { method: "GET", path: SessionInternalPaths.spawnContext, handler: handlers.spawnContext },

@@ -693,9 +693,6 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
 
       await this.finishProviderStartup();
 
-      // Reset circuit breaker on successful spawn initiation
-      this.storage.resetCircuitBreaker();
-
       this.log.info("Sandbox spawn completed", {
         event: "sandbox.spawn",
         outcome: "success",
@@ -1564,6 +1561,43 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
   }
 
   /**
+   * Handle a terminal failure reported by the authenticated sandbox runtime.
+   * Provider creation only proves that a container exists; the runtime is not
+   * healthy until its WebSocket connects. Resuming the queue here lets the
+   * pending prompt create a fresh provider object immediately.
+   */
+  async handleRuntimeFailure(errorMessage: string): Promise<void> {
+    const sandbox = this.storage.getSandbox();
+    if (!sandbox || isDeadSandboxStatus(sandbox.status)) return;
+
+    const now = Date.now();
+    this.log.error("Sandbox runtime failed", {
+      event: "sandbox.runtime_failed",
+      sandbox_id: sandbox.modal_sandbox_id ?? sandbox.id,
+      error: errorMessage,
+    });
+    await this.callbacks.onSandboxTerminating?.();
+    this.storage.setLastSpawnError(errorMessage, now);
+    this.storage.incrementCircuitBreakerFailure(now);
+    this.storage.updateSandboxStatus("failed");
+    this.clearSandboxAccessState();
+    this.broadcaster.broadcast({ type: "sandbox_status", status: "failed" });
+    this.broadcaster.broadcast({ type: "sandbox_error", error: errorMessage });
+    this.wsManager.detachSandboxWebSocket(1011, "Sandbox runtime failed");
+
+    if (this.canStopProviderSandbox()) {
+      try {
+        await this.stopProviderSandbox("runtime_failure");
+      } catch (error) {
+        this.log.warn("Provider stop failed after runtime failure", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    await this.callbacks.onSandboxTerminated?.();
+  }
+
+  /**
    * Warm sandbox proactively (e.g., when user starts typing).
    */
   async warmSandbox(): Promise<void> {
@@ -1757,6 +1791,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
    */
   onSandboxConnected(): void {
     this.isSpawningSandbox = false;
+    this.storage.resetCircuitBreaker();
     this.storage.setLastSpawnError(null, null);
   }
 }

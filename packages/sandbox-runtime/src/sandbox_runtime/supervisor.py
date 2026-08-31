@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
 
-from .constants import BOOT_WARNINGS_FILE_PATH, IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_VAR
+from .constants import (
+    BOOT_WARNINGS_FILE_PATH,
+    BRIDGE_REJECTED_EXIT_CODE,
+    IMAGE_BUILD_EXECUTION_TIMEOUT_ENV_VAR,
+)
 from .repo_image_callback import RepoImageBuildCallback
 from .runtime_config import BootMode, RuntimeConfig
 from .types import AgentHarness
@@ -72,16 +76,18 @@ class SandboxSupervisor:
 
     async def _report_fatal_error(self, message: str) -> None:
         self.log.error("supervisor.fatal", error_message=message)
-        if not self.config.control_plane_url:
+        session_id = str(self.config.session_config.get("session_id") or "")
+        if not self.config.control_plane_url or not session_id:
             return
         try:
             async with httpx.AsyncClient() as client:
-                await client.post(
-                    f"{self.config.control_plane_url}/sandbox/{self.config.sandbox_id}/error",
+                response = await client.post(
+                    f"{self.config.control_plane_url}/sessions/{session_id}/runtime-error",
                     json={"error": message, "fatal": True},
                     headers={"Authorization": f"Bearer {self.config.sandbox_token}"},
                     timeout=5.0,
                 )
+                response.raise_for_status()
         except Exception as error:
             self.log.error("supervisor.report_error_failed", exc=error)
 
@@ -150,6 +156,11 @@ class SandboxSupervisor:
             return restart_count
         if exit_code == 0:
             self.log.info("bridge.graceful_exit", exit_code=exit_code)
+            self.shutdown_event.set()
+            return restart_count
+        if exit_code == BRIDGE_REJECTED_EXIT_CODE:
+            self.log.error("bridge.rejected", exit_code=exit_code)
+            await self._report_fatal_error("Bridge identity was rejected by the control plane")
             self.shutdown_event.set()
             return restart_count
 
@@ -329,7 +340,12 @@ class SandboxSupervisor:
                 f"image build exceeded its {timeout_seconds}-second execution timeout"
             ) from error
 
-    async def run(self, repo_image_callback: RepoImageBuildCallback | None = None) -> bool:
+    async def run(
+        self,
+        repo_image_callback: RepoImageBuildCallback | None = None,
+        *,
+        report_startup_failure: bool = True,
+    ) -> bool:
         startup_start = time.time()
         self.boot_mode = BootMode.from_env(os.environ)
         os.environ["OPENINSPECT_BOOT_MODE"] = self.boot_mode.value
@@ -449,7 +465,8 @@ class SandboxSupervisor:
                 except ImageBuildExecutionCancelled:
                     self.log.info("image_build.cancelled", reason="shutdown_requested")
                     return True
-            await self._report_fatal_error(str(error))
+            if report_startup_failure:
+                await self._report_fatal_error(str(error))
             return False
         finally:
             await self.shutdown()

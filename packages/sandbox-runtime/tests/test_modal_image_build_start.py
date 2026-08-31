@@ -212,7 +212,80 @@ async def test_unflagged_entrypoint_keeps_legacy_environment_path(monkeypatch):
     exit_code = await entrypoint.main([])
 
     assert exit_code == 0
-    run.assert_awaited_once_with()
+    run.assert_awaited_once_with(report_startup_failure=False)
+
+
+@pytest.mark.asyncio
+async def test_unflagged_entrypoint_retries_early_startup_failures(monkeypatch):
+    from sandbox_runtime import entrypoint
+
+    run = AsyncMock(side_effect=[False, True])
+    supervisor = MagicMock(run=run, shutdown_event=asyncio.Event())
+    monkeypatch.setattr(entrypoint, "build_supervisor", MagicMock(return_value=supervisor))
+    monkeypatch.setattr(entrypoint, "install_signal_handlers", MagicMock())
+    sleep = AsyncMock()
+    monkeypatch.setattr(entrypoint.asyncio, "sleep", sleep)
+
+    exit_code = await entrypoint.main([])
+
+    assert exit_code == 0
+    assert run.await_count == 2
+    assert [call.kwargs for call in run.await_args_list] == [
+        {"report_startup_failure": False},
+        {"report_startup_failure": False},
+    ]
+    sleep.assert_awaited_once_with(entrypoint.SESSION_STARTUP_RETRY_BASE_SECONDS)
+    supervisor.log.warn.assert_called_once_with(
+        "supervisor.startup_retry",
+        attempt=1,
+        next_attempt=2,
+        max_attempts=entrypoint.SESSION_STARTUP_MAX_ATTEMPTS,
+        delay_seconds=entrypoint.SESSION_STARTUP_RETRY_BASE_SECONDS,
+    )
+
+
+@pytest.mark.asyncio
+async def test_unflagged_entrypoint_returns_failure_after_retry_exhaustion(monkeypatch):
+    from sandbox_runtime import entrypoint
+
+    run = AsyncMock(return_value=False)
+    supervisor = MagicMock(run=run, shutdown_event=asyncio.Event())
+    monkeypatch.setattr(entrypoint, "build_supervisor", MagicMock(return_value=supervisor))
+    monkeypatch.setattr(entrypoint, "install_signal_handlers", MagicMock())
+    sleep = AsyncMock()
+    monkeypatch.setattr(entrypoint.asyncio, "sleep", sleep)
+
+    exit_code = await entrypoint.main([])
+
+    assert exit_code == 1
+    assert run.await_count == entrypoint.SESSION_STARTUP_MAX_ATTEMPTS
+    assert run.await_args_list[-1].kwargs == {"report_startup_failure": True}
+    assert [call.args[0] for call in sleep.await_args_list] == [2.0, 4.0, 8.0, 16.0]
+    supervisor.log.error.assert_called_once_with(
+        "supervisor.startup_exhausted",
+        attempt=entrypoint.SESSION_STARTUP_MAX_ATTEMPTS,
+        max_attempts=entrypoint.SESSION_STARTUP_MAX_ATTEMPTS,
+    )
+
+
+@pytest.mark.asyncio
+async def test_unflagged_entrypoint_does_not_retry_after_shutdown(monkeypatch):
+    from sandbox_runtime import entrypoint
+
+    shutdown_event = asyncio.Event()
+    shutdown_event.set()
+    run = AsyncMock(return_value=False)
+    supervisor = MagicMock(run=run, shutdown_event=shutdown_event)
+    monkeypatch.setattr(entrypoint, "build_supervisor", MagicMock(return_value=supervisor))
+    monkeypatch.setattr(entrypoint, "install_signal_handlers", MagicMock())
+    sleep = AsyncMock()
+    monkeypatch.setattr(entrypoint.asyncio, "sleep", sleep)
+
+    exit_code = await entrypoint.main([])
+
+    assert exit_code == 0
+    run.assert_awaited_once_with(report_startup_failure=False)
+    sleep.assert_not_awaited()
 
 
 @pytest.mark.asyncio

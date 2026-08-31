@@ -88,6 +88,32 @@ describe("session runtime proxy routes", () => {
     expect(new URL(requests[0].url).search).toBe("?limit=10");
   });
 
+  it("forwards authenticated sandbox runtime failures with their body", async () => {
+    const requests: Request[] = [];
+    const fetch = vi.fn(async (request: Request) => {
+      requests.push(request);
+      return Response.json({ status: "accepted" }, { status: 202 });
+    });
+    const path = "/sessions/session-1/runtime-error";
+    const { handler, match } = getHandler("POST", path);
+    const body = { error: "bridge could not connect", fatal: true };
+
+    const response = await handler(
+      new Request(`https://test.local${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      createEnv(fetch),
+      match,
+      createCtx()
+    );
+
+    expect(response.status).toBe(202);
+    expect(new URL(requests[0].url).pathname).toBe(SessionInternalPaths.runtimeError);
+    await expect(requests[0].json()).resolves.toEqual(body);
+  });
+
   it("returns deduplicated canonical participant profiles with safe fields only", async () => {
     const fetch = vi.fn(async () =>
       Response.json({

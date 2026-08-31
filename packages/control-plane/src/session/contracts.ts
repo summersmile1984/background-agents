@@ -32,6 +32,7 @@ export const SessionInternalPaths = {
   openaiTokenRefresh: "/internal/openai-token-refresh",
   xaiTokenRefresh: "/internal/xai-token-refresh",
   scmCredentials: "/internal/scm-credentials",
+  runtimeError: "/internal/runtime-error",
   tunnelUrls: "/internal/tunnel-urls",
   spawnContext: "/internal/spawn-context",
   activePromptAuthor: "/internal/active-prompt-author",

@@ -168,15 +168,31 @@ class TestStructuredLogger:
 
 
 class TestConfigureLogging:
-    def test_configures_root_logger(self):
+    def test_configures_root_logger(self, monkeypatch):
+        monkeypatch.delenv("OI_RUNTIME_LOG_PATH", raising=False)
         configure_logging()
         assert len(logging.root.handlers) == 1
         assert isinstance(logging.root.handlers[0].formatter, JSONFormatter)
         assert logging.root.level == logging.INFO
 
-    def test_replaces_existing_handlers(self):
+    def test_replaces_existing_handlers(self, monkeypatch):
+        monkeypatch.delenv("OI_RUNTIME_LOG_PATH", raising=False)
         logging.root.addHandler(logging.StreamHandler())
         logging.root.addHandler(logging.StreamHandler())
         assert len(logging.root.handlers) >= 2
         configure_logging()
         assert len(logging.root.handlers) == 1
+
+    def test_optionally_mirrors_logs_to_runtime_file(self, monkeypatch, tmp_path):
+        runtime_log = tmp_path / "runtime.log"
+        monkeypatch.setenv("OI_RUNTIME_LOG_PATH", str(runtime_log))
+
+        configure_logging()
+        get_logger("runtime-file-test").info("runtime.file_test", attempt=1)
+        for handler in logging.root.handlers:
+            handler.flush()
+
+        assert len(logging.root.handlers) == 2
+        record = json.loads(runtime_log.read_text(encoding="utf-8").strip())
+        assert record["event"] == "runtime.file_test"
+        assert record["attempt"] == 1

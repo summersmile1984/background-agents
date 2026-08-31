@@ -22,6 +22,8 @@ import time
 
 SESSION_ENV_PATH = "/tmp/oi-session.env"
 CREATE_TIME_ENV_MARKER = "OI_USE_CREATE_TIME_ENV"
+RUNTIME_LOG_PATH_ENV_VAR = "OI_RUNTIME_LOG_PATH"
+RUNTIME_LOG_PATH = "/tmp/oi-supervisor.log"
 CREATE_TIME_ENV_CHUNKED_MARKER = "OI_E2B_ENV_CHUNKED"
 CREATE_TIME_ENV_CHUNK_PREFIX = "OI_E2B_ENV_CHUNK_"
 ENVD_HOST = "127.0.0.1"
@@ -149,15 +151,25 @@ def main() -> None:
         env[str(k)] = str(v)
 
     _log(f"loaded {len(session_env)} session vars; starting supervisor")
-    # E2B's `sandbox logs` does not surface the start command's stdout/stderr, so
-    # mirror the supervisor's output to a file operators can tail for debugging.
-    try:
-        log_fd = os.open("/tmp/oi-supervisor.log", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-        os.dup2(log_fd, 1)
-        os.dup2(log_fd, 2)
-        os.close(log_fd)
-    except OSError as e:
-        _log(f"could not redirect supervisor output: {e}")
+    if use_create_time_env:
+        # Cube forwards the foreground process' stdout to Host logs. Keep that
+        # stream intact and ask the runtime logger to append a sandbox-local
+        # copy as well, so boot errors survive in both observability paths.
+        env[RUNTIME_LOG_PATH_ENV_VAR] = RUNTIME_LOG_PATH
+    else:
+        # Managed E2B's `sandbox logs` does not surface the start command's
+        # stdout/stderr, so retain the sandbox-local diagnostic file there.
+        try:
+            log_fd = os.open(
+                RUNTIME_LOG_PATH,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o644,
+            )
+            os.dup2(log_fd, 1)
+            os.dup2(log_fd, 2)
+            os.close(log_fd)
+        except OSError as e:
+            _log(f"could not redirect supervisor output: {e}")
     # Replace this process so the supervisor runs as the sandbox's main process.
     os.execvpe("python", ["python", "-m", "sandbox_runtime.entrypoint"], env)
 

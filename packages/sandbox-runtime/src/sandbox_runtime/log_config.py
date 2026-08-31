@@ -16,8 +16,11 @@ Usage:
 
 import json
 import logging
+import os
 import sys
 from typing import Any
+
+RUNTIME_LOG_PATH_ENV_VAR = "OI_RUNTIME_LOG_PATH"
 
 # Standard LogRecord attributes to exclude from extra fields.
 # Built from a blank LogRecord's __dict__ plus our custom underscore-prefixed attrs.
@@ -80,9 +83,16 @@ def configure_logging() -> None:
     Call once at process startup (entrypoint, bridge, web_api module load).
     Replaces any existing handlers on the root logger.
     """
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-    logging.root.handlers = [handler]
+    formatter = JSONFormatter()
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    handlers: list[logging.Handler] = [stream_handler]
+    runtime_log_path = os.environ.get(RUNTIME_LOG_PATH_ENV_VAR, "").strip()
+    if runtime_log_path:
+        file_handler = logging.FileHandler(runtime_log_path, mode="a", encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        handlers.append(file_handler)
+    logging.root.handlers = handlers
     logging.root.setLevel(logging.INFO)
 
 

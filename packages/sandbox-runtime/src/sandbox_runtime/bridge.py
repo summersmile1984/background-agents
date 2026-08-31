@@ -34,6 +34,7 @@ from .attachment_processor import (
 )
 from .constants import (
     BOOT_WARNINGS_FILE_PATH,
+    BRIDGE_REJECTED_EXIT_CODE,
     DEFAULT_SANDBOX_TIMEOUT_SECONDS,
     MAX_SNAPSHOT_RESERVE_SECONDS,
     REPO_MANIFEST_FILE_PATH,
@@ -175,6 +176,14 @@ class SessionTerminatedError(Exception):
     """
 
     pass
+
+
+class SessionRejectedError(Exception):
+    """Raised when the control plane rejects the sandbox's active identity."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        super().__init__(f"Session rejected by control plane (HTTP {status}).")
 
 
 class AgentBridge:
@@ -358,7 +367,9 @@ class AgentBridge:
 
         return re.sub(r"(https?://)([^/\s@]+)@", r"\1***@", redacted_stderr)
 
-    async def run(self) -> None:
+    async def run(
+        self,
+    ) -> Literal["shutdown", "connection_closed", "session_terminated", "fatal_error"]:
         """Main bridge loop with reconnection handling.
 
         Handles reconnection for transient errors (network issues, etc.) but
@@ -394,6 +405,15 @@ class AgentBridge:
                     reconnect_attempts = 0
                 except SessionTerminatedError:
                     run_outcome = "session_terminated"
+                    self.shutdown_event.set()
+                    break
+                except SessionRejectedError as error:
+                    run_outcome = "fatal_error"
+                    self.log.error(
+                        "bridge.rejected",
+                        status=error.status,
+                        detail=str(error),
+                    )
                     self.shutdown_event.set()
                     break
                 except websockets.ConnectionClosed:
@@ -449,6 +469,7 @@ class AgentBridge:
                 reconnect_attempt_count=self._reconnect_attempt_count,
                 total_connected_duration_seconds=round(self._total_connected_duration_seconds, 3),
             )
+        return run_outcome
 
     def _mark_connected(self, *, now_monotonic: float | None = None) -> None:
         self._connection_count += 1
@@ -589,10 +610,12 @@ class AgentBridge:
 
         except InvalidStatus as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
-            if status in (401, 403, 404, 410):
+            if status == 410:
                 raise SessionTerminatedError(
                     f"Session rejected by control plane (HTTP {status})."
                 ) from e
+            if status in (401, 403, 404):
+                raise SessionRejectedError(status) from e
             raise
 
     async def _heartbeat_loop(self) -> None:
@@ -1619,7 +1642,7 @@ class AgentBridge:
         return value
 
 
-async def main() -> None:
+async def main() -> int:
     """Entry point for bridge process."""
     parser = argparse.ArgumentParser(description="Open-Inspect Agent Bridge")
     parser.add_argument("--sandbox-id", required=True, help="Sandbox ID")
@@ -1647,8 +1670,9 @@ async def main() -> None:
         agent_session_id=args.agent_session_id,
     )
 
-    await bridge.run()
+    outcome = await bridge.run()
+    return BRIDGE_REJECTED_EXIT_CODE if outcome == "fatal_error" else 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))
