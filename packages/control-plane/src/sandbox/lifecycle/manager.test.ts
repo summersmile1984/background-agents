@@ -1518,6 +1518,7 @@ describe("SandboxLifecycleManager", () => {
           throw new SandboxProviderError("Auth failed", "permanent");
         }),
       });
+      const onSandboxSpawnFailed = vi.fn(async () => {});
 
       const manager = new SandboxLifecycleManager(
         provider,
@@ -1526,13 +1527,16 @@ describe("SandboxLifecycleManager", () => {
         wsManager,
         createMockAlarmScheduler(),
         createMockIdGenerator(),
-        createTestConfig()
+        createTestConfig(),
+        { onSandboxSpawnFailed }
       );
 
       await manager.spawnSandbox();
 
       expect(storage.calls).toContain("incrementCircuitBreakerFailure");
       expect(storage.calls).toContain("updateSandboxStatus:failed");
+      expect(onSandboxSpawnFailed).toHaveBeenCalledOnce();
+      expect(onSandboxSpawnFailed).toHaveBeenCalledWith(expect.any(SandboxProviderError));
     });
 
     it("does not increment circuit breaker for transient errors", async () => {

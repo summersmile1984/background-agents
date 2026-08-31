@@ -235,9 +235,10 @@ module "control_plane_worker" {
   migration_old_tag   = var.control_plane_migration_old_tag
   new_sqlite_classes  = var.control_plane_new_sqlite_classes
 
-  # The image-build schedule must match IMAGE_BUILD_SCHEDULER_CRON in scheduler.ts,
-  # and the draft sweep ABANDONED_DRAFT_SWEEP_CRON in abandoned-draft-sweep.ts.
-  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *"]
+  # Keep these schedules in sync with the corresponding constants in the
+  # control-plane source. The stale pending sweep wakes old active sessions so
+  # a deployment cannot leave queued prompts in Running forever.
+  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *", "43 * * * *"]
 
   depends_on = [
     null_resource.control_plane_build,

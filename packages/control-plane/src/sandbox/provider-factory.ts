@@ -126,14 +126,20 @@ function createDaytonaProviderFromEnv(env: Env): DaytonaSandboxProvider {
 }
 
 function createE2BProviderFromEnv(env: Env): E2BSandboxProvider {
-  if (!env.E2B_API_KEY || !env.E2B_TEMPLATE_ID) {
+  const templateId = env.E2B_TEMPLATE_ID?.trim();
+  if (!env.E2B_API_KEY || !templateId) {
     throw new Error("E2B_API_KEY and E2B_TEMPLATE_ID are required when SANDBOX_PROVIDER=e2b");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(templateId)) {
+    throw new Error(
+      "E2B_TEMPLATE_ID must contain only letters, numbers, dots, underscores, or dashes"
+    );
   }
 
   const client = createE2BRestClient({
     apiUrl: env.E2B_API_URL || "https://api.e2b.app",
     apiKey: env.E2B_API_KEY,
-    templateId: env.E2B_TEMPLATE_ID,
+    templateId,
   });
 
   return createE2BProvider(client, {

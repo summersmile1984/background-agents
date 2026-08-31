@@ -309,6 +309,11 @@ export class SessionDO extends DurableObject<Env> {
     archive: (request) => this.sessionLifecycleHandler.archive(request),
     unarchive: (request) => this.sessionLifecycleHandler.unarchive(request),
     expireDraft: () => this.sessionLifecycleHandler.expireDraft(),
+    reconcilePending: async () => {
+      const outcome = await this.messageQueue.reconcilePendingPrompt();
+      if (outcome === "none") await this.statusService.settleFromMessageState();
+      return Response.json({ outcome });
+    },
     verifySandboxToken: (request, _url, log) =>
       this.sandboxHandler.verifySandboxToken(request, log),
     openaiTokenRefresh: (_request, _url, log) => this.sandboxHandler.openaiTokenRefresh(log),
@@ -1237,6 +1242,7 @@ export class SessionDO extends DurableObject<Env> {
       {
         onSandboxTerminating: () => this.messageQueue.failStuckProcessingMessage(),
         onSandboxTerminated: () => this.messageQueue.resumeAfterSandboxTermination(),
+        onSandboxSpawnFailed: (error) => this.messageQueue.failPendingAfterSpawnError(error),
         isProcessing: () => this.messageRepository.getProcessingMessage() !== null,
       },
       imageBuildLookup

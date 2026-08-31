@@ -65,6 +65,14 @@ describe("createSandboxProviderFromEnv", () => {
     );
   });
 
+  it("rejects an E2B template placeholder before any sandbox request", () => {
+    const env = createEnv({ E2B_API_KEY: "e2b-key", E2B_TEMPLATE_ID: "-" });
+
+    expect(() => createSandboxProviderFromEnv(env, "e2b")).toThrow(
+      "E2B_TEMPLATE_ID must contain only letters"
+    );
+  });
+
   it("rejects an insecure E2B preview gateway", () => {
     const env = createEnv({
       E2B_API_KEY: "e2b-key",

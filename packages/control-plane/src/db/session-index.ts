@@ -765,6 +765,36 @@ export class SessionIndexStore {
   }
 
   /**
+   * Find active sessions old enough that a pending-dispatch alarm may have
+   * been lost during a deployment. The Durable Object re-checks its own queue,
+   * so an active session with a healthy sandbox is a cheap no-op.
+   */
+  async listStaleActiveSessionIds(staleBefore: number, limit: number): Promise<string[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT id FROM sessions
+         WHERE status = 'active' AND updated_at < ?
+         ORDER BY updated_at ASC
+         LIMIT ?`
+      )
+      .bind(staleBefore, limit)
+      .all<{ id: string }>();
+
+    return (result.results ?? []).map((row) => row.id);
+  }
+
+  /** Mark an active index row failed when its Durable Object no longer exists. */
+  async failOrphanedActiveSession(id: string): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        "UPDATE sessions SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'active'"
+      )
+      .bind(Date.now(), id)
+      .run();
+    return (result.meta?.changes ?? 0) > 0;
+  }
+
+  /**
    * Retire an index row whose Durable Object holds no session at all.
    *
    * A 404 from the expiry route is definitive rather than transient: there is no

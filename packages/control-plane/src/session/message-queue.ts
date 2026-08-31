@@ -57,6 +57,8 @@ import { parsePersistedSandboxSettings } from "../sandbox/settings";
  */
 export const PENDING_PROMPT_DISPATCH_TIMEOUT_MS = 15 * 60 * 1000;
 
+export type PendingPromptRecoveryOutcome = "none" | "connected" | "waiting" | "failed";
+
 interface PromptMessageData {
   clientRequestId?: string;
   content: string;
@@ -594,19 +596,24 @@ export class SessionMessageQueue {
    * when the sandbox never connects.
    */
   async failStuckPendingMessage(): Promise<void> {
+    await this.reconcilePendingPrompt();
+  }
+
+  /** Reconcile one pending prompt and report what the maintenance caller saw. */
+  async reconcilePendingPrompt(): Promise<PendingPromptRecoveryOutcome> {
     // A connected sandbox can legitimately spend longer than this deadline on
     // the prompt ahead of the queue. Only expire pending work while there is no
     // connection capable of receiving it.
-    if (this.wsManager.getSandboxSocket()) return;
+    if (this.wsManager.getSandboxSocket()) return "connected";
 
     const pending = this.messageRepository.getNextPendingMessage();
-    if (!pending) return;
+    if (!pending) return "none";
 
     const now = Date.now();
     const deadline = pending.created_at + PENDING_PROMPT_DISPATCH_TIMEOUT_MS;
     if (now < deadline) {
       await this.alarmScheduler.scheduleAlarm(deadline);
-      return;
+      return "waiting";
     }
 
     if (
@@ -617,7 +624,7 @@ export class SessionMessageQueue {
         "pending"
       )
     ) {
-      return;
+      return "none";
     }
 
     this.log.warn("Pending prompt dispatch timed out", {
@@ -634,6 +641,36 @@ export class SessionMessageQueue {
     // instead of allowing the first timeout to consume the only alarm wake-up.
     const nextPending = this.messageRepository.getNextPendingMessage();
     if (nextPending) await this.schedulePendingPromptDeadline(nextPending.created_at);
+    return "failed";
+  }
+
+  /**
+   * Settle a pending prompt immediately when the provider reports a permanent
+   * configuration/authentication error. Transient failures deliberately keep
+   * the normal dispatch deadline so a later reconnect can retry them.
+   */
+  async failPendingAfterSpawnError(error: Error): Promise<void> {
+    if (this.wsManager.getSandboxSocket()) return;
+    const pending = this.messageRepository.listPendingMessagesWithCreatedAt();
+    if (pending.length === 0) return;
+    const now = Date.now();
+    let failed = 0;
+    for (const message of pending) {
+      if (
+        this.failMessage(message, `Sandbox could not be started: ${error.message}`, now, "pending")
+      ) {
+        failed += 1;
+      }
+    }
+    if (failed === 0) return;
+    this.log.warn("Pending prompt failed after permanent sandbox spawn error", {
+      event: "prompt.dispatch_failed",
+      message_count: failed,
+      error_type: "permanent_provider_error",
+    });
+    this.messenger.broadcast({ type: "processing_status", isProcessing: false });
+    this.broadcastPromptQueue();
+    await this.sessionStatus.reconcileAfterExecution(false);
   }
 
   private async schedulePendingPromptDeadline(createdAt: number): Promise<void> {

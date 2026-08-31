@@ -366,6 +366,8 @@ export interface LifecycleCallbacks {
   onSandboxTerminating?: () => Promise<void>;
   /** Called after the sandbox is terminal and cannot reconnect. */
   onSandboxTerminated?: () => Promise<void>;
+  /** Called after a permanent provider error leaves no sandbox to reconnect. */
+  onSandboxSpawnFailed?: (error: Error) => Promise<void>;
   /** Returns true while a prompt is actively being processed by the sandbox. */
   isProcessing?: () => boolean;
 }
@@ -737,6 +739,19 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         type: "sandbox_error",
         error: errorMessage,
       });
+      if (error instanceof SandboxProviderError && error.errorType === "permanent") {
+        try {
+          await this.callbacks.onSandboxSpawnFailed?.(error);
+        } catch (callbackError) {
+          // Provider failure is already persisted and broadcast; a projection
+          // callback failure must not turn the expected provider error into an
+          // unhandled background rejection.
+          this.log.error("Sandbox spawn failure callback failed", {
+            event: "sandbox.spawn_failure_callback_error",
+            error: callbackError instanceof Error ? callbackError.message : String(callbackError),
+          });
+        }
+      }
     } finally {
       this.isSpawningSandbox = false;
       this.providerStartupPending = false;

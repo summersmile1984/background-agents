@@ -20,6 +20,11 @@ import type { SqlDatabase } from "./db/sql-database";
 import { createCloudflareBackgroundJobDispatcher } from "./cloudflare/background-job-dispatcher";
 import { handleGitHubGitProxy } from "./github-git-proxy";
 import { handleScmGitProxy } from "./scm-git-proxy";
+import {
+  STALE_PENDING_SWEEP_CRON,
+  SessionPendingRecoveryClient,
+  StalePendingSweep,
+} from "./session/stale-pending-sweep";
 
 const logger = createLogger("worker");
 
@@ -72,6 +77,15 @@ export default {
         // eslint-disable-next-line no-restricted-syntax -- scheduled composition root: the one cron env.DB read
         new SessionIndexStore(env.DB),
         new SessionDraftExpiryClient(env.SESSION),
+        logger
+      ).run(Date.now());
+      return;
+    }
+    if (event.cron === STALE_PENDING_SWEEP_CRON) {
+      await new StalePendingSweep(
+        // eslint-disable-next-line no-restricted-syntax -- scheduled composition root: the one sweep DB read
+        new SessionIndexStore(env.DB),
+        new SessionPendingRecoveryClient(env.SESSION),
         logger
       ).run(Date.now());
       return;

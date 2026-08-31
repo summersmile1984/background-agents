@@ -645,8 +645,11 @@ variable "e2b_template_id" {
   default     = ""
 
   validation {
-    condition     = var.sandbox_provider != "e2b" || length(var.e2b_template_id) > 0
-    error_message = "e2b_template_id must be set when sandbox_provider = 'e2b'."
+    condition = var.sandbox_provider != "e2b" || (
+      length(trimspace(var.e2b_template_id)) > 0 &&
+      can(regex("^[A-Za-z0-9][A-Za-z0-9._-]*$", trimspace(var.e2b_template_id)))
+    )
+    error_message = "e2b_template_id must be a non-empty template identifier (letters, numbers, dots, underscores, or dashes) when sandbox_provider = 'e2b'."
   }
 }
 
