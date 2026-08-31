@@ -1061,9 +1061,9 @@ session 接管检查验证既有话题仍可工作；完成后记录 Apply run�
 - 生产日志中旧的 E2B `template identifier "-"`
   错误属于永久配置错误，不是 Tunnel 或 WebSocket 抖动。此前 provider 将 sandbox 标记为
   `failed`，但排队 prompt 仍可能让 session 长期显示 `Running`；网络类错误则仍保留重试窗口。
-- 永久性 `SandboxProviderError` 现在会立即失败当前 pending prompt，并广播明确的
-  `prompt.dispatch_failed`；瞬时错误仍按 15 分钟 dispatch
-  deadline 等待重连。这样错误会在同一次 spawn 尝试内收敛，不再让用户等待超时才看到结果。
+- 已知不可重试的模板/配置类 `SandboxProviderError` 现在会立即失败当前 pending prompt，并广播明确的
+  `prompt.dispatch_failed`；配额、鉴权或网络类错误仍按 15 分钟 dispatch
+  deadline 等待重连。这样不会把可恢复的 provider 故障误判为终态，同时配置错误也不再让用户等待超时。
 - 新增每小时的 `StalePendingSweep`（`43 * * * *`）：按 D1 的 active/更新时间取有限批次，唤醒 Durable
   Object 重新检查队列。只有确实没有 sandbox 且 deadline 已过的 prompt 才会失败；健康 sandbox、无 pending 或仍在 deadline 内的会话是幂等 no-op/重新安排 alarm。该 sweep 专门覆盖旧部署遗留的 DO，避免必须手动打开每个会话才能触发恢复；如果 D1 有 active 索引但 DO 已不存在，则安全地将索引行标记为 failed。
 - Terraform 与 Worker provider factory 现在都拒绝 `-`、空白或含非法字符的

@@ -739,7 +739,11 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
         type: "sandbox_error",
         error: errorMessage,
       });
-      if (error instanceof SandboxProviderError && error.errorType === "permanent") {
+      if (
+        error instanceof SandboxProviderError &&
+        error.errorType === "permanent" &&
+        isNonRetryableSpawnConfiguration(error)
+      ) {
         try {
           await this.callbacks.onSandboxSpawnFailed?.(error);
         } catch (callbackError) {
@@ -1755,4 +1759,20 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
     this.isSpawningSandbox = false;
     this.storage.setLastSpawnError(null, null);
   }
+}
+
+/**
+ * Provider errors are not all equally actionable. Quota/auth/network errors
+ * may recover after a retry or a secret update, so they retain the dispatch
+ * deadline. Invalid template/configuration errors cannot succeed on retry and
+ * should settle queued work immediately.
+ */
+function isNonRetryableSpawnConfiguration(error: SandboxProviderError): boolean {
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("template") ||
+    message.includes("configuration") ||
+    message.includes("required when sandbox_provider") ||
+    message.includes("env var value too large")
+  );
 }

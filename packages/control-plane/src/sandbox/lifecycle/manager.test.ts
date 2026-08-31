@@ -1515,7 +1515,7 @@ describe("SandboxLifecycleManager", () => {
       const wsManager = createMockWebSocketManager(false);
       const provider = createMockProvider({
         createSandbox: vi.fn(async () => {
-          throw new SandboxProviderError("Auth failed", "permanent");
+          throw new SandboxProviderError("E2B template configuration is invalid", "permanent");
         }),
       });
       const onSandboxSpawnFailed = vi.fn(async () => {});
