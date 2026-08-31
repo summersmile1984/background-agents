@@ -133,6 +133,12 @@ The command builds from a temporary context containing only this package and `sa
 pushes the image, and registers a new Cube template. Point `e2b_template_id` at the returned
 template only after it reaches `READY`.
 
+Cube's hard template probe on port `49999` is served by the first-party `oi-cube-health` liveness
+process. The base image's optional code-interpreter runs on internal port `49998`, while envd
+remains on `49983`. This separation prevents a code-interpreter startup failure from terminating a
+healthy Open-Inspect supervisor; the supervisor is still the foreground process, so its exit
+terminates the sandbox normally.
+
 New Cube templates default to 4 vCPU and 8192 MB of memory. Override `CUBE_TEMPLATE_CPU_MILLICORES`
 and `CUBE_TEMPLATE_MEMORY_MB` when the host capacity or workload requires another size. Resource
 changes apply only to sandboxes created from the new template; existing sandboxes keep their

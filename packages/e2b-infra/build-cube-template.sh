@@ -21,7 +21,11 @@ cleanup() {
 trap cleanup EXIT
 
 cp "$script_dir/cube.Dockerfile" "$build_dir/Dockerfile"
-cp "$script_dir/cube-entry.sh" "$script_dir/oi-launch.py" "$build_dir/"
+cp \
+  "$script_dir/cube-entry.sh" \
+  "$script_dir/cube-health-server.py" \
+  "$script_dir/oi-launch.py" \
+  "$build_dir/"
 cp -R "$repo_root/packages/sandbox-runtime/src/sandbox_runtime" "$build_dir/sandbox_runtime"
 find "$build_dir/sandbox_runtime" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 find "$build_dir/sandbox_runtime" -type f -name '*.pyc' -delete

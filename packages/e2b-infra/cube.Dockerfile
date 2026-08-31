@@ -78,6 +78,7 @@ COPY sandbox_runtime/bin/upload-media.js /usr/local/bin/upload-media
 COPY sandbox_runtime/bin/oi-git-sign /usr/local/bin/oi-git-sign
 COPY sandbox_runtime/bin/oi-visual-verify /usr/local/bin/oi-visual-verify
 COPY oi-launch.py /usr/local/bin/oi-launch
+COPY cube-health-server.py /usr/local/bin/oi-cube-health
 COPY cube-entry.sh /usr/local/bin/cube-entry
 
 RUN printf '/app\n' > "$(python -c 'import site; print(site.getsitepackages()[0])')/oi-app-path.pth" \
@@ -86,10 +87,12 @@ RUN printf '/app\n' > "$(python -c 'import site; print(site.getsitepackages()[0]
   && chmod 0755 /usr/local/bin/oi-git-credentials /usr/local/bin/gh \
      /usr/local/bin/upload-media /usr/local/bin/oi-git-sign \
      /usr/local/bin/oi-visual-verify \
-     /usr/local/bin/oi-launch /usr/local/bin/cube-entry \
+     /usr/local/bin/oi-launch /usr/local/bin/oi-cube-health \
+     /usr/local/bin/cube-entry \
   && test -x /usr/local/bin/upload-media \
   && test -x /usr/local/bin/oi-git-sign \
   && test -x /usr/local/bin/oi-visual-verify \
+  && test -x /usr/local/bin/oi-cube-health \
   && git config --system credential.helper /usr/local/bin/oi-git-credentials \
   && git config --system credential.useHttpPath true
 
