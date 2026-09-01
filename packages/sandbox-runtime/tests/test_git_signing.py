@@ -1,12 +1,17 @@
 import json
 import subprocess
 import textwrap
+import time
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from sandbox_runtime.git_signing import GitSigningRuntime, resolve_session_scm_provider
+from sandbox_runtime.git_signing import (
+    SIGNING_CONFIG_CACHE_MAX_AGE_SECONDS,
+    GitSigningRuntime,
+    resolve_session_scm_provider,
+)
 from sandbox_runtime.repo_config import RepoEntry, dump_repo_manifest
 from sandbox_runtime.types import GitUser
 
@@ -497,7 +502,7 @@ async def test_enabled_configuration_cache_expires(tmp_path, monkeypatch: pytest
     )
 
     await runtime.refresh(None)
-    runtime._cached_configuration_at = 0.0
+    runtime._cached_configuration_at = time.monotonic() - SIGNING_CONFIG_CACHE_MAX_AGE_SECONDS - 1.0
     with pytest.raises(RuntimeError, match="Commit signing configuration unavailable"):
         await runtime.refresh(None)
 
