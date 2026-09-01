@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -21,7 +22,10 @@ if TYPE_CHECKING:
 
 MAX_SIGNING_PAYLOAD_BYTES = 1024 * 1024
 MAX_SIGNING_RESPONSE_BYTES = 16 * 1024
-SIGNING_REQUEST_TIMEOUT_SECONDS = 30.0
+SIGNING_REQUEST_TIMEOUT_SECONDS = 10.0
+SIGNING_REQUEST_MAX_ATTEMPTS = 3
+SIGNING_REQUEST_RETRY_BACKOFF_SECONDS = 0.25
+RETRYABLE_SIGNING_REQUEST_STATUS_CODES = frozenset({408, 425, 429})
 STOCK_SSH_KEYGEN_PATH = "/usr/bin/ssh-keygen"
 
 
@@ -48,25 +52,40 @@ def run_signer(
         raise GitSignerError("Commit signing payload is empty")
 
     url = f"{control_plane_url}/sessions/{quote(session_id, safe='')}/commit-signing"
-    try:
-        with client.stream(
-            "POST",
-            url,
-            headers={
-                "Authorization": f"Bearer {auth_token}",
-                "Content-Type": "application/octet-stream",
-                "X-Open-Inspect-Signing-Fingerprint": fingerprint,
-            },
-            content=payload,
-        ) as response:
-            response_bytes = _read_bounded_response(response)
-            if response.status_code != 200:
-                raise GitSignerError("Control-plane signing request failed")
-    except httpx.HTTPError:
-        raise GitSignerError("Control-plane signing request failed") from None
+    response_bytes: bytes | None = None
+    for attempt in range(1, SIGNING_REQUEST_MAX_ATTEMPTS + 1):
+        retryable = False
+        try:
+            with client.stream(
+                "POST",
+                url,
+                headers={
+                    "Authorization": f"Bearer {auth_token}",
+                    "Content-Type": "application/octet-stream",
+                    "X-Open-Inspect-Signing-Fingerprint": fingerprint,
+                },
+                content=payload,
+            ) as response:
+                if response.status_code == 200:
+                    response_bytes = _read_bounded_response(response)
+                    break
+                retryable = _is_retryable_status(response.status_code)
+        except httpx.HTTPError:
+            retryable = True
+
+        if not retryable or attempt == SIGNING_REQUEST_MAX_ATTEMPTS:
+            raise GitSignerError("Control-plane signing request failed") from None
+        time.sleep(SIGNING_REQUEST_RETRY_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+
+    if response_bytes is None:
+        raise GitSignerError("Control-plane signing request failed")
 
     armor = _validate_armor(response_bytes)
     _atomic_write(signature_path, armor)
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code in RETRYABLE_SIGNING_REQUEST_STATUS_CODES or status_code >= 500
 
 
 def _parse_sign_arguments(arguments: Sequence[str]) -> tuple[Path, Path]:

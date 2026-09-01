@@ -270,6 +270,21 @@ describe("sandbox commit signing broker", () => {
     expect(await response.json()).toEqual({ enabled: false });
   });
 
+  it("fails closed when the authenticated sandbox has no session index row", async () => {
+    const sessionName = await createSandboxSession("commit-signing-missing-index");
+    await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sessionName).run();
+
+    const response = await SELF.fetch(`https://test.local/sessions/${sessionName}/commit-signing`, {
+      headers: { Authorization: "Bearer sandbox-token" },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: "Commit signing configuration unavailable",
+    });
+  });
+
   it("rejects missing, invalid, and wrong-session sandbox tokens", async () => {
     const firstSession = await createSandboxSession("commit-signing-a", "first-token", "sandbox-a");
     const secondSession = await createSandboxSession(

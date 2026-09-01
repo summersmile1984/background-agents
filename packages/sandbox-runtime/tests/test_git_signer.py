@@ -266,6 +266,111 @@ def test_git_2_39_literal_public_key_reference_is_signed(tmp_path: Path) -> None
     assert Path(f"{buffer_path}.sig").read_text() == armor
 
 
+@pytest.mark.parametrize("transient_status", [408, 425, 429, 503])
+def test_signer_retries_transient_responses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transient_status: int
+) -> None:
+    key_path = tmp_path / "git-selected-key"
+    key_path.write_text(PUBLIC_KEY)
+    buffer_path = tmp_path / "commit-buffer"
+    buffer_path.write_bytes(b"tree abcdef\n\ncommit message\n")
+    armor = (
+        "-----BEGIN SSH SIGNATURE-----\n"
+        f"{base64.b64encode(b'SSHSIG-test').decode()}\n"
+        "-----END SSH SIGNATURE-----\n"
+    )
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) < 3:
+            return httpx.Response(transient_status, text="temporary")
+        return httpx.Response(200, text=armor)
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("sandbox_runtime.git_signer.time.sleep", sleep_calls.append)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        run_signer(
+            ["-Y", "sign", "-n", "git", "-f", str(key_path), "-U", str(buffer_path)],
+            {
+                "CONTROL_PLANE_URL": "https://control.example.com",
+                "SANDBOX_AUTH_TOKEN": "sandbox-token",
+                "SESSION_CONFIG": json.dumps({"sessionId": "session-1"}),
+            },
+            client,
+        )
+
+    assert len(requests) == 3
+    assert sleep_calls == [0.25, 0.5]
+    assert Path(f"{buffer_path}.sig").read_text() == armor
+
+
+def test_signer_retries_transport_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key_path = tmp_path / "git-selected-key"
+    key_path.write_text(PUBLIC_KEY)
+    buffer_path = tmp_path / "commit-buffer"
+    buffer_path.write_bytes(b"tree abcdef\n\ncommit message\n")
+    armor = (
+        "-----BEGIN SSH SIGNATURE-----\n"
+        f"{base64.b64encode(b'SSHSIG-test').decode()}\n"
+        "-----END SSH SIGNATURE-----\n"
+    )
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ConnectError("temporary", request=request)
+        return httpx.Response(200, text=armor)
+
+    monkeypatch.setattr("sandbox_runtime.git_signer.time.sleep", lambda _seconds: None)
+    with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+        run_signer(
+            ["-Y", "sign", "-n", "git", "-f", str(key_path), "-U", str(buffer_path)],
+            {
+                "CONTROL_PLANE_URL": "https://control.example.com",
+                "SANDBOX_AUTH_TOKEN": "sandbox-token",
+                "SESSION_CONFIG": json.dumps({"sessionId": "session-1"}),
+            },
+            client,
+        )
+
+    assert len(requests) == 2
+
+
+def test_signer_does_not_retry_permanent_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key_path = tmp_path / "git-selected-key"
+    key_path.write_text(PUBLIC_KEY)
+    buffer_path = tmp_path / "commit-buffer"
+    buffer_path.write_bytes(b"commit payload")
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(409, text="key changed")
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("sandbox_runtime.git_signer.time.sleep", sleep_calls.append)
+    with (
+        httpx.Client(transport=httpx.MockTransport(handle)) as client,
+        pytest.raises(GitSignerError, match="signing request failed"),
+    ):
+        run_signer(
+            ["-Y", "sign", "-n", "git", "-f", str(key_path), "-U", str(buffer_path)],
+            {
+                "CONTROL_PLANE_URL": "https://control.example.com",
+                "SANDBOX_AUTH_TOKEN": "sandbox-token",
+                "SESSION_CONFIG": json.dumps({"sessionId": "session-1"}),
+            },
+            client,
+        )
+
+    assert len(requests) == 1
+    assert sleep_calls == []
+
+
 @pytest.mark.parametrize(
     "session_config",
     [
@@ -368,7 +473,9 @@ def test_signer_bounds_streamed_responses_without_leaving_signature_output(
     assert not Path(f"{buffer_path}.sig").exists()
 
 
-def test_signer_redacts_control_plane_error_bodies(tmp_path: Path) -> None:
+def test_signer_redacts_control_plane_error_bodies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     key_path = tmp_path / "git-selected-key"
     key_path.write_text(PUBLIC_KEY)
     buffer_path = tmp_path / "commit-buffer"
@@ -376,9 +483,13 @@ def test_signer_redacts_control_plane_error_bodies(tmp_path: Path) -> None:
     signature_path = Path(f"{buffer_path}.sig")
     signature_path.write_text("stale signature")
 
-    def handle(_request: httpx.Request) -> httpx.Response:
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
         return httpx.Response(503, text="secret response detail")
 
+    monkeypatch.setattr("sandbox_runtime.git_signer.time.sleep", lambda _seconds: None)
     with (
         httpx.Client(transport=httpx.MockTransport(handle)) as client,
         pytest.raises(GitSignerError) as caught,
@@ -404,6 +515,7 @@ def test_signer_redacts_control_plane_error_bodies(tmp_path: Path) -> None:
 
     assert "secret response detail" not in str(caught.value)
     assert "private commit message" not in str(caught.value)
+    assert len(requests) == 3
     assert not signature_path.exists()
 
 

@@ -1,4 +1,5 @@
 import { commitSigningWriteRequestSchema } from "@open-inspect/shared/types/commit-signing";
+import { sourceControlProviderNameSchema } from "@open-inspect/shared/types/source-control";
 
 import {
   OpenSshKeyValidationError,
@@ -9,6 +10,7 @@ import { CommitSigningStore } from "../db/commit-signing";
 import type { SqlDatabase } from "../db/sql-database";
 import { resolveScmProviderFromEnv, type SourceControlProviderName } from "../source-control";
 import type { Env } from "../types";
+import { createLogger } from "../logger";
 import {
   error,
   json,
@@ -22,10 +24,11 @@ import {
 } from "./shared";
 
 const MAX_SIGNING_PAYLOAD_BYTES = 1024 * 1024;
+const logger = createLogger("router:commit-signing");
 
 interface SessionSigningProviderRow {
   scm_connection_id: string | null;
-  provider: SourceControlProviderName | null;
+  provider: string | null;
 }
 
 async function resolveSessionSigningProvider(
@@ -46,13 +49,35 @@ async function resolveSessionSigningProvider(
   // Legacy sessions predate pinned connections and continue to use the
   // deployment provider. A pinned but missing connection must fail closed:
   // falling back to a GitHub deployment could enable signing for another forge.
-  if (!row || !row.scm_connection_id) {
+  if (!row) {
+    throw new Error("Session index entry is unavailable");
+  }
+  if (!row.scm_connection_id) {
     return resolveScmProviderFromEnv(env.SCM_PROVIDER);
   }
   if (!row.provider) {
     throw new Error("Pinned source-control connection is unavailable");
   }
-  return row.provider;
+  const provider = sourceControlProviderNameSchema.safeParse(row.provider);
+  if (!provider.success) {
+    throw new Error("Pinned source-control provider is invalid");
+  }
+  return provider.data;
+}
+
+function logRuntimeFailure(
+  operation: "configuration" | "sign",
+  sessionId: string,
+  ctx: RequestContext,
+  caught: unknown
+): void {
+  logger.error("commit_signing.runtime_failure", {
+    operation,
+    session_id: sessionId,
+    request_id: ctx.request_id,
+    trace_id: ctx.trace_id,
+    error: caught instanceof Error ? caught : new Error("Unknown commit signing failure"),
+  });
 }
 
 function noStore(response: Response): Response {
@@ -181,7 +206,8 @@ async function handleGetSandboxCommitSigning(
     if ((await resolveSessionSigningProvider(env, ctx.db, sessionId)) !== "github") {
       return noStore(json({ enabled: false }));
     }
-  } catch {
+  } catch (caught) {
+    logRuntimeFailure("configuration", sessionId, ctx, caught);
     return noStore(error("Commit signing configuration unavailable", 503));
   }
 
@@ -191,7 +217,8 @@ async function handleGetSandboxCommitSigning(
   try {
     const configuration = await store.getRuntimeConfiguration();
     return noStore(json(configuration ? { enabled: true, ...configuration } : { enabled: false }));
-  } catch {
+  } catch (caught) {
+    logRuntimeFailure("configuration", sessionId, ctx, caught);
     return noStore(error("Commit signing configuration unavailable", 503));
   }
 }
@@ -208,7 +235,8 @@ async function handlePostSandboxCommitSigning(
     if ((await resolveSessionSigningProvider(env, ctx.db, sessionId)) !== "github") {
       return noStore(error("Commit signing is disabled", 409));
     }
-  } catch {
+  } catch (caught) {
+    logRuntimeFailure("sign", sessionId, ctx, caught);
     return noStore(error("Commit signing unavailable", 503));
   }
 
@@ -246,7 +274,8 @@ async function handlePostSandboxCommitSigning(
         headers: { "Content-Type": "text/plain; charset=utf-8" },
       })
     );
-  } catch {
+  } catch (caught) {
+    logRuntimeFailure("sign", sessionId, ctx, caught);
     return noStore(error("Commit signing unavailable", 503));
   }
 }

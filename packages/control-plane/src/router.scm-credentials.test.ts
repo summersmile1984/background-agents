@@ -13,7 +13,9 @@ function routeFor(method: string, path: string) {
 function createEnv(
   options: {
     deploymentScmProvider?: "github" | "gitlab";
-    pinnedScmProvider?: "github" | "gitea" | "gitlab";
+    pinnedScmProvider?: string;
+    missingSession?: boolean;
+    sessionLookupError?: boolean;
   } = {}
 ) {
   const fetch = vi.fn(async (request: Request) => {
@@ -25,14 +27,16 @@ function createEnv(
   });
   const statement = {
     bind: vi.fn(() => statement),
-    first: vi.fn(async () =>
-      options.pinnedScmProvider
+    first: vi.fn(async () => {
+      if (options.sessionLookupError) throw new Error("D1 unavailable");
+      if (options.missingSession) return null;
+      return options.pinnedScmProvider
         ? {
             scm_connection_id: `scm-${options.pinnedScmProvider}`,
             provider: options.pinnedScmProvider,
           }
-        : null
-    ),
+        : { scm_connection_id: null, provider: null };
+    }),
     all: vi.fn(async () => ({ results: [] })),
     run: vi.fn(async () => ({ meta: { changes: 0 } })),
   };
@@ -190,6 +194,61 @@ describe("SCM credentials router provider gate", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({ enabled: false });
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the session index row is missing", async () => {
+    const { env, fetch } = createEnv({
+      deploymentScmProvider: "github",
+      missingSession: true,
+    });
+
+    const response = await handleRequest(
+      new Request("https://test.local/sessions/session-1/commit-signing", {
+        headers: { Authorization: "Bearer sandbox-token" },
+      }),
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Commit signing configuration unavailable",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the pinned provider is invalid", async () => {
+    const { env } = createEnv({
+      deploymentScmProvider: "github",
+      pinnedScmProvider: "unknown-forge",
+    });
+
+    const response = await handleRequest(
+      new Request("https://test.local/sessions/session-1/commit-signing", {
+        headers: { Authorization: "Bearer sandbox-token" },
+      }),
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+
+    expect(response.status).toBe(503);
+  });
+
+  it("fails closed when the session provider lookup is unavailable", async () => {
+    const { env } = createEnv({
+      deploymentScmProvider: "github",
+      sessionLookupError: true,
+    });
+
+    const response = await handleRequest(
+      new Request("https://test.local/sessions/session-1/commit-signing", {
+        headers: { Authorization: "Bearer sandbox-token" },
+      }),
+      env as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+
+    expect(response.status).toBe(503);
   });
 
   it("rejects signing payloads for a pinned Gitea connection", async () => {

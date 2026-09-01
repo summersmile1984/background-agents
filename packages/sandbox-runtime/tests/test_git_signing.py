@@ -1,10 +1,12 @@
+import json
 import subprocess
 import textwrap
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
-from sandbox_runtime.git_signing import GitSigningRuntime
+from sandbox_runtime.git_signing import GitSigningRuntime, resolve_session_scm_provider
 from sandbox_runtime.repo_config import RepoEntry, dump_repo_manifest
 from sandbox_runtime.types import GitUser
 
@@ -105,6 +107,7 @@ def create_runtime(
     *,
     signer_path=None,
     control_plane_url="https://control.example.com",
+    scm_provider=None,
 ):
     return GitSigningRuntime(
         control_plane_url=control_plane_url,
@@ -112,7 +115,25 @@ def create_runtime(
         auth_token="sandbox-token",
         repo_manifest_path=manifest,
         signer_path=signer_path or tmp_path / "oi-git-sign",
+        scm_provider=scm_provider,
     )
+
+
+@pytest.mark.parametrize(
+    ("session_config", "expected"),
+    [
+        ({"launch_spec": {"target": {"provider": "gitea"}}}, "gitea"),
+        ({"launch_spec": {"target": {"provider": "github"}}}, "github"),
+        ({"launch_spec": {"target": {"provider": None}}}, None),
+        ({"provider": "openai"}, None),
+    ],
+)
+def test_resolve_session_scm_provider_uses_launch_target(session_config, expected):
+    assert resolve_session_scm_provider({"SESSION_CONFIG": json.dumps(session_config)}) == expected
+
+
+def test_resolve_session_scm_provider_rejects_malformed_config():
+    assert resolve_session_scm_provider({"SESSION_CONFIG": "not-json"}) is None
 
 
 @pytest.mark.asyncio
@@ -288,6 +309,244 @@ async def test_refresh_fetches_the_session_broker_with_sandbox_auth(
 
 
 @pytest.mark.asyncio
+async def test_non_github_refresh_never_depends_on_signing_broker(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = create_repository(tmp_path / "repo")
+    runtime = create_runtime(
+        tmp_path,
+        create_manifest(tmp_path, [repo]),
+        scm_provider="gitea",
+    )
+    client = AsyncMock()
+    monkeypatch.setattr("sandbox_runtime.git_signing.httpx.AsyncClient", client)
+
+    await runtime.refresh(GitUser(name="Gitea User", email="user@gitea.example.com"))
+
+    client.assert_not_called()
+    assert git(repo, "config", "user.name").stdout.strip() == "Gitea User"
+    assert git(repo, "config", "user.email").stdout.strip() == "user@gitea.example.com"
+    assert git(repo, "config", "--get", "commit.gpgsign", check=False).returncode == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transient_status", [408, 425, 429, 503])
+async def test_refresh_retries_transient_broker_failures(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, transient_status: int
+):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) < 3:
+            return httpx.Response(transient_status, json={"error": "temporary"})
+        return httpx.Response(200, json={"enabled": False})
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", sleep)
+    repo = create_repository(tmp_path / "repo")
+    runtime = create_runtime(tmp_path, create_manifest(tmp_path, [repo]))
+
+    await runtime.refresh(None)
+
+    assert len(requests) == 3
+    assert [call.args[0] for call in sleep.await_args_list] == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_refresh_retries_transport_failure(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ConnectError("temporary", request=request)
+        return httpx.Response(200, json={"enabled": False})
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", AsyncMock())
+    repo = create_repository(tmp_path / "repo")
+    runtime = create_runtime(tmp_path, create_manifest(tmp_path, [repo]))
+
+    await runtime.refresh(None)
+
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_does_not_retry_permanent_broker_rejection(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(401, json={"error": "unauthorized"})
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", sleep)
+    repo = create_repository(tmp_path / "repo")
+    runtime = create_runtime(tmp_path, create_manifest(tmp_path, [repo]))
+
+    with pytest.raises(RuntimeError, match="Commit signing configuration unavailable"):
+        await runtime.refresh(None)
+
+    assert len(requests) == 1
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_enabled_configuration_cache_bridges_a_transient_outage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = create_repository(tmp_path / "repo")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(200, json=ENABLED_CONFIGURATION)
+        return httpx.Response(503, json={"error": "temporary"})
+
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", AsyncMock())
+    runtime = create_runtime(tmp_path, create_manifest(tmp_path, [repo]), scm_provider="github")
+    first_author = GitUser(name="First User", email="first@example.com")
+    second_author = GitUser(name="Second User", email="second@example.com")
+
+    await runtime.refresh(first_author)
+    await runtime.refresh(second_author)
+
+    assert len(requests) == 4
+    assert git(repo, "config", "user.name").stdout.strip() == "Second User"
+    assert git(repo, "config", "commit.gpgsign").stdout.strip() == "true"
+
+
+@pytest.mark.asyncio
+async def test_enabled_configuration_cache_never_hides_permanent_rejection(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    repo = create_repository(tmp_path / "repo")
+    responses = iter(
+        [
+            httpx.Response(200, json=ENABLED_CONFIGURATION),
+            httpx.Response(401, json={"error": "unauthorized"}),
+        ]
+    )
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda _request: next(responses))
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    runtime = create_runtime(
+        tmp_path,
+        create_manifest(tmp_path, [repo]),
+        scm_provider="github",
+    )
+
+    await runtime.refresh(None)
+    with pytest.raises(RuntimeError, match="Commit signing configuration unavailable"):
+        await runtime.refresh(None)
+
+
+@pytest.mark.asyncio
+async def test_enabled_configuration_cache_expires(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    repo = create_repository(tmp_path / "repo")
+    responses = iter(
+        [
+            httpx.Response(200, json=ENABLED_CONFIGURATION),
+            httpx.Response(503, json={"error": "temporary"}),
+            httpx.Response(503, json={"error": "temporary"}),
+            httpx.Response(503, json={"error": "temporary"}),
+        ]
+    )
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda _request: next(responses))
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", AsyncMock())
+    runtime = create_runtime(
+        tmp_path,
+        create_manifest(tmp_path, [repo]),
+        scm_provider="github",
+    )
+
+    await runtime.refresh(None)
+    runtime._cached_configuration_at = 0.0
+    with pytest.raises(RuntimeError, match="Commit signing configuration unavailable"):
+        await runtime.refresh(None)
+
+
+@pytest.mark.asyncio
+async def test_repository_free_session_never_depends_on_signing_broker(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    runtime = create_runtime(tmp_path, create_manifest(tmp_path), scm_provider="github")
+    client = AsyncMock()
+    monkeypatch.setattr("sandbox_runtime.git_signing.httpx.AsyncClient", client)
+
+    await runtime.refresh(None)
+
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_disabled_github_configuration_never_falls_back_from_cache(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    responses = iter(
+        [
+            httpx.Response(200, json={"enabled": False}),
+            httpx.Response(503, json={"error": "temporary"}),
+            httpx.Response(503, json={"error": "temporary"}),
+            httpx.Response(503, json={"error": "temporary"}),
+        ]
+    )
+    real_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda _request: next(responses))
+    monkeypatch.setattr(
+        "sandbox_runtime.git_signing.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", AsyncMock())
+    repo = create_repository(tmp_path / "repo")
+    runtime = create_runtime(
+        tmp_path,
+        create_manifest(tmp_path, [repo]),
+        scm_provider="github",
+    )
+
+    await runtime.refresh(None)
+    with pytest.raises(RuntimeError, match="Commit signing configuration unavailable"):
+        await runtime.refresh(None)
+
+
+@pytest.mark.asyncio
 async def test_enabled_configuration_applies_to_every_manifest_repository(tmp_path):
     repositories = [
         create_repository(tmp_path / "first"),
@@ -365,7 +624,9 @@ async def test_enabled_disabled_transition_reconciles_owned_config_only(tmp_path
         assert git(repo, "config", "--get", key, check=False).returncode == 1
     assert git(repo, "config", unowned_key).stdout.strip() == unowned_value
     assert git(repo, "config", "user.name").stdout.strip() == "OpenInspect"
-    assert git(repo, "config", "user.email").stdout.strip() == "open-inspect@noreply.github.com"
+    assert git(repo, "config", "user.email").stdout.strip() == (
+        "open-inspect@noreply.open-inspect.invalid"
+    )
 
     await runtime.apply_configuration(ENABLED_CONFIGURATION, None)
 
@@ -399,7 +660,8 @@ async def test_enabled_disabled_transition_reconciles_owned_config_only(tmp_path
 async def test_refresh_blocks_on_non_success_or_malformed_broker_results(
     tmp_path, monkeypatch: pytest.MonkeyPatch, status: int, payload
 ):
-    manifest = create_manifest(tmp_path)
+    repo = create_repository(tmp_path / "repo")
+    manifest = create_manifest(tmp_path, [repo])
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(status, json=payload)
@@ -410,10 +672,25 @@ async def test_refresh_blocks_on_non_success_or_malformed_broker_results(
         "sandbox_runtime.git_signing.httpx.AsyncClient",
         lambda **kwargs: real_client(transport=transport, **kwargs),
     )
+    monkeypatch.setattr("sandbox_runtime.git_signing.asyncio.sleep", AsyncMock())
     runtime = create_runtime(tmp_path, manifest)
 
     with pytest.raises(RuntimeError, match=r"commit signing configuration|Commit signing"):
         await runtime.refresh(GitUser(name="OpenInspect", email="open-inspect@example.com"))
+
+
+@pytest.mark.asyncio
+async def test_multi_repo_preflight_prevents_partial_configuration(tmp_path):
+    first = create_repository(tmp_path / "first")
+    missing = tmp_path / "missing"
+    missing.mkdir()
+    manifest = create_manifest(tmp_path, [first, missing])
+    runtime = create_runtime(tmp_path, manifest)
+
+    with pytest.raises(RuntimeError, match="repository is unavailable"):
+        await runtime.apply_configuration(ENABLED_CONFIGURATION, None)
+
+    assert git(first, "config", "--get", "commit.gpgsign", check=False).returncode == 1
 
 
 @pytest.mark.asyncio
@@ -439,7 +716,8 @@ async def test_refresh_blocks_when_the_repository_manifest_is_unavailable(
 async def test_initialize_fetches_public_configuration_without_creating_key_files(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ):
-    manifest = create_manifest(tmp_path)
+    repo = create_repository(tmp_path / "repo")
+    manifest = create_manifest(tmp_path, [repo])
 
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=ENABLED_CONFIGURATION)

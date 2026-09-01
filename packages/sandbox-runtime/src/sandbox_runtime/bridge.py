@@ -43,7 +43,7 @@ from .constants import (
 )
 from .diff_capture import ControlPlaneDiffClient, SessionDiffRefreshWorker
 from .event_forwarder import BufferedEventForwarder
-from .git_signing import GitSigningError, GitSigningRuntime
+from .git_signing import GitSigningError, GitSigningRuntime, resolve_session_scm_provider
 from .harness.base import (
     HarnessDriver,
     HarnessPrompt,
@@ -291,6 +291,7 @@ class AgentBridge:
             session_id=session_id,
             auth_token=auth_token,
             repo_manifest_path=self.repo_manifest_path,
+            scm_provider=resolve_session_scm_provider(os.environ),
         )
 
         # OpenCode transport client; owns its connection pool unless one was
@@ -369,7 +370,13 @@ class AgentBridge:
 
     async def run(
         self,
-    ) -> Literal["shutdown", "connection_closed", "session_terminated", "fatal_error"]:
+    ) -> Literal[
+        "shutdown",
+        "connection_closed",
+        "connection_error",
+        "session_terminated",
+        "fatal_error",
+    ]:
         """Main bridge loop with reconnection handling.
 
         Handles reconnection for transient errors (network issues, etc.) but

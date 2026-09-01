@@ -2206,7 +2206,7 @@ describe("SandboxLifecycleManager", () => {
       expect(alarmScheduler.alarms.length).toBe(1);
     });
 
-    it("calls onSandboxTerminating callback on connecting timeout", async () => {
+    it("resumes the pending queue after a connecting timeout", async () => {
       const now = Date.now();
       const sandbox = createMockSandbox({
         status: "connecting" as SandboxStatus,
@@ -2215,6 +2215,7 @@ describe("SandboxLifecycleManager", () => {
       });
       const storage = createMockStorage(createMockSession(), sandbox);
       const onSandboxTerminating = vi.fn().mockResolvedValue(undefined);
+      const onSandboxTerminated = vi.fn().mockResolvedValue(undefined);
 
       const manager = new SandboxLifecycleManager(
         createMockProvider(),
@@ -2224,12 +2225,13 @@ describe("SandboxLifecycleManager", () => {
         createMockAlarmScheduler(),
         createMockIdGenerator(),
         createTestConfig(),
-        { onSandboxTerminating }
+        { onSandboxTerminating, onSandboxTerminated }
       );
 
       await manager.handleAlarm();
 
       expect(onSandboxTerminating).toHaveBeenCalledOnce();
+      expect(onSandboxTerminated).toHaveBeenCalledOnce();
     });
   });
 
