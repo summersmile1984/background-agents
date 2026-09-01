@@ -353,6 +353,7 @@ export interface SessionGitCapabilityIssuer {
     repositoryIds: string[];
     expiresAt: number;
   }): Promise<string>;
+  extend?(input: { sessionId: string; expiresAt: number }): Promise<boolean>;
 }
 
 // ==================== Callbacks ====================
@@ -387,6 +388,7 @@ export interface SandboxLifecycle {
 
 export type UnresponsiveSandboxTrigger =
   | "prompt_dispatch_send_failed"
+  | "pending_dispatch_timeout"
   | "stop_send_failed"
   | "stop_confirmation_timeout";
 
@@ -1087,6 +1089,28 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
       const sandboxSettings = this.parseSandboxSettings(session);
       const timeoutSeconds = this.resolveSandboxTimeoutSeconds(sandboxSettings);
 
+      if (session.scm_connection_id) {
+        const expiresAt =
+          Date.now() +
+          (timeoutSeconds ?? DEFAULT_SANDBOX_TIMEOUT_SECONDS) * 1000 +
+          SESSION_GIT_CAPABILITY_EXPIRY_BUFFER_MS;
+        const extended = await this.config.sessionGitCapabilityIssuer?.extend?.({
+          sessionId: session.session_name || session.id,
+          expiresAt,
+        });
+        if (!extended) {
+          // A resumed provider keeps its old process environment, so a missing
+          // or revoked capability cannot be repaired in place. Fence that
+          // provider object and boot with a newly issued token instead of
+          // returning a Ready sandbox whose every fetch/push will be 401.
+          this.log.warn("Pinned Git capability cannot be extended; spawning fresh", {
+            provider_object_id: providerObjectId,
+          });
+          await this.doSpawn();
+          return;
+        }
+      }
+
       const result = await this.provider.resumeSandbox({
         providerObjectId,
         sessionId: session.session_name || session.id,
@@ -1099,6 +1123,21 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
 
       if (!result.success) {
         if (result.shouldSpawnFresh) {
+          // A slow runtime can finish reconnecting while the provider is still
+          // running its post-resume health probe. The authenticated Bridge is
+          // stronger evidence than a stale provider state/log response; do not
+          // replace a sandbox that has already rejoined this session. If it
+          // disconnects again, normal dispatch/heartbeat recovery will fence it
+          // and spawn fresh.
+          if (this.wsManager.getSandboxWebSocket()) {
+            this.log.info("Resume recovered while provider verification was pending", {
+              provider_object_id: providerObjectId,
+              provider_error: result.error,
+            });
+            await this.finishProviderStartup();
+            this.storage.resetCircuitBreaker();
+            return;
+          }
           this.log.info("Resume fell back to fresh spawn", {
             provider_object_id: providerObjectId,
             error: result.error,
@@ -1546,6 +1585,7 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
     this.broadcaster.broadcast({ type: "sandbox_status", status: "stale" });
     const closeReason = {
       prompt_dispatch_send_failed: "Prompt dispatch send failed",
+      pending_dispatch_timeout: "Pending prompt dispatch timed out",
       stop_send_failed: "Stop command send failed",
       stop_confirmation_timeout: "Stop confirmation timed out",
     }[trigger];

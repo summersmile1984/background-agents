@@ -1407,6 +1407,84 @@ describe("SandboxLifecycleManager", () => {
       ]);
     });
 
+    it("keeps a resumed sandbox whose Bridge connects during provider verification", async () => {
+      const sandbox = createMockSandbox({
+        status: "stopped",
+        modal_object_id: "slow-provider-obj",
+        snapshot_image_id: null,
+      });
+      const storage = createMockStorage(createMockSession(), sandbox);
+      const wsManager = createMockWebSocketManager(false);
+      const provider = createMockProvider({
+        capabilities: { supportsPersistentResume: true },
+        resumeSandbox: vi.fn(async () => {
+          sandbox.status = "ready";
+          vi.mocked(wsManager.getSandboxWebSocket).mockReturnValue({} as WebSocket);
+          return {
+            success: false,
+            shouldSpawnFresh: true,
+            error: "Provider readiness probe timed out",
+          };
+        }),
+      });
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        wsManager,
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        createTestConfig()
+      );
+
+      await manager.spawnSandbox();
+
+      expect(provider.resumeSandbox).toHaveBeenCalled();
+      expect(provider.createSandbox).not.toHaveBeenCalled();
+      expect(storage.calls).toContain("resetCircuitBreaker");
+      expect(sandbox.status).toBe("ready");
+    });
+
+    it("extends a pinned session Git capability before resuming its provider sandbox", async () => {
+      const sandbox = createMockSandbox({
+        status: "stopped",
+        modal_object_id: "paused-provider-obj",
+        snapshot_image_id: null,
+      });
+      const session = createMockSession({ scm_connection_id: "scm_gitea_1" });
+      const storage = createMockStorage(session, sandbox);
+      const provider = createMockProvider({
+        capabilities: { supportsPersistentResume: true },
+        resumeSandbox: vi.fn(async () => ({ success: true })),
+      });
+      const issuer: SessionGitCapabilityIssuer = {
+        issue: vi.fn(async () => "unused-on-resume"),
+        extend: vi.fn(async () => true),
+      };
+      const beforeResume = Date.now();
+      const manager = new SandboxLifecycleManager(
+        provider,
+        storage,
+        createMockBroadcaster(),
+        createMockWebSocketManager(false),
+        createMockAlarmScheduler(),
+        createMockIdGenerator(),
+        { ...createTestConfig(), sessionGitCapabilityIssuer: issuer }
+      );
+
+      await manager.spawnSandbox();
+
+      expect(issuer.extend).toHaveBeenCalledWith({
+        sessionId: "test-session",
+        expiresAt: expect.any(Number),
+      });
+      expect(vi.mocked(issuer.extend!).mock.calls[0][0].expiresAt).toBeGreaterThan(
+        beforeResume + 60 * 60 * 1000
+      );
+      expect(provider.resumeSandbox).toHaveBeenCalledOnce();
+      expect(provider.createSandbox).not.toHaveBeenCalled();
+    });
+
     it("resets isSpawningSandbox flag after restore throws error", async () => {
       const sandbox = createMockSandbox({
         status: "stopped",
@@ -2238,6 +2316,7 @@ describe("SandboxLifecycleManager", () => {
   describe("terminateUnresponsiveSandbox", () => {
     it.each([
       ["prompt_dispatch_send_failed", "Prompt dispatch send failed"],
+      ["pending_dispatch_timeout", "Pending prompt dispatch timed out"],
       ["stop_send_failed", "Stop command send failed"],
       ["stop_confirmation_timeout", "Stop confirmation timed out"],
     ] as const)(

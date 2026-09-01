@@ -56,7 +56,11 @@ const CUBE_TERMINAL_LIFECYCLE_MARKERS = [
 ];
 
 class E2BRuntimeStartupError extends Error {
-  constructor(message: string, cause?: Error) {
+  constructor(
+    message: string,
+    readonly definitive: boolean,
+    cause?: Error
+  ) {
     super(message, cause ? { cause } : undefined);
     this.name = "E2BRuntimeStartupError";
   }
@@ -98,7 +102,15 @@ export class E2BSandboxProvider implements SandboxProvider {
    * Stop reasons after which the provider object cannot be resumed, including
    * replacement by a newly-created sandbox.
    */
-  private static readonly TERMINAL_STOP_REASONS = new Set(["connecting_timeout", "respawn"]);
+  private static readonly TERMINAL_STOP_REASONS = new Set([
+    "connecting_timeout",
+    "pending_dispatch_timeout",
+    "prompt_dispatch_send_failed",
+    "runtime_failure",
+    "stop_confirmation_timeout",
+    "stop_send_failed",
+    "respawn",
+  ]);
 
   readonly capabilities: SandboxProviderCapabilities = {
     supportsSandboxTimeout: true,
@@ -267,18 +279,20 @@ export class E2BSandboxProvider implements SandboxProvider {
       const sandbox = await this.client.getSandbox(sandboxId);
       if (sandbox.state !== "running") {
         throw new E2BRuntimeStartupError(
-          `Cube runtime left running state during startup (${sandbox.state})`
+          `Cube runtime left running state during startup (${sandbox.state})`,
+          true
         );
       }
 
       const lifecycleLogs = await this.client.getSandboxLogs(sandboxId);
       if (CUBE_TERMINAL_LIFECYCLE_MARKERS.some((marker) => marker.test(lifecycleLogs))) {
-        throw new E2BRuntimeStartupError("Cube runtime exited during startup");
+        throw new E2BRuntimeStartupError("Cube runtime exited during startup", true);
       }
     } catch (error) {
       if (error instanceof E2BRuntimeStartupError) throw error;
       throw new E2BRuntimeStartupError(
         "Cube runtime readiness could not be verified",
+        false,
         error instanceof Error ? error : undefined
       );
     }
@@ -324,6 +338,42 @@ export class E2BSandboxProvider implements SandboxProvider {
           };
         }
         throw error;
+      }
+
+      if (this.providerConfig.useCreateTimeEnv) {
+        try {
+          // Cube's E2B compatibility layer can report a paused/running object
+          // after the restored foreground task has exited. A successful
+          // connect/timeout command is therefore not proof that the runtime can
+          // reconnect its bridge. Reuse the create-time shim probe so the
+          // lifecycle manager replaces the dead object immediately instead of
+          // spending the full connecting watchdog on it.
+          await this.verifyCreateTimeRuntime(config.providerObjectId);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Cube runtime readiness could not be verified";
+          if (error instanceof E2BRuntimeStartupError && !error.definitive) {
+            // A control-plane/log API outage is not evidence that the paused
+            // workspace died. Preserve it and let the authenticated Bridge or
+            // the connecting watchdog make the authoritative decision.
+            log.warn("e2b.resume_runtime_probe_unavailable", {
+              sandbox_id: config.providerObjectId,
+              session_id: config.sessionId,
+              reason: message,
+            });
+          } else {
+            log.warn("e2b.resume_runtime_unhealthy", {
+              sandbox_id: config.providerObjectId,
+              session_id: config.sessionId,
+              reason: message,
+            });
+            return {
+              success: false,
+              error: message,
+              shouldSpawnFresh: true,
+            };
+          }
+        }
       }
 
       const codeServerPassword = config.codeServerEnabled

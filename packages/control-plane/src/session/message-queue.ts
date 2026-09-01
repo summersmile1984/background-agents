@@ -637,6 +637,13 @@ export class SessionMessageQueue {
     this.broadcastPromptQueue();
     await this.sessionStatus.reconcileAfterExecution(false);
 
+    // The request is now terminal, so a sandbox that is still spawning or
+    // connecting has no prompt left to serve. Stop it immediately instead of
+    // allowing a late bridge to turn an already-failed session back into a
+    // resource-consuming Ready state. The no-socket guard above ensures this
+    // cannot tear down a sandbox that is legitimately processing other work.
+    await this.sandboxLifecycle.terminateUnresponsiveSandbox("pending_dispatch_timeout");
+
     // If more prompts remain queued, give the next one its own bounded wait
     // instead of allowing the first timeout to consume the only alarm wake-up.
     const nextPending = this.messageRepository.getNextPendingMessage();

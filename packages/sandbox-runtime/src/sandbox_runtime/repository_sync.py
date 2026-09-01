@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,6 +70,19 @@ class RepositorySynchronizer:
     ) -> tuple[bytes, bytes]:
         return await communicate_owned_subprocess(process, kill_process_group=os.killpg)
 
+    def _cleanup_failed_clone(self, repo: RepoEntry) -> None:
+        try:
+            shutil.rmtree(repo.path)
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            self.log.warn(
+                "git.clone_cleanup_failed",
+                repo_owner=repo.owner,
+                repo_name=repo.name,
+                error=str(error),
+            )
+
     async def _clone_repo(self, repo: RepoEntry) -> bool:
         self.log.info("git.clone_start", repo_owner=repo.owner, repo_name=repo.name)
         try:
@@ -77,6 +91,9 @@ class RepositorySynchronizer:
                 "clone",
                 "--depth",
                 str(self.CLONE_DEPTH_COMMITS),
+                "--single-branch",
+                "--no-tags",
+                "--filter=blob:none",
                 "--branch",
                 repo.branch,
                 self._build_repo_url(repo),
@@ -86,8 +103,12 @@ class RepositorySynchronizer:
                 start_new_session=True,
             )
             _stdout, stderr = await self._communicate_owned_subprocess(result)
+        except asyncio.CancelledError:
+            self._cleanup_failed_clone(repo)
+            raise
         except Exception as error:
             self.log.error("git.clone_error", exc=error, repo_owner=repo.owner, repo_name=repo.name)
+            self._cleanup_failed_clone(repo)
             return False
         if result.returncode != 0:
             self.log.error(
@@ -97,6 +118,13 @@ class RepositorySynchronizer:
                 stderr=self._redact_git_stderr(stderr),
                 exit_code=result.returncode,
             )
+            # A failed clone commonly leaves a directory containing an
+            # incomplete .git repository. The supervisor retries startup, but
+            # _sync_repo would otherwise treat that directory as an existing
+            # checkout and every later attempt would fail in the update path.
+            # Fresh clones own this path, so remove only the failed destination
+            # and let the next bounded startup attempt clone cleanly.
+            self._cleanup_failed_clone(repo)
             return False
         self.log.info("git.clone_complete", repo_path=str(repo.path))
         return True
@@ -186,7 +214,7 @@ class RepositorySynchronizer:
             "git",
             "fetch",
             "origin",
-            f"{branch}:refs/remotes/origin/{branch}",
+            f"+refs/heads/{branch}:refs/remotes/origin/{branch}",
             cwd=repo.path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -284,8 +312,12 @@ class RepositorySynchronizer:
             repo_name=repo.name,
             repo_path=str(repo.path),
         )
-        if not repo.path.exists() and not await self._clone_repo(repo):
-            return False
+        if not repo.path.exists():
+            # `git clone --branch` already creates the requested checkout with
+            # a plain, credential-helper-backed origin. Fetching and checking
+            # out again immediately adds a second authenticated network round
+            # trip and another failure point on the startup critical path.
+            return await self._clone_repo(repo)
         return await self._update_existing_repo(repo, boot_mode)
 
     async def sync(

@@ -376,12 +376,14 @@ export default function SessionPage() {
             minSize="30%"
             style={{ minHeight: 0, overflow: "clip" }}
           >
+            {/* A retained snapshot is useful during reconnect, but its processing
+                flag is stale until the subscribed stream is current again. */}
             <SessionTimeline
               events={events}
               sessionId={sessionId}
               currentParticipantId={currentParticipantId}
               participantProfiles={profiles}
-              isProcessing={isProcessing}
+              isProcessing={ready && isProcessing}
               promptQueue={promptQueue}
               loadingHistory={loadingHistory}
               showSkeleton={false}

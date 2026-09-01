@@ -23,6 +23,7 @@ const WS_CLOSE_INVALID_MESSAGE = 4004;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_BASE_DELAY_MS = 1000;
 const MAX_RECONNECT_DELAY_MS = 30000;
+const BACKGROUND_RECONNECT_DELAY_MS = 30000;
 const PING_INTERVAL_MS = 30000;
 
 function reconnectDelayMs(attemptsSoFar: number): number {
@@ -34,8 +35,7 @@ type CloseDirective =
   | { action: "auth_required" }
   | { action: "session_expired" }
   | { action: "retry"; delayMs: number }
-  | { action: "give_up" }
-  | { action: "none" };
+  | { action: "give_up" };
 
 function closeDirective(
   event: Pick<CloseEvent, "code" | "wasClean">,
@@ -47,12 +47,14 @@ function closeDirective(
   if (event.code === WS_CLOSE_SESSION_EXPIRED) {
     return { action: "session_expired" };
   }
-  if (!event.wasClean || event.code === WS_CLOSE_INVALID_MESSAGE) {
-    return attemptsSoFar < MAX_RECONNECT_ATTEMPTS
-      ? { action: "retry", delayMs: reconnectDelayMs(attemptsSoFar) }
-      : { action: "give_up" };
-  }
-  return { action: "none" };
+  // A current socket closing is never a user-initiated disconnect: reconnect()
+  // and unmount detach wsRef before close, so their late close events fail the
+  // socket-identity guard below. Retry both unclean network failures and clean
+  // server/deployment closes; relying on wasClean left the UI permanently
+  // disconnected after a successful close handshake.
+  return attemptsSoFar < MAX_RECONNECT_ATTEMPTS
+    ? { action: "retry", delayMs: reconnectDelayMs(attemptsSoFar) }
+    : { action: "give_up" };
 }
 
 export interface SessionTransportHandlers {
@@ -131,7 +133,7 @@ export function useSessionTransport(
         }
         const error = await response.text();
         console.error("Failed to fetch WS token:", error);
-        setAuthError("Failed to authenticate");
+        setConnectionError("Connection unavailable. Retrying in the background.");
         return null;
       }
 
@@ -139,7 +141,7 @@ export function useSessionTransport(
       return data.token;
     } catch (error) {
       console.error("Failed to fetch WS token:", error);
-      setAuthError("Failed to authenticate");
+      setConnectionError("Connection unavailable. Retrying in the background.");
       return null;
     }
   }, [sessionId]);
@@ -224,6 +226,7 @@ export function useSessionTransport(
     switch (directive.action) {
       case "auth_required":
         setAuthError("Authentication failed. Please sign in again.");
+        setConnectionError(null);
         // Clear the token so we fetch a new one on reconnect
         wsTokenRef.current = null;
         return;
@@ -241,6 +244,7 @@ export function useSessionTransport(
           `Reconnecting in ${directive.delayMs}ms (attempt ${reconnectAttempts.current})`
         );
         reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
           if (mountedRef.current) {
             retry();
           }
@@ -251,9 +255,6 @@ export function useSessionTransport(
         if (!mountedRef.current) return;
         console.error(`WebSocket reconnection failed after ${MAX_RECONNECT_ATTEMPTS} attempts`);
         setConnectionError("Connection lost. Please check your network and try reconnecting.");
-        return;
-
-      case "none":
         return;
     }
   }, []);
@@ -348,7 +349,31 @@ export function useSessionTransport(
 
   const markHealthy = useCallback(() => {
     reconnectAttempts.current = 0;
+    setConnectionError(null);
   }, []);
+
+  // Five fast attempts make transient interruptions recover quickly. If the
+  // browser remains offline longer (sleep, mobile handoff, local proxy/TUN
+  // restart), keep a single low-frequency retry alive instead of freezing the
+  // main session view until the user notices and presses Reconnect. The error
+  // banner stays visible until the subscribe snapshot calls markHealthy().
+  useEffect(() => {
+    if (!connectionError || authError || connected || connecting || reconnectTimeoutRef.current) {
+      return;
+    }
+
+    reconnectTimeoutRef.current = setTimeout(() => {
+      reconnectTimeoutRef.current = null;
+      if (mountedRef.current) connect();
+    }, BACKGROUND_RECONNECT_DELAY_MS);
+
+    return () => {
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+  }, [authError, connect, connected, connecting, connectionError]);
 
   // Connect on mount
   useEffect(() => {

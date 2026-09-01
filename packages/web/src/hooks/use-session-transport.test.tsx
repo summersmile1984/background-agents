@@ -223,7 +223,27 @@ describe("useSessionTransport", () => {
     rendered.unmount();
   });
 
-  it("gives up after exhausting reconnect attempts", async () => {
+  it("reconnects after a clean server close", async () => {
+    vi.useFakeTimers();
+    const rendered = renderTransport();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    act(() => {
+      FakeWebSocket.instances[0].open();
+      FakeWebSocket.instances[0].serverClose(1000, true);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    rendered.unmount();
+  });
+
+  it("continues low-frequency recovery after exhausting fast reconnect attempts", async () => {
     vi.useFakeTimers();
     const rendered = renderTransport();
     await act(async () => {
@@ -241,11 +261,43 @@ describe("useSessionTransport", () => {
       });
     }
 
-    expect(FakeWebSocket.instances).toHaveLength(6);
+    // Six fast failures surface the banner, then the background recovery loop
+    // opens a seventh socket after the capped delay.
+    expect(FakeWebSocket.instances).toHaveLength(7);
     expect(rendered.result.current.connectionError).toBe(
       "Connection lost. Please check your network and try reconnecting."
     );
 
+    act(() => {
+      FakeWebSocket.instances[6].open();
+      rendered.result.current.markHealthy();
+    });
+    expect(rendered.result.current.connectionError).toBeNull();
+
+    rendered.unmount();
+  });
+
+  it("retries a transient token endpoint failure without misreporting authentication", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(Response.json({ token: "recovered-token" }));
+    const rendered = renderTransport();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(rendered.result.current.authError).toBeNull();
+    expect(rendered.result.current.connectionError).toBe(
+      "Connection unavailable. Retrying in the background."
+    );
+    expect(FakeWebSocket.instances).toHaveLength(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     rendered.unmount();
   });
 

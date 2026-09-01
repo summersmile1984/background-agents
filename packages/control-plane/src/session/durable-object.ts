@@ -337,7 +337,10 @@ export class SessionDO extends DurableObject<Env> {
 
   private async handlePurge(): Promise<Response> {
     for (const socket of this.ctx.getWebSockets()) {
-      socket.close(1001, "Session deleted");
+      // Reuse the explicit terminal close code understood by the Web client.
+      // A generic clean 1001 is otherwise indistinguishable from a Worker
+      // restart and correctly triggers automatic reconnection.
+      socket.close(4002, "Session deleted");
     }
     await this.ctx.storage.deleteAll();
     return Response.json({ status: "purged" });
@@ -1182,6 +1185,7 @@ export class SessionDO extends DurableObject<Env> {
             expiresAt: input.expiresAt,
           });
         },
+        extend: (input) => gitCapabilities.extend("session_git", input.sessionId, input.expiresAt),
       };
     }
 

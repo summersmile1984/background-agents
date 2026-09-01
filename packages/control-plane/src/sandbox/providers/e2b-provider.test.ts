@@ -256,20 +256,25 @@ describe("E2BSandboxProvider", () => {
     }
   });
 
-  it.each(["connecting_timeout", "respawn"])(
-    "stopSandbox KILLS on terminal reason %s",
-    async (reason) => {
-      const client = mockClient();
-      const res = await new E2BSandboxProvider(client, providerConfig).stopSandbox({
-        providerObjectId: "x",
-        sessionId: "s",
-        reason,
-      });
-      expect(res.success).toBe(true);
-      expect(client.killSandbox).toHaveBeenCalledWith("x");
-      expect(client.pauseSandbox).not.toHaveBeenCalled();
-    }
-  );
+  it.each([
+    "connecting_timeout",
+    "pending_dispatch_timeout",
+    "prompt_dispatch_send_failed",
+    "runtime_failure",
+    "stop_confirmation_timeout",
+    "stop_send_failed",
+    "respawn",
+  ])("stopSandbox KILLS on terminal reason %s", async (reason) => {
+    const client = mockClient();
+    const res = await new E2BSandboxProvider(client, providerConfig).stopSandbox({
+      providerObjectId: "x",
+      sessionId: "s",
+      reason,
+    });
+    expect(res.success).toBe(true);
+    expect(client.killSandbox).toHaveBeenCalledWith("x");
+    expect(client.pauseSandbox).not.toHaveBeenCalled();
+  });
 
   it("forwards the caller signal when killing a replaced sandbox", async () => {
     const client = mockClient();
@@ -299,6 +304,85 @@ describe("E2BSandboxProvider", () => {
     });
     expect(result.success).toBe(false);
     expect(result.shouldSpawnFresh).toBe(true);
+  });
+
+  it("replaces a Cube sandbox whose shim exited after a nominal resume", async () => {
+    const client = mockClient({
+      getSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
+      getSandboxLogs: vi.fn(async () => '{"message":"wait container finish, exit code:1"}'),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    const result = await provider.resumeSandbox({
+      providerObjectId: "e2b-id",
+      sessionId: "sess",
+      sandboxId: "sandbox-logical",
+    });
+
+    expect(client.connectSandbox).toHaveBeenCalledWith("e2b-id", 1800);
+    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
+    expect(result).toMatchObject({
+      success: false,
+      shouldSpawnFresh: true,
+      error: expect.stringContaining("runtime exited"),
+    });
+  });
+
+  it("accepts a Cube resume only after the shim remains healthy", async () => {
+    const client = mockClient({
+      getSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    const result = await provider.resumeSandbox({
+      providerObjectId: "e2b-id",
+      sessionId: "sess",
+      sandboxId: "sandbox-logical",
+    });
+
+    expect(result.success).toBe(true);
+    expect(client.getSandbox).toHaveBeenCalledTimes(2);
+    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
+  });
+
+  it("preserves a resumed Cube workspace when only the lifecycle log probe is unavailable", async () => {
+    const client = mockClient({
+      getSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
+      getSandboxLogs: vi.fn(async () => {
+        throw new E2BApiError("logs unavailable", 503);
+      }),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    const result = await provider.resumeSandbox({
+      providerObjectId: "e2b-id",
+      sessionId: "sess",
+      sandboxId: "sandbox-logical",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.shouldSpawnFresh).toBeUndefined();
   });
 
   it("honors config.timeoutSeconds on create and resume (child sandboxes)", async () => {

@@ -1138,6 +1138,9 @@ describe("SessionMessageQueue", () => {
       );
       expect(h.broadcast).toHaveBeenCalledWith({ type: "processing_status", isProcessing: false });
       expect(h.sessionStatus.reconcileAfterExecution).toHaveBeenCalledWith(false);
+      expect(h.sandboxLifecycle.terminateUnresponsiveSandbox).toHaveBeenCalledWith(
+        "pending_dispatch_timeout"
+      );
     });
 
     it("does not expire queued work while a sandbox is connected", async () => {
@@ -1154,6 +1157,7 @@ describe("SessionMessageQueue", () => {
 
       expect(h.repository.recordMessageCompletion).not.toHaveBeenCalled();
       expect(h.sessionStatus.reconcileAfterExecution).not.toHaveBeenCalled();
+      expect(h.sandboxLifecycle.terminateUnresponsiveSandbox).not.toHaveBeenCalled();
     });
   });
 

@@ -94,4 +94,27 @@ export class ScmGitCapabilityStore {
       .bind(Date.now(), audience, subjectId)
       .run();
   }
+
+  /**
+   * Extend the live capability embedded in a paused session sandbox.
+   *
+   * Resume preserves the filesystem and process environment, so rotating the
+   * token would strand the old value inside the sandbox. Reviving only the
+   * non-revoked, session-scoped row keeps the same repository boundary while
+   * making Git usable for the provider's newly extended lifetime.
+   */
+  async extend(
+    audience: ScmGitCapabilityAudience,
+    subjectId: string,
+    expiresAt: number
+  ): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+        `UPDATE scm_git_capabilities SET expires_at = ?
+         WHERE audience = ? AND subject_id = ? AND revoked_at IS NULL`
+      )
+      .bind(expiresAt, audience, subjectId)
+      .run();
+    return result.meta.changes > 0;
+  }
 }

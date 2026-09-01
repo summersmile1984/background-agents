@@ -813,7 +813,7 @@ class TestNormalMode:
 
     @pytest.mark.asyncio
     async def test_uses_full_git_sync(self, base_env, tmp_path):
-        """A fresh boot clones (repo missing) then updates — the unified rule."""
+        """A fresh boot completes with the checkout produced by git clone."""
         supervisor = _make_supervisor(base_env)
         supervisor.repository_boot.repo_path = tmp_path / "nonexistent"
         _repoint_primary(supervisor.repository_boot)
@@ -838,9 +838,7 @@ class TestNormalMode:
         supervisor.repository_boot.synchronizer._clone_repo.assert_called_once_with(
             supervisor.repository_boot.repositories[0]
         )
-        supervisor.repository_boot.synchronizer._update_existing_repo.assert_called_once_with(
-            supervisor.repository_boot.repositories[0], BootMode.FRESH
-        )
+        supervisor.repository_boot.synchronizer._update_existing_repo.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_runs_setup_script(self, base_env):
@@ -1132,7 +1130,7 @@ class TestUpdateExistingRepo:
             )
 
         fetch_call = next(c for c in call_log if "fetch" in c)
-        assert "feature/xyz:refs/remotes/origin/feature/xyz" in fetch_call
+        assert "+refs/heads/feature/xyz:refs/remotes/origin/feature/xyz" in fetch_call
 
     @pytest.mark.asyncio
     async def test_checks_out_target_branch(self, base_env, tmp_path):
@@ -1283,7 +1281,7 @@ class TestPerformGitSync:
             mock_proc.communicate = AsyncMock(return_value=(b"", b""))
             mock_proc.wait = AsyncMock(return_value=0)
             mock_proc.returncode = 0
-            # Create the directory so _update_existing_repo proceeds after clone.
+            # Mirror git clone creating the checkout directory.
             (tmp_path / "nonexistent").mkdir(exist_ok=True)
             return mock_proc
 
@@ -1299,6 +1297,7 @@ class TestPerformGitSync:
 
         clone_call = next(c for c in call_log if "clone" in c)
         assert "staging" in clone_call
+        assert len(call_log) == 1
 
     @pytest.mark.asyncio
     async def test_fetch_uses_explicit_refspec(self, base_env, tmp_path):
@@ -1332,7 +1331,7 @@ class TestPerformGitSync:
         assert result is True
 
         fetch_call = next(c for c in call_log if "fetch" in c)
-        assert "feature/abc:refs/remotes/origin/feature/abc" in fetch_call
+        assert "+refs/heads/feature/abc:refs/remotes/origin/feature/abc" in fetch_call
 
     @pytest.mark.asyncio
     async def test_checkout_switches_to_target_branch(self, base_env, tmp_path):
