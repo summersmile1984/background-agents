@@ -271,6 +271,7 @@ export class SessionDO extends DurableObject<Env> {
 
   // Internal HTTP route table (transport wiring only; handlers remain on SessionDO).
   private readonly routes = createSessionInternalRoutes({
+    purge: () => this.handlePurge(),
     init: (request, _url, log) => this.sessionLifecycleHandler.init(request, log),
     state: () => this.sessionLifecycleHandler.getState(),
     snapshot: () => this.handleSnapshot(),
@@ -333,6 +334,14 @@ export class SessionDO extends DurableObject<Env> {
     diffResolveFile: (_request, url) => this.diffsHandler.resolveFile(url),
     diffRetry: () => this.diffsHandler.retry(),
   });
+
+  private async handlePurge(): Promise<Response> {
+    for (const socket of this.ctx.getWebSockets()) {
+      socket.close(1001, "Session deleted");
+    }
+    await this.ctx.storage.deleteAll();
+    return Response.json({ status: "purged" });
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);

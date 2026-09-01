@@ -187,6 +187,18 @@ describe("SessionServer", () => {
     expect(httpDeps.routes[0].handler).not.toHaveBeenCalled();
   });
 
+  it("dispatches cleanup routes without initializing legacy session state", async () => {
+    const { server, ensureInitialized, httpDeps } = createHarness();
+    httpDeps.routes[0].initialize = false;
+
+    const response = await server.onRequest(
+      new Request(`https://session${SessionInternalPaths.state}`)
+    );
+
+    expect(response.status).toBe(200);
+    expect(ensureInitialized).not.toHaveBeenCalled();
+  });
+
   it("preserves correlated invalid-prompt errors", async () => {
     const { server, sockets } = createHarness();
     await server.onMessage(

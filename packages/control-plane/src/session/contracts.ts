@@ -4,6 +4,7 @@
  */
 
 export const SessionInternalPaths = {
+  purge: "/internal/purge",
   init: "/internal/init",
   state: "/internal/state",
   snapshot: "/internal/snapshot",

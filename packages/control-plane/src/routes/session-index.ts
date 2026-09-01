@@ -26,9 +26,28 @@ import {
 import type { Env } from "../types";
 import { createLogger } from "../logger";
 import { encodeSessionInboxCursor, parseSessionInboxCursor } from "../db/session-inbox-cursor";
+import { buildSessionInternalUrl, SessionInternalPaths } from "../session/contracts";
 
 const log = createLogger("session-read-state");
 const SESSION_INBOX_LIMIT = 20;
+
+async function purgeSessionMedia(bucket: R2Bucket, sessionId: string): Promise<number> {
+  const prefix = `sessions/${sessionId}/`;
+  let cursor: string | undefined;
+  let deleted = 0;
+
+  do {
+    const page = await bucket.list({ prefix, cursor });
+    const keys = page.objects.map((object) => object.key);
+    if (keys.length > 0) {
+      await bucket.delete(keys);
+      deleted += keys.length;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  return deleted;
+}
 
 function parseCreatedByFilters(
   values: readonly string[],
@@ -233,9 +252,62 @@ async function handleDeleteSession(
   if (!sessionId) return error("Session ID required");
 
   const sessionStore = new SessionIndexStore(ctx.db);
+  const session =
+    ctx.principal?.kind === "user"
+      ? await sessionStore.getVisibleForUser(sessionId, ctx.principal.userId)
+      : await sessionStore.get(sessionId);
+  if (!session) return error("Session not found", 404);
+
+  let mediaObjectsDeleted: number;
+  try {
+    mediaObjectsDeleted = await purgeSessionMedia(env.MEDIA_BUCKET, sessionId);
+  } catch (cause) {
+    log.error("session.delete.media_failed", {
+      event: "session.delete.media_failed",
+      session_id: sessionId,
+      error: cause instanceof Error ? cause.message : String(cause),
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+    });
+    return error("Failed to delete session media", 502);
+  }
+
+  let purgeResponse: Response;
+  try {
+    const durableObjectId = env.SESSION.idFromName(sessionId);
+    purgeResponse = await env.SESSION.get(durableObjectId).fetch(
+      new Request(buildSessionInternalUrl(SessionInternalPaths.purge), {
+        method: "POST",
+        headers: {
+          "x-request-id": ctx.request_id,
+          "x-trace-id": ctx.trace_id,
+        },
+      })
+    );
+  } catch (cause) {
+    log.error("session.delete.do_failed", {
+      event: "session.delete.do_failed",
+      session_id: sessionId,
+      error: cause instanceof Error ? cause.message : String(cause),
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+    });
+    return error("Failed to delete session storage", 502);
+  }
+  if (!purgeResponse.ok) {
+    log.error("session.delete.do_failed", {
+      event: "session.delete.do_failed",
+      session_id: sessionId,
+      http_status: purgeResponse.status,
+      request_id: ctx.request_id,
+      trace_id: ctx.trace_id,
+    });
+    return error("Failed to delete session storage", 502);
+  }
+
   await sessionStore.delete(sessionId);
 
-  return json({ status: "deleted", sessionId });
+  return json({ status: "deleted", sessionId, mediaObjectsDeleted });
 }
 
 export const sessionIndexRoutes: Route[] = [

@@ -16,10 +16,12 @@ export type SessionInternalRouteHandler = (
 export interface SessionInternalRoute {
   method: "GET" | "POST";
   path: SessionInternalPath;
+  initialize?: boolean;
   handler: SessionInternalRouteHandler;
 }
 
 export interface SessionInternalRouteHandlers {
+  purge: SessionInternalRouteHandler;
   init: SessionInternalRouteHandler;
   state: SessionInternalRouteHandler;
   snapshot: SessionInternalRouteHandler;
@@ -71,6 +73,12 @@ export function createSessionInternalRoutes(
   handlers: SessionInternalRouteHandlers
 ): SessionInternalRoute[] {
   return [
+    {
+      method: "POST",
+      path: SessionInternalPaths.purge,
+      initialize: false,
+      handler: handlers.purge,
+    },
     { method: "POST", path: SessionInternalPaths.init, handler: handlers.init },
     { method: "GET", path: SessionInternalPaths.state, handler: handlers.state },
     { method: "GET", path: SessionInternalPaths.snapshot, handler: handlers.snapshot },

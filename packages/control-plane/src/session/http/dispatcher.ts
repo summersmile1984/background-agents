@@ -16,20 +16,20 @@ export class SessionHttpDispatcher {
 
   async dispatch(request: Request): Promise<Response> {
     const fetchStart = this.deps.clock.monotonicNowMs();
-    this.deps.ensureInitialized();
-    const initMs = this.deps.clock.monotonicNowMs() - fetchStart;
-    const log = this.requestLogger(request);
     const url = new URL(request.url);
     const path = url.pathname;
+    const route = this.deps.routes.find(
+      (candidate) => candidate.path === path && candidate.method === request.method
+    );
+    if (route?.initialize !== false) this.deps.ensureInitialized();
+    const initMs = this.deps.clock.monotonicNowMs() - fetchStart;
+    const log = this.requestLogger(request);
 
     // Preserve the existing contract: upgrades and unmatched routes are not route metrics.
     if (request.headers.get("Upgrade") === "websocket") {
       return this.deps.handleWebSocketUpgrade(request, url, log);
     }
 
-    const route = this.deps.routes.find(
-      (candidate) => candidate.path === path && candidate.method === request.method
-    );
     if (!route) return new Response("Not Found", { status: 404 });
 
     const handlerStart = this.deps.clock.monotonicNowMs();

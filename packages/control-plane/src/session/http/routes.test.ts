@@ -9,6 +9,7 @@ function noopHandler(): SessionInternalRouteHandler {
 describe("createSessionInternalRoutes", () => {
   it("builds the expected method/path mapping", () => {
     const routes = createSessionInternalRoutes({
+      purge: noopHandler(),
       init: noopHandler(),
       state: noopHandler(),
       snapshot: noopHandler(),
@@ -53,9 +54,13 @@ describe("createSessionInternalRoutes", () => {
     });
 
     const methodPathSet = new Set(routes.map((route) => `${route.method} ${route.path}`));
+    const purgeRoute = routes.find((route) => route.path === SessionInternalPaths.purge);
+
+    expect(purgeRoute?.initialize).toBe(false);
 
     expect(methodPathSet).toEqual(
       new Set([
+        `POST ${SessionInternalPaths.purge}`,
         `POST ${SessionInternalPaths.init}`,
         `GET ${SessionInternalPaths.snapshot}`,
         `GET ${SessionInternalPaths.sandboxAccess}`,
