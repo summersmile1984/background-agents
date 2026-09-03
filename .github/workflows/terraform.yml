@@ -372,14 +372,17 @@ jobs:
           npm run build -w @open-inspect/github-bot
           npm run build -w @open-inspect/linear-bot
 
+      # The Modal data plane is unused when sandbox_provider=e2b, and
+      # setup-uv downloads uv from github.com which this self-hosted runner
+      # cannot reach. Gate both steps off until Modal is needed again.
       - name: Setup uv
         uses: astral-sh/setup-uv@v8.2.0
-        if: ${{ secrets.SANDBOX_PROVIDER == 'modal' }}
+        if: false
 
       - name: Install Modal and Python dependencies
         run: uv sync --frozen
         working-directory: packages/modal-infra
-        if: ${{ secrets.SANDBOX_PROVIDER == 'modal' }}
+        if: false
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
