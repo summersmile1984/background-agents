@@ -237,8 +237,9 @@ module "control_plane_worker" {
 
   # Keep these schedules in sync with the corresponding constants in the
   # control-plane source. The stale pending sweep wakes old active sessions so
-  # a deployment cannot leave queued prompts in Running forever.
-  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *", "43 * * * *"]
+  # a deployment cannot leave queued prompts in Running forever. The Cube
+  # sandbox sweep reaps paused sandboxes the lifecycle manager leaked.
+  cron_triggers = ["* * * * *", "7,37 * * * *", "23 * * * *", "43 * * * *", "53 * * * *"]
 
   depends_on = [
     null_resource.control_plane_build,

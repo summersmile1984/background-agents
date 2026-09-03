@@ -39,7 +39,13 @@ function createSession(overrides: Partial<SessionRow> = {}): SessionRow {
   } as SessionRow;
 }
 
-function harness(options: { session?: SessionRow | null; sessionIndex?: null } = {}) {
+function harness(
+  options: {
+    session?: SessionRow | null;
+    sessionIndex?: null;
+    onSessionEnd?: (status: string) => void | Promise<void>;
+  } = {}
+) {
   const session = options.session === undefined ? createSession() : options.session;
 
   const repository = {
@@ -95,7 +101,8 @@ function harness(options: { session?: SessionRow | null; sessionIndex?: null } =
     artifactRepository,
     messenger,
     sessionIndex as unknown as SessionIndexStore | null,
-    parentSessions as unknown as DurableObjectNamespace
+    parentSessions as unknown as DurableObjectNamespace,
+    options.onSessionEnd as ((status: string) => void | Promise<void>) | undefined
   );
 
   return {
@@ -267,6 +274,31 @@ describe("SessionStatusService.cancel", () => {
     releaseIndex();
     await cancellation;
     expect(h.broadcast).toHaveBeenCalledWith({ type: "session_status", status: "cancelled" });
+  });
+});
+
+describe("SessionStatusService.onSessionEnd", () => {
+  it("fires for cancelled and failed transitions, but not completed", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const h = harness({ onSessionEnd });
+
+    await h.service.transition("failed");
+    expect(onSessionEnd).toHaveBeenCalledWith("failed");
+
+    await h.service.transition("completed");
+    expect(onSessionEnd).not.toHaveBeenCalledWith("completed");
+
+    // completed is not a resumable end, so it must not kill the sandbox.
+    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("fires on cancel", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const h = harness({ onSessionEnd });
+
+    await h.service.cancel(vi.fn());
+
+    expect(onSessionEnd).toHaveBeenCalledWith("cancelled");
   });
 });
 

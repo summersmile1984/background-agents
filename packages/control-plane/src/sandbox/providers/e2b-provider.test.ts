@@ -290,6 +290,60 @@ describe("E2BSandboxProvider", () => {
     expect(client.killSandbox).toHaveBeenCalledWith("x", signal);
   });
 
+  it("retries kill on Cube 409 conflict and 408 before succeeding", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient({
+        killSandbox: vi
+          .fn()
+          .mockRejectedValueOnce(new E2BConflictError("is pausing; retry DELETE after 2 seconds"))
+          .mockRejectedValueOnce(new E2BApiError("could not be resumed before delete", 408))
+          .mockResolvedValueOnce(undefined),
+      });
+      const provider = new E2BSandboxProvider(client, providerConfig);
+
+      const stopping = provider.stopSandbox({
+        providerObjectId: "x",
+        sessionId: "s",
+        reason: "respawn",
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await stopping;
+
+      expect(result.success).toBe(true);
+      expect(client.killSandbox).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after kill retries are exhausted and surfaces the error", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = mockClient({
+        killSandbox: vi.fn(async () => {
+          throw new E2BConflictError("is pausing; retry DELETE after 2 seconds");
+        }),
+      });
+      const provider = new E2BSandboxProvider(client, providerConfig);
+
+      const stopping = provider.stopSandbox({
+        providerObjectId: "x",
+        sessionId: "s",
+        reason: "respawn",
+      });
+      // Attach the rejection handler before advancing timers so the promise
+      // that rejects during the retry delay is not reported as unhandled.
+      const expectation = expect(stopping).rejects.toBeInstanceOf(SandboxProviderError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expectation;
+
+      expect(client.killSandbox).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resumeSandbox: 404 during connect (post-GET race) returns shouldSpawnFresh", async () => {
     const client = mockClient({
       getSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })),
@@ -306,13 +360,15 @@ describe("E2BSandboxProvider", () => {
     expect(result.shouldSpawnFresh).toBe(true);
   });
 
-  it("replaces a Cube sandbox whose shim exited after a nominal resume", async () => {
+  it("resume skips the lifecycle-log probe so a pause-time TaskExit does not force a fresh spawn", async () => {
     const client = mockClient({
       getSandbox: vi
         .fn()
         .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
         .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
-      getSandboxLogs: vi.fn(async () => '{"message":"wait container finish, exit code:1"}'),
+      // A paused sandbox's lifecycle log necessarily contains the checkpoint
+      // TaskExit; resume must not re-read those markers.
+      getSandboxLogs: vi.fn(async () => '{"message":"TaskExit event"}'),
     });
     const provider = new E2BSandboxProvider(client, {
       ...providerConfig,
@@ -326,63 +382,36 @@ describe("E2BSandboxProvider", () => {
       sandboxId: "sandbox-logical",
     });
 
+    expect(result.success).toBe(true);
     expect(client.connectSandbox).toHaveBeenCalledWith("e2b-id", 1800);
-    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
+    expect(client.getSandbox).toHaveBeenCalledTimes(2);
+    expect(client.getSandboxLogs).not.toHaveBeenCalled();
+  });
+
+  it("resume still replaces a Cube sandbox that leaves the running state after connect", async () => {
+    const client = mockClient({
+      getSandbox: vi
+        .fn()
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
+        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" }),
+    });
+    const provider = new E2BSandboxProvider(client, {
+      ...providerConfig,
+      useCreateTimeEnv: true,
+      createTimeEnvVerifyDelayMs: 0,
+    });
+
+    const result = await provider.resumeSandbox({
+      providerObjectId: "e2b-id",
+      sessionId: "sess",
+      sandboxId: "sandbox-logical",
+    });
+
     expect(result).toMatchObject({
       success: false,
       shouldSpawnFresh: true,
-      error: expect.stringContaining("runtime exited"),
+      error: expect.stringContaining("left running state"),
     });
-  });
-
-  it("accepts a Cube resume only after the shim remains healthy", async () => {
-    const client = mockClient({
-      getSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    const result = await provider.resumeSandbox({
-      providerObjectId: "e2b-id",
-      sessionId: "sess",
-      sandboxId: "sandbox-logical",
-    });
-
-    expect(result.success).toBe(true);
-    expect(client.getSandbox).toHaveBeenCalledTimes(2);
-    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
-  });
-
-  it("preserves a resumed Cube workspace when only the lifecycle log probe is unavailable", async () => {
-    const client = mockClient({
-      getSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
-      getSandboxLogs: vi.fn(async () => {
-        throw new E2BApiError("logs unavailable", 503);
-      }),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    const result = await provider.resumeSandbox({
-      providerObjectId: "e2b-id",
-      sessionId: "sess",
-      sandboxId: "sandbox-logical",
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.shouldSpawnFresh).toBeUndefined();
   });
 
   it("honors config.timeoutSeconds on create and resume (child sandboxes)", async () => {

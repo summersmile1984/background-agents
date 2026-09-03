@@ -46,6 +46,24 @@ const e2bSandboxCreatedSchema = z.object({
 export type E2BSandboxCreated = z.infer<typeof e2bSandboxCreatedSchema>;
 
 /**
+ * One entry in the list returned by `GET /sandboxes`. Deliberately lenient:
+ * only `sandboxID` and `state` are required for the leak sweep; Cube versions
+ * have shuffled the remaining fields, so they are all optional and unknown
+ * keys are ignored.
+ */
+const e2bListedSandboxSchema = z
+  .object({
+    sandboxID: z.string(),
+    state: z.string().optional(),
+    startedAt: z.string().optional(),
+    endAt: z.string().optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .passthrough();
+
+export type E2BListedSandbox = z.infer<typeof e2bListedSandboxSchema>;
+
+/**
  * E2B's `Error` schema types `code` as an integer, not a string slug. Typing it
  * as a string here rejects every real structured error and silently downgrades
  * the body to raw text.
@@ -218,6 +236,18 @@ export class E2BRestClient {
 
   async getSandbox(id: string): Promise<E2BSandboxDetail> {
     return this.requestJson("GET", `/sandboxes/${id}`, TIMEOUT_GET_MS, e2bSandboxDetailSchema);
+  }
+
+  /**
+   * List sandboxes for the periodic leak sweep.
+   *
+   * Cube's E2B-compatible `GET /sandboxes` returns a bare array of
+   * `RunningSandbox` entries. The schema is intentionally lenient: the sweep
+   * only needs `sandboxID` and `state`, and Cube versions have shuffled the
+   * auxiliary fields, so everything else is optional.
+   */
+  async listSandboxes(): Promise<E2BListedSandbox[]> {
+    return this.requestJson("GET", "/sandboxes", TIMEOUT_GET_MS, z.array(e2bListedSandboxSchema));
   }
 
   /**

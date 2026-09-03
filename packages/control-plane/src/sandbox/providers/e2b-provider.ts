@@ -110,6 +110,11 @@ export class E2BSandboxProvider implements SandboxProvider {
     "stop_confirmation_timeout",
     "stop_send_failed",
     "respawn",
+    // Session-end reasons: an ended session can never resume, so pausing would
+    // leak a provider-side object indefinitely.
+    "archived",
+    "cancelled",
+    "failed",
   ]);
 
   readonly capabilities: SandboxProviderCapabilities = {
@@ -268,7 +273,10 @@ export class E2BSandboxProvider implements SandboxProvider {
    * early-exit window, then combine the advertised state with the shim log.
    * This remains create-time-env-only so standard E2B behaviour is unchanged.
    */
-  private async verifyCreateTimeRuntime(sandboxId: string): Promise<void> {
+  private async verifyCreateTimeRuntime(
+    sandboxId: string,
+    options: { checkLifecycleLogs?: boolean } = {}
+  ): Promise<void> {
     const delayMs = Math.max(
       0,
       this.providerConfig.createTimeEnvVerifyDelayMs ?? DEFAULT_E2B_CREATE_TIME_ENV_VERIFY_DELAY_MS
@@ -283,6 +291,15 @@ export class E2BSandboxProvider implements SandboxProvider {
           true
         );
       }
+
+      // A resumed sandbox's lifecycle log accumulates the pause-time TaskExit:
+      // Cube's checkpoint stops the container, which records a containerd
+      // TaskExit event. Re-checking those markers on resume misclassifies a
+      // healthy restore as a dead runtime and forces a fresh spawn. Skip the
+      // log probe on resume — the state check above plus the authenticated
+      // Bridge reconnect (see the lifecycle manager) are the authoritative
+      // health signal for a restarted sandbox.
+      if (options.checkLifecycleLogs === false) return;
 
       const lifecycleLogs = await this.client.getSandboxLogs(sandboxId);
       if (CUBE_TERMINAL_LIFECYCLE_MARKERS.some((marker) => marker.test(lifecycleLogs))) {
@@ -342,13 +359,16 @@ export class E2BSandboxProvider implements SandboxProvider {
 
       if (this.providerConfig.useCreateTimeEnv) {
         try {
-          // Cube's E2B compatibility layer can report a paused/running object
-          // after the restored foreground task has exited. A successful
-          // connect/timeout command is therefore not proof that the runtime can
-          // reconnect its bridge. Reuse the create-time shim probe so the
+          // Cube may report a paused/running object whose restored foreground
+          // task has since exited. Reuse the create-time shim probe so the
           // lifecycle manager replaces the dead object immediately instead of
-          // spending the full connecting watchdog on it.
-          await this.verifyCreateTimeRuntime(config.providerObjectId);
+          // spending the full connecting watchdog on it. The log-marker check
+          // is disabled here: a paused sandbox's lifecycle log records the
+          // checkpoint TaskExit, which would misclassify every healthy restore
+          // as dead and force a fresh spawn.
+          await this.verifyCreateTimeRuntime(config.providerObjectId, {
+            checkLifecycleLogs: false,
+          });
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "Cube runtime readiness could not be verified";
@@ -416,21 +436,18 @@ export class E2BSandboxProvider implements SandboxProvider {
   async stopSandbox(config: StopConfig): Promise<StopResult> {
     const terminal = E2BSandboxProvider.TERMINAL_STOP_REASONS.has(config.reason);
     try {
-      try {
-        if (terminal) {
-          await this.client.killSandbox(
-            config.providerObjectId,
-            ...(config.signal ? [config.signal] : [])
-          );
-        } else {
+      if (terminal) {
+        await this.killSandboxWithRetry(config);
+      } else {
+        try {
           await this.client.pauseSandbox(config.providerObjectId);
+        } catch (error) {
+          // Already gone or already paused — nothing to do.
+          if (error instanceof E2BNotFoundError || error instanceof E2BConflictError) {
+            return { success: true };
+          }
+          throw error;
         }
-      } catch (error) {
-        // Already gone or already paused — nothing to do.
-        if (error instanceof E2BNotFoundError || error instanceof E2BConflictError) {
-          return { success: true };
-        }
-        throw error;
       }
       return { success: true };
     } catch (error) {
@@ -439,6 +456,40 @@ export class E2BSandboxProvider implements SandboxProvider {
         error,
         "stop"
       );
+    }
+  }
+
+  /**
+   * Cube may reject DELETE on a paused/pausing sandbox and ask the client to
+   * retry ("is pausing; retry DELETE after 2 seconds", or "could not be resumed
+   * before delete; retry DELETE after 5 seconds"). Treating those 409/408
+   * responses as success would silently leak the provider object, so retry a
+   * bounded number of times while honouring the caller's deadline.
+   */
+  private async killSandboxWithRetry(config: StopConfig): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.client.killSandbox(
+          config.providerObjectId,
+          ...(config.signal ? [config.signal] : [])
+        );
+        return;
+      } catch (error) {
+        const retryable =
+          error instanceof E2BConflictError ||
+          (error instanceof E2BApiError && error.status === 408);
+        if (!retryable || attempt >= maxAttempts || config.signal?.aborted) throw error;
+
+        const delayMs = error instanceof E2BApiError && error.status === 408 ? 5000 : 2000;
+        log.warn("e2b.kill_retry", {
+          sandbox_id: config.providerObjectId,
+          attempt,
+          delay_ms: delayMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
     }
   }
 

@@ -1604,6 +1604,38 @@ export class SandboxLifecycleManager implements SandboxLifecycle {
   }
 
   /**
+   * Terminate a sandbox because the session reached an end state (archived,
+   * cancelled, failed). Unlike an idle timeout — which is a resumable pause —
+   * an ended session can never resume, so this KILLS the provider object. A
+   * session left paused here would leak a provider-side object indefinitely.
+   */
+  async terminateSandbox(reason: string): Promise<void> {
+    const sandbox = this.storage.getSandbox();
+    if (!sandbox || isDeadSandboxStatus(sandbox.status)) return;
+
+    // Block bridge reconnects before touching the provider, then mark the
+    // sandbox stopped so the spawn decision never tries to resume it in place.
+    this.storage.updateSandboxStatus("stopped");
+    this.clearSandboxAccessState();
+    this.broadcaster.broadcast({ type: "sandbox_status", status: "stopped" });
+    this.wsManager.detachSandboxWebSocket(1000, "Session ended");
+
+    if (this.canStopProviderSandbox()) {
+      try {
+        await this.stopProviderSandbox(reason);
+      } catch (error) {
+        this.log.warn("Provider stop failed on session end", {
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } else {
+      this.wsManager.sendToSandbox({ type: "shutdown" });
+    }
+    await this.callbacks.onSandboxTerminated?.();
+  }
+
+  /**
    * Handle a terminal failure reported by the authenticated sandbox runtime.
    * Provider creation only proves that a container exists; the runtime is not
    * healthy until its WebSocket connects. Resuming the queue here lets the

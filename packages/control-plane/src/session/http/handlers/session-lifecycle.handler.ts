@@ -52,6 +52,11 @@ export interface SessionLifecycleHandlerDeps {
   getSandboxSocket: () => WebSocket | null;
   sendToSandbox: (ws: WebSocket, message: string | object) => boolean;
   updateSandboxStatus: (status: SandboxStatus) => void;
+  /**
+   * Kill the provider sandbox when the session reaches a non-resumable end
+   * state. Optional so existing test doubles and call sites remain valid.
+   */
+  terminateSandbox?: (reason: string) => void | Promise<void>;
 }
 
 function sessionTitleUpdateStatus(
@@ -488,6 +493,7 @@ export function createSessionLifecycleHandler(
       }
 
       await deps.statusService.transition("archived");
+      await deps.terminateSandbox?.("archived");
 
       return Response.json({ status: "archived" });
     },
@@ -540,6 +546,7 @@ export function createSessionLifecycleHandler(
       }
 
       await deps.statusService.transition("archived");
+      await deps.terminateSandbox?.("archived");
 
       return Response.json({ outcome: "archived", status: "archived" });
     },

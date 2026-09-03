@@ -31,7 +31,15 @@ export class SessionStatusService {
     private readonly artifactRepository: ArtifactRepository,
     private readonly messenger: SessionMessenger,
     private readonly sessionIndex: SessionIndexStore | null,
-    private readonly parentSessions: DurableObjectNamespace | null
+    private readonly parentSessions: DurableObjectNamespace | null,
+    /**
+     * Fired when the session reaches an end state that can never resume
+     * (`cancelled` / `failed`). `completed` is excluded on purpose: a completed
+     * session may still receive a follow-up prompt, so its sandbox is paused
+     * (resumable) rather than killed. The owner uses this to kill the provider
+     * sandbox instead of leaking it.
+     */
+    private readonly onSessionEnd?: (status: SessionStatus) => void | Promise<void>
   ) {}
 
   /**
@@ -62,6 +70,10 @@ export class SessionStatusService {
     const updatedAt = Math.max(Date.now(), session.updated_at + 1);
     this.repository.updateSessionStatus(session.id, status, updatedAt);
     await this.projectTransition(session, publicSessionId, status, updatedAt);
+
+    if (status === "cancelled" || status === "failed") {
+      await this.onSessionEnd?.(status);
+    }
 
     return true;
   }
@@ -111,6 +123,8 @@ export class SessionStatusService {
     this.repository.updateSessionStatus(session.id, "cancelled", updatedAt);
     terminalizeUnfinishedMessages();
     await this.projectTransition(session, publicSessionId, "cancelled", updatedAt);
+
+    await this.onSessionEnd?.("cancelled");
 
     return true;
   }

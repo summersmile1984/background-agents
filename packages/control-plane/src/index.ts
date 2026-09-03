@@ -25,6 +25,8 @@ import {
   SessionPendingRecoveryClient,
   StalePendingSweep,
 } from "./session/stale-pending-sweep";
+import { CUBE_SANDBOX_SWEEP_CRON, CubeSandboxSweep } from "./sandbox/cube-sandbox-sweep";
+import { createE2BRestClient } from "./sandbox/e2b-rest-client";
 
 const logger = createLogger("worker");
 
@@ -86,6 +88,23 @@ export default {
         // eslint-disable-next-line no-restricted-syntax -- scheduled composition root: the one sweep DB read
         new SessionIndexStore(env.DB),
         new SessionPendingRecoveryClient(env.SESSION),
+        logger
+      ).run(Date.now());
+      return;
+    }
+    if (event.cron === CUBE_SANDBOX_SWEEP_CRON) {
+      if (!env.E2B_API_KEY || !env.E2B_TEMPLATE_ID) {
+        logger.warn("Cube sandbox sweep skipped: E2B not configured", {
+          event: "cube.sandbox_sweep_skipped",
+        });
+        return;
+      }
+      await new CubeSandboxSweep(
+        createE2BRestClient({
+          apiUrl: env.E2B_API_URL || "https://api.e2b.app",
+          apiKey: env.E2B_API_KEY,
+          templateId: env.E2B_TEMPLATE_ID,
+        }),
         logger
       ).run(Date.now());
       return;

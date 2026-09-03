@@ -865,6 +865,7 @@ export class SessionDO extends DurableObject<Env> {
         getSandboxSocket: () => this.wsManager.getSandboxSocket(),
         sendToSandbox: (ws, message) => this.wsManager.send(ws, message),
         updateSandboxStatus: (status) => this.updateSandboxStatus(status),
+        terminateSandbox: (reason) => this.lifecycleManager.terminateSandbox(reason),
       });
     }
 
@@ -1048,7 +1049,8 @@ export class SessionDO extends DurableObject<Env> {
         this.artifactRepository,
         this.messenger,
         this.db ? new SessionIndexStore(this.db) : null,
-        this.env.SESSION ?? null
+        this.env.SESSION ?? null,
+        (status) => this.lifecycleManager.terminateSandbox(status)
       );
     }
 
