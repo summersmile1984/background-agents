@@ -13,7 +13,7 @@ concurrency:
 jobs:
   lint-typescript:
     name: Lint & Format (TypeScript)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -42,7 +42,7 @@ jobs:
 
   typecheck-typescript:
     name: TypeCheck (TypeScript)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -65,7 +65,7 @@ jobs:
 
   build-web:
     name: Build (Web)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -88,7 +88,7 @@ jobs:
 
   lint-python-sandbox-runtime:
     name: Lint & Format (Python - sandbox-runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     defaults:
       run:
@@ -116,7 +116,7 @@ jobs:
 
   lint-python:
     name: Lint & Format (Python - provider infra)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     permissions:
       contents: read
@@ -144,7 +144,7 @@ jobs:
 
   typecheck-python:
     name: TypeCheck (Python)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     defaults:
       run:
@@ -171,7 +171,7 @@ jobs:
 
   typecheck-python-sandbox-runtime:
     name: TypeCheck (Python - sandbox-runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     needs: [lint-python-sandbox-runtime]
     defaults:
@@ -198,7 +198,7 @@ jobs:
 
   test-cp-unit:
     name: Test (control-plane unit)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -224,7 +224,7 @@ jobs:
 
   test-cp-integration:
     name: Test (control-plane integration ${{ matrix.shard }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -254,7 +254,7 @@ jobs:
 
   test-web:
     name: Test (web)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -277,7 +277,7 @@ jobs:
 
   test-bots:
     name: Test (bots)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -306,7 +306,7 @@ jobs:
 
   test-python-sandbox-runtime:
     name: Test (Python - sandbox-runtime)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     needs: [lint-python-sandbox-runtime]
     defaults:
@@ -332,7 +332,7 @@ jobs:
 
   test-python:
     name: Test (Python - modal-infra)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     needs: [lint-python]
     defaults:

@@ -74,7 +74,7 @@ env:
 jobs:
   check-secrets:
     name: Check Secrets
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 2
     outputs:
       has-secrets: ${{ steps.check.outputs.has-secrets }}
@@ -91,7 +91,7 @@ jobs:
 
   validate:
     name: Validate
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 5
     needs: [check-secrets]
     steps:
@@ -163,7 +163,7 @@ jobs:
 
   plan:
     name: Plan
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 15
     needs: [validate, check-secrets]
     if: github.event_name == 'pull_request' && needs.check-secrets.outputs.has-secrets == 'true'
@@ -345,7 +345,7 @@ jobs:
 
   apply:
     name: Apply
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 45
     needs: [validate, check-secrets]
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && needs.check-secrets.outputs.has-secrets == 'true'
