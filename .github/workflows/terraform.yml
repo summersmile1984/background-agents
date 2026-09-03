@@ -374,10 +374,12 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v8.2.0
+        if: ${{ (secrets.SANDBOX_PROVIDER || 'modal') == 'modal' }}
 
       - name: Install Modal and Python dependencies
         run: uv sync --frozen
         working-directory: packages/modal-infra
+        if: ${{ (secrets.SANDBOX_PROVIDER || 'modal') == 'modal' }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
