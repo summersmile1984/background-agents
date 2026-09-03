@@ -504,17 +504,23 @@ describe("E2BSandboxProvider", () => {
     expect(opts).toMatchObject({ envdAccessToken: "envd-token" });
   });
 
-  it("fails closed (kills the sandbox, no env write) when create returns no envd token", async () => {
+  it("proceeds with the standard env upload when create returns no envd token (CubeSandbox)", async () => {
     const client = mockClient({
       createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
     });
     const provider = new E2BSandboxProvider(client, providerConfig);
-    await expect(provider.createSandbox(baseCreateConfig)).rejects.toMatchObject({
-      errorType: "permanent",
-      message: expect.stringMatching(/envd access token/),
+    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
+      status: "running",
+      providerObjectId: "e2b-id",
     });
-    expect(client.writeSessionEnv).not.toHaveBeenCalled();
-    expect(client.killSandbox).toHaveBeenCalledWith("e2b-id");
+    // No token returned (self-hosted Cube) → still lands the session env via the
+    // standard envd file upload, with the header omitted (envd accepts anonymous).
+    expect(client.writeSessionEnv).toHaveBeenCalledWith(
+      "e2b-id",
+      expect.any(Object),
+      expect.objectContaining({ domain: undefined, envdAccessToken: undefined })
+    );
+    expect(client.killSandbox).not.toHaveBeenCalled();
   });
 
   it("uses create-time env without an envd token for an explicitly compatible backend", async () => {

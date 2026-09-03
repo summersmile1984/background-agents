@@ -178,7 +178,7 @@ export class E2BRestClient {
   async writeSessionEnv(
     sandboxId: string,
     env: Record<string, string>,
-    opts: { domain?: string | null; envdAccessToken: string }
+    opts: { domain?: string | null; envdAccessToken?: string | null }
   ): Promise<void> {
     const domain = opts.domain || DEFAULT_SANDBOX_DOMAIN;
     // envd requires the in-sandbox user to write the file as. "user" is E2B's
@@ -199,8 +199,12 @@ export class E2BRestClient {
     const startMs = Date.now();
     try {
       // Do NOT set Content-Type — fetch derives the multipart boundary itself.
-      // envd requires the access token from create (secure:true); never write anonymously.
-      const headers: Record<string, string> = { "X-Access-Token": opts.envdAccessToken };
+      // Managed E2B requires the access token from create (secure:true). Some
+      // self-hosted E2B-compatible backends (CubeSandbox) never return one, but
+      // their envd accepts anonymous writes; omit the header so the standard
+      // envd file upload still lands /tmp/oi-session.env.
+      const headers: Record<string, string> = {};
+      if (opts.envdAccessToken) headers["X-Access-Token"] = opts.envdAccessToken;
 
       const response = await fetch(url, {
         method: "POST",

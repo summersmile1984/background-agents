@@ -128,6 +128,15 @@ describe("E2BRestClient", () => {
     expect((init.headers as Record<string, string>)["X-Access-Token"]).toBe("tok-123");
   });
 
+  it("omits the X-Access-Token header when the backend returns no envd token (CubeSandbox)", async () => {
+    const client = new E2BRestClient(defaultConfig);
+    fetchSpy.mockResolvedValue(new Response("[]", { status: 200 }));
+    await client.writeSessionEnv("sb-1", { FOO: "bar" }, { envdAccessToken: null });
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain("49983-sb-1.e2b.app");
+    expect((init.headers as Record<string, string>)["X-Access-Token"]).toBeUndefined();
+  });
+
   it("connect + timeout endpoints", async () => {
     const client = new E2BRestClient(defaultConfig);
     // Connect answers with the create-style Sandbox shape (no `state`); the

@@ -233,14 +233,16 @@ export class E2BSandboxProvider implements SandboxProvider {
         // (oi-launch.py) waits for this file and execs the supervisor with it.
         const envdAccessToken = sandbox.envdAccessToken;
         if (!envdAccessToken) {
-          // secure:true always returns a token, so a missing one is systemic (secure
-          // unsupported / API change), not intermittent — classify permanent to trip the
-          // circuit breaker rather than looping create→kill. Fail closed: the env write
-          // (SANDBOX_AUTH_TOKEN + secrets) never happens; the catch below kills the sandbox.
-          throw new SandboxProviderError(
-            "E2B create did not return an envd access token (secure access required)",
-            "permanent"
-          );
+          // Some self-hosted E2B-compatible backends (CubeSandbox) do not return
+          // an envd access token even with secure:true, but their envd accepts
+          // anonymous writes. writeSessionEnv omits the X-Access-Token header in
+          // that case so the standard envd file upload still lands
+          // /tmp/oi-session.env. Managed E2B always returns a token, so its write
+          // stays authenticated.
+          log.warn("e2b.write_session_env_without_token", {
+            sandbox_id: sandbox.sandboxID,
+            domain: sandbox.domain,
+          });
         }
         await this.client.writeSessionEnv(sandbox.sandboxID, envVars, {
           domain: sandbox.domain,
