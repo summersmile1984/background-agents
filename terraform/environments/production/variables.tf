@@ -910,3 +910,9 @@ variable "unsafe_allow_all_users" {
   type        = bool
   default     = false
 }
+
+variable "email_password_enabled" {
+  description = "Enable local email/password sign-in (and sign-up gated by allowed_emails/allowed_email_domains). Useful when GitHub/Google OAuth hosts are unreachable from the deployment host."
+  type        = bool
+  default     = false
+}

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getServerAuthSession: vi.fn(),
-  getEnabledSignInProviders: vi.fn(),
+  getEnabledSignInOptions: vi.fn(),
   redirect: vi.fn(),
 }));
 
@@ -16,11 +16,13 @@ vi.mock("@/lib/server-auth-session", () => ({
 }));
 
 vi.mock("@/lib/sign-in-providers", () => ({
-  getEnabledSignInProviders: mocks.getEnabledSignInProviders,
+  getEnabledSignInOptions: mocks.getEnabledSignInOptions,
 }));
 
 vi.mock("@/lib/auth-session", () => ({
   signIn: vi.fn(),
+  signInWithEmail: vi.fn(),
+  signUpWithEmail: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -35,7 +37,10 @@ expect.extend(matchers);
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.getServerAuthSession.mockResolvedValue(null);
-  mocks.getEnabledSignInProviders.mockResolvedValue(["github", "google"]);
+  mocks.getEnabledSignInOptions.mockResolvedValue({
+    providers: ["github", "google"],
+    emailPasswordEnabled: false,
+  });
 });
 
 afterEach(cleanup);
@@ -59,7 +64,7 @@ describe("LoginPage", () => {
 
     await expect(LoginPage()).rejects.toThrow("NEXT_REDIRECT");
     expect(mocks.redirect).toHaveBeenCalledWith("/");
-    expect(mocks.getEnabledSignInProviders).not.toHaveBeenCalled();
+    expect(mocks.getEnabledSignInOptions).not.toHaveBeenCalled();
   });
 
   it.each(["session", "providers"] as const)(
@@ -70,7 +75,7 @@ describe("LoginPage", () => {
           new AuthenticationUnavailableError(new Error("sensitive session error"))
         );
       } else {
-        mocks.getEnabledSignInProviders.mockRejectedValue(
+        mocks.getEnabledSignInOptions.mockRejectedValue(
           new AuthenticationUnavailableError(new Error("sensitive provider error"))
         );
       }
@@ -90,7 +95,7 @@ describe("LoginPage", () => {
       if (failure === "session") {
         mocks.getServerAuthSession.mockRejectedValue(unexpectedError);
       } else {
-        mocks.getEnabledSignInProviders.mockRejectedValue(unexpectedError);
+        mocks.getEnabledSignInOptions.mockRejectedValue(unexpectedError);
       }
 
       await expect(LoginPage()).rejects.toBe(unexpectedError);

@@ -18,6 +18,7 @@ const handleSignInProviders: Route["handler"] = async (_request, _env, _match, c
     }
     const response = json({
       providers: ctx.getUserAuthRuntime().enabledProviders,
+      emailPasswordEnabled: ctx.getUserAuthRuntime().emailPasswordEnabled,
     });
     response.headers.set("Cache-Control", "no-store");
     return response;

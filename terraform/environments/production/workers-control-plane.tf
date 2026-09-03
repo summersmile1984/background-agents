@@ -96,6 +96,7 @@ module "control_plane_worker" {
       { name = "ALLOWED_GITHUB_ORGS", value = var.allowed_github_orgs },
       { name = "DEPLOYMENT_ADMIN_IDENTITIES", value = var.deployment_admin_identities },
       { name = "UNSAFE_ALLOW_ALL_USERS", value = tostring(var.unsafe_allow_all_users) },
+      { name = "EMAIL_PASSWORD_ENABLED", value = tostring(var.email_password_enabled) },
       { name = "WORKER_URL", value = local.control_plane_url },
       { name = "DEPLOYMENT_NAME", value = var.deployment_name },
       { name = "APP_NAME", value = var.app_name },

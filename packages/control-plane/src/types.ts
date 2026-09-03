@@ -80,6 +80,7 @@ export interface Env {
   ALLOWED_GITHUB_ORGS?: string;
   DEPLOYMENT_ADMIN_IDENTITIES?: string; // comma-separated user:<id>, github:<login>, or email:<address>
   UNSAFE_ALLOW_ALL_USERS?: string;
+  EMAIL_PASSWORD_ENABLED?: string; // "true" enables local email/password sign-in
   CF_ACCOUNT_ID?: string; // Cloudflare account ID
   SANDBOX_PROVIDER?: string; // "modal" (default), "daytona", "vercel", "opencomputer", or "e2b"
   DEFAULT_AGENT_HARNESS?: string; // opencode (default), codex, claude, or deepseek

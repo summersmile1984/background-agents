@@ -21,9 +21,9 @@ vi.mock("./logger", () => ({
 }));
 
 import { AuthenticationUnavailableError } from "./authentication-unavailable-error";
-import { getEnabledSignInProviders } from "./sign-in-providers";
+import { getEnabledSignInOptions } from "./sign-in-providers";
 
-describe("getEnabledSignInProviders", () => {
+describe("getEnabledSignInOptions", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.getRequestCorrelation.mockResolvedValue({
@@ -34,10 +34,13 @@ describe("getEnabledSignInProviders", () => {
 
   it("returns the validated provider set from an exact server-only request", async () => {
     mocks.dispatchWebServiceRequest.mockResolvedValue(
-      Response.json({ providers: ["github", "google"] })
+      Response.json({ providers: ["github", "google"], emailPasswordEnabled: true })
     );
 
-    await expect(getEnabledSignInProviders()).resolves.toEqual(["github", "google"]);
+    await expect(getEnabledSignInOptions()).resolves.toEqual({
+      providers: ["github", "google"],
+      emailPasswordEnabled: true,
+    });
     expect(mocks.dispatchWebServiceRequest).toHaveBeenCalledWith({
       method: "GET",
       path: "/internal/auth/sign-in-providers",
@@ -57,23 +60,21 @@ describe("getEnabledSignInProviders", () => {
     const frameworkSignal = new Error("NEXT_REQUEST_CONTEXT_SIGNAL");
     mocks.getRequestCorrelation.mockRejectedValue(frameworkSignal);
 
-    await expect(getEnabledSignInProviders()).rejects.toBe(frameworkSignal);
+    await expect(getEnabledSignInOptions()).rejects.toBe(frameworkSignal);
     expect(mocks.dispatchWebServiceRequest).not.toHaveBeenCalled();
     expect(mocks.logError).not.toHaveBeenCalled();
   });
 
   it.each([
-    Response.json({ providers: [] }),
-    Response.json({ providers: ["github", "github"] }),
-    Response.json({ providers: ["saml"] }),
-    Response.json({ providers: "github" }),
+    Response.json({ providers: [], emailPasswordEnabled: false }),
+    Response.json({ providers: ["github", "github"], emailPasswordEnabled: false }),
+    Response.json({ providers: ["saml"], emailPasswordEnabled: false }),
+    Response.json({ providers: "github", emailPasswordEnabled: false }),
     Response.json({ error: "sensitive upstream detail" }, { status: 503 }),
   ])("fails closed on an invalid or unavailable provider response", async (response) => {
     mocks.dispatchWebServiceRequest.mockResolvedValue(response);
 
-    await expect(getEnabledSignInProviders()).rejects.toBeInstanceOf(
-      AuthenticationUnavailableError
-    );
+    await expect(getEnabledSignInOptions()).rejects.toBeInstanceOf(AuthenticationUnavailableError);
     expect(mocks.logError).toHaveBeenCalledOnce();
   });
 });

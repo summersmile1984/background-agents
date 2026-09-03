@@ -49,6 +49,37 @@ export async function signIn(provider: SignInProvider): Promise<void> {
   globalThis.location.assign(destination.href);
 }
 
+export async function signInWithEmail(email: string, password: string): Promise<void> {
+  const response = await browserApiFetch("/api/auth/sign-in/email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!response.ok) {
+    throw new Error(`Email sign-in failed with status ${response.status}`);
+  }
+  await mutate(BROWSER_AUTH_SESSION_PATH);
+  globalThis.location.assign("/");
+}
+
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  name?: string
+): Promise<void> {
+  const response = await browserApiFetch("/api/auth/sign-up/email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name: name ?? email }),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Email sign-up failed (${response.status})${detail ? `: ${detail}` : ""}`);
+  }
+  await mutate(BROWSER_AUTH_SESSION_PATH);
+  globalThis.location.assign("/");
+}
+
 export async function signOut(): Promise<void> {
   const response = await browserApiFetch("/api/auth/sign-out", {
     method: "POST",

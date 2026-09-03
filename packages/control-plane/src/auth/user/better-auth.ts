@@ -22,6 +22,13 @@ export interface UserAuthConfig {
   readonly secret: string;
   readonly github?: SocialProviderAuthConfig;
   readonly google?: SocialProviderAuthConfig;
+  /**
+   * Enable local email/password sign-in. This is the deployment escape hatch
+   * for hosts that cannot reach github.com/accounts.google.com for OAuth; the
+   * password hash is stored on the canonical identity row (providerId
+   * "credential") in `user_identities.password`.
+   */
+  readonly emailPassword?: boolean;
 }
 
 /**
@@ -89,6 +96,16 @@ export function createUserAuth(config: UserAuthConfig) {
           }
         : {}),
     },
+    emailAndPassword: config.emailPassword
+      ? {
+          enabled: true,
+          // No SMTP is configured in this deployment; a verified email is not
+          // required to sign in. The caller gates sign-up admission upstream.
+          requireEmailVerification: false,
+          autoSignIn: true,
+          minPasswordLength: 6,
+        }
+      : undefined,
     user: {
       modelName: "users",
       fields: {

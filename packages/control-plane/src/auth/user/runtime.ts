@@ -77,6 +77,7 @@ interface NormalizedUserAuthConfig {
   readonly appName: string;
   readonly admission: AdmissionPolicyConfig;
   readonly providers: ProviderCredentials;
+  readonly emailPasswordEnabled: boolean;
 }
 
 function normalizeProviderCredentials(
@@ -107,9 +108,13 @@ function normalizeUserAuthConfig(env: Env): NormalizedUserAuthConfig {
     github: normalizeProviderCredentials("github", env.GITHUB_CLIENT_ID, env.GITHUB_CLIENT_SECRET),
     google: normalizeProviderCredentials("google", env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
   });
-  if (!SIGN_IN_PROVIDERS.some((provider) => providers[provider] !== null)) {
+  const emailPasswordEnabled = parseAdmissionBoolean(env.EMAIL_PASSWORD_ENABLED);
+  if (
+    !emailPasswordEnabled &&
+    !SIGN_IN_PROVIDERS.some((provider) => providers[provider] !== null)
+  ) {
     throw new UserAuthConfigurationError(
-      "At least one sign-in provider must be configured: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
+      "At least one sign-in provider must be configured: set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or EMAIL_PASSWORD_ENABLED=true"
     );
   }
 
@@ -117,6 +122,7 @@ function normalizeUserAuthConfig(env: Env): NormalizedUserAuthConfig {
     publicWebOrigin: parsePublicWebOrigin(env.WEB_APP_URL),
     secret,
     appName: env.APP_NAME?.trim() || "Open-Inspect",
+    emailPasswordEnabled,
     admission: {
       allowedGitHubUsers: parseAdmissionAllowlist(env.ALLOWED_USERS),
       allowedEmails: parseAdmissionAllowlist(env.ALLOWED_EMAILS),
@@ -217,6 +223,7 @@ function createUserAuthRuntime(
     database,
     publicWebOrigin: config.publicWebOrigin,
     secret: config.secret,
+    emailPassword: config.emailPasswordEnabled,
     ...(github ? { github } : {}),
     ...(google ? { google } : {}),
   });
@@ -225,6 +232,7 @@ function createUserAuthRuntime(
     enabledProviders: Object.freeze(
       SIGN_IN_PROVIDERS.filter((provider) => config.providers[provider] !== null)
     ),
+    emailPasswordEnabled: config.emailPasswordEnabled,
   };
 }
 
@@ -237,6 +245,7 @@ type BetterAuthInstance = ReturnType<typeof createUserAuth>;
 export interface UserAuthRuntime {
   readonly auth: BetterAuthInstance;
   readonly enabledProviders: readonly SignInProvider[];
+  readonly emailPasswordEnabled: boolean;
 }
 
 interface CachedUserAuth {

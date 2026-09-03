@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { EmailPasswordForm } from "@/components/email-password-form";
 import { SignInProviderButtons } from "@/components/sign-in-provider-buttons";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { AuthenticationUnavailableError } from "@/lib/authentication-unavailable-error";
 import { getServerAuthSession, type ServerAuthSession } from "@/lib/server-auth-session";
-import { getEnabledSignInProviders } from "@/lib/sign-in-providers";
+import { getEnabledSignInOptions } from "@/lib/sign-in-providers";
 import { APP_NAME } from "@/lib/site-config";
 
 export const dynamic = "force-dynamic";
@@ -32,9 +33,9 @@ export default async function LoginPage() {
   }
   if (session) redirect("/");
 
-  let providers;
+  let options;
   try {
-    providers = await getEnabledSignInProviders();
+    options = await getEnabledSignInOptions();
   } catch (error) {
     if (error instanceof AuthenticationUnavailableError) return <LoginUnavailable />;
     throw error;
@@ -46,7 +47,8 @@ export default async function LoginPage() {
         <h1 className="text-4xl font-bold text-foreground">Sign in to {APP_NAME}</h1>
         <p className="text-muted-foreground">Choose an authentication provider to continue.</p>
       </div>
-      <SignInProviderButtons providers={providers} />
+      {options.emailPasswordEnabled && <EmailPasswordForm />}
+      <SignInProviderButtons providers={options.providers} />
     </main>
   );
 }

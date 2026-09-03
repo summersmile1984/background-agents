@@ -23,6 +23,8 @@ export function getSignInProviderIssuer(provider: string): string | null {
 
 export interface EnabledSignInProviders {
   readonly providers: readonly SignInProvider[];
+  /** Local email/password sign-in is enabled. */
+  readonly emailPasswordEnabled: boolean;
 }
 
 const enabledSignInProvidersSchema = z
@@ -40,6 +42,7 @@ const enabledSignInProvidersSchema = z
           ),
         "Sign-in providers must be unique and in canonical order"
       ),
+    emailPasswordEnabled: z.boolean(),
   })
   .strict();
 

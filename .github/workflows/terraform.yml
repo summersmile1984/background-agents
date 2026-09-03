@@ -257,6 +257,7 @@ jobs:
           TF_VAR_allowed_users: ${{ secrets.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
+          TF_VAR_email_password_enabled: "${{ secrets.EMAIL_PASSWORD_ENABLED || 'false' }}"
           TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
           TF_VAR_deployment_admin_identities: ${{ secrets.DEPLOYMENT_ADMIN_IDENTITIES }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}
@@ -446,6 +447,7 @@ jobs:
           TF_VAR_allowed_users: ${{ secrets.ALLOWED_USERS }}
           TF_VAR_allowed_email_domains: ${{ secrets.ALLOWED_EMAIL_DOMAINS }}
           TF_VAR_allowed_emails: ${{ secrets.ALLOWED_EMAILS }}
+          TF_VAR_email_password_enabled: "${{ secrets.EMAIL_PASSWORD_ENABLED || 'false' }}"
           TF_VAR_allowed_github_orgs: ${{ secrets.ALLOWED_GITHUB_ORGS }}
           TF_VAR_deployment_admin_identities: ${{ secrets.DEPLOYMENT_ADMIN_IDENTITIES }}
           TF_VAR_deployment_name: ${{ secrets.DEPLOYMENT_NAME }}

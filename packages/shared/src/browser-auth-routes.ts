@@ -12,6 +12,9 @@ export const BROWSER_AUTH_PROXY_ROUTES = [
   ["GET", "/api/auth/get-session"],
   ["POST", "/api/auth/sign-out"],
   ["GET", "/api/auth/error"],
+  // Email/password (local credential) sign-in and sign-up.
+  ["POST", "/api/auth/sign-in/email"],
+  ["POST", "/api/auth/sign-up/email"],
 ] as const;
 
 export function isBrowserAuthProxyRoute(method: string, path: string): boolean {

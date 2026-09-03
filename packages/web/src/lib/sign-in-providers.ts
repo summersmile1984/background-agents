@@ -13,7 +13,12 @@ import { getRequestCorrelation } from "./request-context";
 const log = createLogger("sign-in-providers");
 const SIGN_IN_PROVIDERS_PATH = "/internal/auth/sign-in-providers";
 
-export async function getEnabledSignInProviders(): Promise<readonly SignInProvider[]> {
+export interface EnabledSignInOptions {
+  readonly providers: readonly SignInProvider[];
+  readonly emailPasswordEnabled: boolean;
+}
+
+export async function getEnabledSignInOptions(): Promise<EnabledSignInOptions> {
   const correlation = await getRequestCorrelation();
   const correlationFields = getCorrelationLogFields(correlation);
 
@@ -33,7 +38,11 @@ export async function getEnabledSignInProviders(): Promise<readonly SignInProvid
     }
 
     const payload: unknown = await response.json();
-    return parseEnabledSignInProviders(payload).providers;
+    const parsed = parseEnabledSignInProviders(payload);
+    return {
+      providers: parsed.providers,
+      emailPasswordEnabled: parsed.emailPasswordEnabled,
+    };
   } catch (cause) {
     log.error("auth.providers.fetch_failed", {
       ...correlationFields,

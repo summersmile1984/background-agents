@@ -28,23 +28,29 @@ describe("getSignInProviderIssuer", () => {
 
 describe("parseEnabledSignInProviders", () => {
   it("accepts the compiled providers in canonical order", () => {
-    expect(parseEnabledSignInProviders({ providers: ["github", "google"] })).toEqual({
+    expect(
+      parseEnabledSignInProviders({ providers: ["github", "google"], emailPasswordEnabled: false })
+    ).toEqual({
       providers: ["github", "google"],
+      emailPasswordEnabled: false,
     });
   });
 
   it.each(["github", "google"] as const)("accepts the single enabled provider %s", (provider) => {
-    expect(parseEnabledSignInProviders({ providers: [provider] })).toEqual({
+    expect(
+      parseEnabledSignInProviders({ providers: [provider], emailPasswordEnabled: true })
+    ).toEqual({
       providers: [provider],
+      emailPasswordEnabled: true,
     });
   });
 
   it.each([
-    [{ providers: [] }, "empty"],
-    [{ providers: ["github", "github"] }, "duplicate"],
-    [{ providers: ["google", "github"] }, "out of order"],
-    [{ providers: ["github", "saml"] }, "unknown"],
-    [{ providers: ["github"], label: "GitHub" }, "extra metadata"],
+    [{ providers: [], emailPasswordEnabled: false }, "empty"],
+    [{ providers: ["github", "github"], emailPasswordEnabled: false }, "duplicate"],
+    [{ providers: ["google", "github"], emailPasswordEnabled: false }, "out of order"],
+    [{ providers: ["github", "saml"], emailPasswordEnabled: false }, "unknown"],
+    [{ providers: ["github"], emailPasswordEnabled: false, label: "GitHub" }, "extra metadata"],
   ])("rejects a non-canonical provider response: %s (%s)", (value) => {
     expect(() => parseEnabledSignInProviders(value)).toThrow();
   });
