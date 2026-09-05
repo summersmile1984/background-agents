@@ -1,0 +1,25 @@
+[Unit]
+Description=Open-Inspect E2B SaaS-compatible shim in front of CubeSandbox
+Documentation=https://e2b.dev/docs
+After=network-online.target cube-sandbox-control.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Pre-baked shim credentials live in a 0600 file the operator populates.
+EnvironmentFile=/etc/default/oi-e2b-shim
+ExecStart=/usr/bin/env node /opt/open-inspect/packages/e2b-shim/dist/index.js
+Restart=on-failure
+RestartSec=2
+User=turing-agents
+Group=turing-agents
+# node:sqlite uses a file when SHIM_DB_PATH is not :memory:.
+StateDirectory=open-inspect
+WorkingDirectory=/var/lib/open-inspect
+ProtectSystem=strict
+ReadWritePaths=/var/lib/open-inspect
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
