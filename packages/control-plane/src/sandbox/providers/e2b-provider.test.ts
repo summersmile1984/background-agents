@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeHmacHex } from "@open-inspect/shared/auth";
-import {
-  deriveVncPassword,
-  E2B_CREATE_TIME_ENV_CHUNK_PREFIX,
-  E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES,
-} from "../sandbox-env";
+import { deriveVncPassword } from "../sandbox-env";
 import { E2BSandboxProvider, type E2BProviderConfig } from "./e2b-provider";
 import { SandboxProviderError } from "../provider";
 import {
@@ -290,7 +286,7 @@ describe("E2BSandboxProvider", () => {
     expect(client.killSandbox).toHaveBeenCalledWith("x", signal);
   });
 
-  it("retries kill on Cube 409 conflict and 408 before succeeding", async () => {
+  it("retries kill on backend 409 conflict and 408 before succeeding", async () => {
     vi.useFakeTimers();
     try {
       const client = mockClient({
@@ -358,60 +354,6 @@ describe("E2BSandboxProvider", () => {
     });
     expect(result.success).toBe(false);
     expect(result.shouldSpawnFresh).toBe(true);
-  });
-
-  it("resume skips the lifecycle-log probe so a pause-time TaskExit does not force a fresh spawn", async () => {
-    const client = mockClient({
-      getSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "running" }),
-      // A paused sandbox's lifecycle log necessarily contains the checkpoint
-      // TaskExit; resume must not re-read those markers.
-      getSandboxLogs: vi.fn(async () => '{"message":"TaskExit event"}'),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    const result = await provider.resumeSandbox({
-      providerObjectId: "e2b-id",
-      sessionId: "sess",
-      sandboxId: "sandbox-logical",
-    });
-
-    expect(result.success).toBe(true);
-    expect(client.connectSandbox).toHaveBeenCalledWith("e2b-id", 1800);
-    expect(client.getSandbox).toHaveBeenCalledTimes(2);
-    expect(client.getSandboxLogs).not.toHaveBeenCalled();
-  });
-
-  it("resume still replaces a Cube sandbox that leaves the running state after connect", async () => {
-    const client = mockClient({
-      getSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" })
-        .mockResolvedValueOnce({ sandboxID: "e2b-id", templateID: "tmpl", state: "paused" }),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    const result = await provider.resumeSandbox({
-      providerObjectId: "e2b-id",
-      sessionId: "sess",
-      sandboxId: "sandbox-logical",
-    });
-
-    expect(result).toMatchObject({
-      success: false,
-      shouldSpawnFresh: true,
-      error: expect.stringContaining("left running state"),
-    });
   });
 
   it("honors config.timeoutSeconds on create and resume (child sandboxes)", async () => {
@@ -504,155 +446,19 @@ describe("E2BSandboxProvider", () => {
     expect(opts).toMatchObject({ envdAccessToken: "envd-token" });
   });
 
-  it("proceeds with the standard env upload when create returns no envd token (CubeSandbox)", async () => {
+  it("fails closed when create returns no envd access token", async () => {
     const client = mockClient({
       createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
     });
     const provider = new E2BSandboxProvider(client, providerConfig);
-    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
-      status: "running",
-      providerObjectId: "e2b-id",
-    });
-    // No token returned (self-hosted Cube) → still lands the session env via the
-    // standard envd file upload, with the header omitted (envd accepts anonymous).
-    expect(client.writeSessionEnv).toHaveBeenCalledWith(
-      "e2b-id",
-      expect.any(Object),
-      expect.objectContaining({ domain: undefined, envdAccessToken: undefined })
-    );
-    expect(client.killSandbox).not.toHaveBeenCalled();
-  });
-
-  it("uses create-time env without an envd token for an explicitly compatible backend", async () => {
-    const client = mockClient({
-      createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
-      getSandbox: vi.fn(async () => ({
-        sandboxID: "e2b-id",
-        templateID: "tmpl",
-        state: "running",
-      })),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
-      status: "running",
-      providerObjectId: "e2b-id",
-    });
-    expect(client.createSandbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envVars: expect.objectContaining({
-          SANDBOX_ID: "sandbox-logical",
-          OI_USE_CREATE_TIME_ENV: "1",
-          VCS_CLONE_BASE_URL: "https://cp.test/git/sess-1",
-        }),
-        envVarsField: "envs",
-        secure: true,
-      })
-    );
-    expect(client.writeSessionEnv).not.toHaveBeenCalled();
-    expect(client.killSandbox).not.toHaveBeenCalled();
-    expect(client.getSandbox).toHaveBeenCalledWith("e2b-id");
-    expect(client.getSandboxLogs).toHaveBeenCalledWith("e2b-id");
-  });
-
-  it("kills and transparently replaces a Cube sandbox whose runtime exits after create", async () => {
-    const client = mockClient({
-      createSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "dead-id", templateID: "tmpl" })
-        .mockResolvedValueOnce({ sandboxID: "healthy-id", templateID: "tmpl" }),
-      getSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "dead-id", templateID: "tmpl", state: "running" })
-        .mockResolvedValueOnce({ sandboxID: "healthy-id", templateID: "tmpl", state: "running" }),
-      getSandboxLogs: vi
-        .fn()
-        .mockResolvedValueOnce('{"message":"wait container finish, exit code:0"}')
-        .mockResolvedValueOnce('{"message":"start container finish"}'),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
-    await expect(provider.createSandbox(baseCreateConfig)).resolves.toMatchObject({
-      status: "running",
-      providerObjectId: "healthy-id",
-    });
-    expect(client.createSandbox).toHaveBeenCalledTimes(2);
-    expect(client.killSandbox).toHaveBeenCalledWith("dead-id");
-  });
-
-  it("fails quickly as transient after bounded Cube runtime replacement attempts", async () => {
-    const client = mockClient({
-      createSandbox: vi
-        .fn()
-        .mockResolvedValueOnce({ sandboxID: "dead-1", templateID: "tmpl" })
-        .mockResolvedValueOnce({ sandboxID: "dead-2", templateID: "tmpl" }),
-      getSandbox: vi.fn(async () => ({
-        sandboxID: "dead",
-        templateID: "tmpl",
-        state: "running",
-      })),
-      getSandboxLogs: vi.fn(async () => '{"message":"TaskExit event"}'),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-
     await expect(provider.createSandbox(baseCreateConfig)).rejects.toMatchObject({
-      errorType: "transient",
-      message: expect.stringContaining("Cube runtime exited during startup"),
+      name: "SandboxProviderError",
+      errorType: "permanent",
+      message: expect.stringContaining("envd access token"),
     });
-    expect(client.createSandbox).toHaveBeenCalledTimes(2);
-    expect(client.killSandbox).toHaveBeenNthCalledWith(1, "dead-1");
-    expect(client.killSandbox).toHaveBeenNthCalledWith(2, "dead-2");
-  });
-
-  it("chunks oversized create-time secrets so CubeSandbox accepts Codex auth", async () => {
-    const client = mockClient({
-      createSandbox: vi.fn(async () => ({ sandboxID: "e2b-id", templateID: "tmpl" })),
-      getSandbox: vi.fn(async () => ({
-        sandboxID: "e2b-id",
-        templateID: "tmpl",
-        state: "running",
-      })),
-    });
-    const provider = new E2BSandboxProvider(client, {
-      ...providerConfig,
-      useCreateTimeEnv: true,
-      createTimeEnvVerifyDelayMs: 0,
-    });
-    const authJson = `${"a".repeat(5000)}🙂`;
-
-    await provider.createSandbox({
-      ...baseCreateConfig,
-      userEnvVars: { CODEX_AUTH_JSON: authJson },
-    });
-
-    const request = vi.mocked(client.createSandbox).mock.calls[0][0];
-    const env = request.envVars!;
-    const chunks = Object.entries(env)
-      .filter(([key]) => key.startsWith(E2B_CREATE_TIME_ENV_CHUNK_PREFIX))
-      .sort(([left], [right]) => left.localeCompare(right));
-
-    expect(env).not.toHaveProperty("CODEX_AUTH_JSON");
-    expect(chunks.length).toBeGreaterThan(1);
-    expect(
-      chunks.every(
-        ([, value]) =>
-          new TextEncoder().encode(value).byteLength <= E2B_CREATE_TIME_ENV_MAX_VALUE_BYTES
-      )
-    ).toBe(true);
-    expect(chunks.map(([, value]) => value).join("")).toBe(authJson);
+    // Fail-closed: never write the session env and tear the sandbox down.
     expect(client.writeSessionEnv).not.toHaveBeenCalled();
+    expect(client.killSandbox).toHaveBeenCalledWith("e2b-id");
   });
 
   it("429 maps to a TRANSIENT SandboxProviderError (not counted toward the circuit breaker)", async () => {

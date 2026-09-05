@@ -99,19 +99,6 @@ describe("E2BRestClient", () => {
     expect(body.autoResume).toEqual({ enabled: true });
   });
 
-  it("uses CubeSandbox's envs field when requested", async () => {
-    const client = new E2BRestClient(defaultConfig);
-    fetchSpy.mockResolvedValue(jsonResponse({ sandboxID: "sb-new", templateID: "tmpl-123" }));
-    await client.createSandbox({
-      templateID: "tmpl-123",
-      envVars: { FOO: "bar" },
-      envVarsField: "envs",
-    });
-    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(body.envs).toEqual({ FOO: "bar" });
-    expect(body.envVars).toBeUndefined();
-  });
-
   it("sends secure:true when requested", async () => {
     const client = new E2BRestClient(defaultConfig);
     fetchSpy.mockResolvedValue(jsonResponse({ sandboxID: "sb-new", templateID: "tmpl-123" }));
@@ -128,15 +115,6 @@ describe("E2BRestClient", () => {
     expect((init.headers as Record<string, string>)["X-Access-Token"]).toBe("tok-123");
   });
 
-  it("omits the X-Access-Token header when the backend returns no envd token (CubeSandbox)", async () => {
-    const client = new E2BRestClient(defaultConfig);
-    fetchSpy.mockResolvedValue(new Response("[]", { status: 200 }));
-    await client.writeSessionEnv("sb-1", { FOO: "bar" }, { envdAccessToken: null });
-    const [url, init] = fetchSpy.mock.calls[0];
-    expect(String(url)).toContain("49983-sb-1.e2b.app");
-    expect((init.headers as Record<string, string>)["X-Access-Token"]).toBeUndefined();
-  });
-
   it("connect + timeout endpoints", async () => {
     const client = new E2BRestClient(defaultConfig);
     // Connect answers with the create-style Sandbox shape (no `state`); the
@@ -148,16 +126,6 @@ describe("E2BRestClient", () => {
     fetchSpy.mockResolvedValue(new Response(null, { status: 204 }));
     await client.setSandboxTimeout("sb-1", 7200);
     expect(JSON.parse(fetchSpy.mock.calls[1][1].body)).toEqual({ timeout: 7200 });
-  });
-
-  it("reads v2 lifecycle logs as an opaque payload", async () => {
-    const client = new E2BRestClient(defaultConfig);
-    fetchSpy.mockResolvedValue(
-      jsonResponse({ logEntries: [{ timestamp: "now", message: "start container finish" }] })
-    );
-
-    await expect(client.getSandboxLogs("sb-1")).resolves.toContain("start container finish");
-    expect(fetchSpy.mock.calls[0][0]).toBe("https://api.e2b.app/v2/sandboxes/sb-1/logs");
   });
 
   it("commands ignore whatever a success body contains", async () => {

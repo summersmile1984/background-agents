@@ -698,7 +698,7 @@ variable "e2b_auto_pause" {
 }
 
 variable "e2b_use_create_time_env" {
-  description = "Inject session env in POST /sandboxes for compatible self-hosted backends such as CubeSandbox"
+  description = "DEPRECATED: session env is now delivered via the standard E2B envd file write; this variable is ignored."
   type        = bool
   default     = false
 }

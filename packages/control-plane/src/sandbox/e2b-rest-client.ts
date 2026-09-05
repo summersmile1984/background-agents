@@ -23,7 +23,6 @@ const TIMEOUT_KILL_MS = 30_000;
 const TIMEOUT_GET_MS = 15_000;
 const TIMEOUT_SETTTL_MS = 15_000;
 const TIMEOUT_WRITE_FILE_MS = 30_000;
-const TIMEOUT_LOGS_MS = 15_000;
 
 const e2bSandboxDetailSchema = z.object({
   sandboxID: z.string(),
@@ -47,9 +46,8 @@ export type E2BSandboxCreated = z.infer<typeof e2bSandboxCreatedSchema>;
 
 /**
  * One entry in the list returned by `GET /sandboxes`. Deliberately lenient:
- * only `sandboxID` and `state` are required for the leak sweep; Cube versions
- * have shuffled the remaining fields, so they are all optional and unknown
- * keys are ignored.
+ * only `sandboxID` and `state` are required for the leak sweep; everything
+ * else is optional and unknown keys are ignored.
  */
 const e2bListedSandboxSchema = z
   .object({
@@ -88,8 +86,6 @@ const SESSION_ENV_PATH = "/tmp/oi-session.env";
 export interface E2BCreateSandboxParams {
   templateID: string;
   envVars?: Record<string, string>;
-  /** CubeSandbox's E2B-compatible API names the create-time env field `envs`. */
-  envVarsField?: "envVars" | "envs";
   metadata?: Record<string, string>;
   timeoutSeconds?: number;
   /** Pause (not kill) the sandbox when its timeout expires. */
@@ -149,7 +145,7 @@ export class E2BRestClient {
         {
           body: {
             templateID: params.templateID,
-            ...(params.envVars ? { [params.envVarsField ?? "envVars"]: params.envVars } : {}),
+            envVars: params.envVars,
             metadata: params.metadata,
             timeout: params.timeoutSeconds,
             secure: params.secure ?? false,
@@ -178,7 +174,7 @@ export class E2BRestClient {
   async writeSessionEnv(
     sandboxId: string,
     env: Record<string, string>,
-    opts: { domain?: string | null; envdAccessToken?: string | null }
+    opts: { domain?: string | null; envdAccessToken: string }
   ): Promise<void> {
     const domain = opts.domain || DEFAULT_SANDBOX_DOMAIN;
     // envd requires the in-sandbox user to write the file as. "user" is E2B's
@@ -199,12 +195,8 @@ export class E2BRestClient {
     const startMs = Date.now();
     try {
       // Do NOT set Content-Type — fetch derives the multipart boundary itself.
-      // Managed E2B requires the access token from create (secure:true). Some
-      // self-hosted E2B-compatible backends (CubeSandbox) never return one, but
-      // their envd accepts anonymous writes; omit the header so the standard
-      // envd file upload still lands /tmp/oi-session.env.
-      const headers: Record<string, string> = {};
-      if (opts.envdAccessToken) headers["X-Access-Token"] = opts.envdAccessToken;
+      // envd requires the access token from create (secure:true); never write anonymously.
+      const headers: Record<string, string> = { "X-Access-Token": opts.envdAccessToken };
 
       const response = await fetch(url, {
         method: "POST",
@@ -243,28 +235,12 @@ export class E2BRestClient {
   }
 
   /**
-   * List sandboxes for the periodic leak sweep.
-   *
-   * Cube's E2B-compatible `GET /sandboxes` returns a bare array of
-   * `RunningSandbox` entries. The schema is intentionally lenient: the sweep
-   * only needs `sandboxID` and `state`, and Cube versions have shuffled the
-   * auxiliary fields, so everything else is optional.
+   * List sandboxes for the periodic leak sweep. The schema is deliberately
+   * lenient: the sweep only needs `sandboxID` and `state`, so auxiliary fields
+   * are optional and unknown keys are ignored.
    */
   async listSandboxes(): Promise<E2BListedSandbox[]> {
     return this.requestJson("GET", "/sandboxes", TIMEOUT_GET_MS, z.array(e2bListedSandboxSchema));
-  }
-
-  /**
-   * Read the provider's structured lifecycle logs as an opaque payload.
-   *
-   * CubeSandbox exposes this E2B-compatible endpoint and records the shim's
-   * start/exit events there. The provider deliberately treats the body as
-   * opaque text: Cube versions have used more than one JSON envelope, while
-   * the lifecycle markers themselves are stable. Callers must never log the
-   * returned value because sandbox output may contain user data or secrets.
-   */
-  async getSandboxLogs(id: string): Promise<string> {
-    return this.requestText("GET", `/v2/sandboxes/${id}/logs`, TIMEOUT_LOGS_MS);
   }
 
   async pauseSandbox(id: string): Promise<void> {
@@ -342,15 +318,6 @@ export class E2BRestClient {
     options?: { body?: unknown; signal?: AbortSignal }
   ): Promise<void> {
     return this.send<void>(method, path, timeoutMs, options, () => {});
-  }
-
-  private requestText(
-    method: "GET" | "POST" | "DELETE",
-    path: string,
-    timeoutMs: number,
-    options?: { body?: unknown; signal?: AbortSignal }
-  ): Promise<string> {
-    return this.send(method, path, timeoutMs, options, (response) => response.text());
   }
 
   /**
