@@ -501,6 +501,122 @@ async function handleMetrics(ctx: ApiContext, res: ServerResponse, id: string): 
 }
 
 // ---------------------------------------------------------------------------
+// Template v3 build API: E2B two-step (POST /v3/templates, then
+// POST /v2/templates/{id}/builds/{buildID}) collapses onto Cube's from-image
+// POST /templates in one round-trip. The build worker would otherwise need
+// its own Docker build context upload + step runner; Cube treats the OCI image
+// as the canonical artifact.
+// ---------------------------------------------------------------------------
+
+function e2bStatusFromCubeStatus(status: string | undefined): string {
+  switch (status) {
+    case "READY":
+      return "ready";
+    case "BUILDING":
+      return "building";
+    case "WAITING":
+      return "waiting";
+    case "ERROR":
+    case "FAILED":
+      return "error";
+    default:
+      return "waiting";
+  }
+}
+
+interface TemplateV3Request {
+  name?: string;
+  tags?: string[];
+  alias?: string;
+  cpuCount?: number;
+  memoryMB?: number;
+}
+
+async function handleTemplateV3Create(
+  ctx: ApiContext,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  const raw = await readBody(req);
+  let body: TemplateV3Request;
+  try {
+    body = raw.length ? (JSON.parse(raw.toString("utf8")) as TemplateV3Request) : {};
+  } catch {
+    return sendShimError(res, 400, "Invalid JSON body");
+  }
+  if (!body.name) return sendShimError(res, 400, "name is required");
+
+  // Cube expects `image` (an OCI image reference). E2B's v3 `name` slot is the
+  // catalog name; when the SDK uses fromImage-style builds the image already
+  // exists, so pass it through. Shim-level Dockerfile-driven builds would need
+  // a local docker build + localhost:5000 push (out of scope for v1).
+  const upstream = await ctx.cube.request("POST", "/templates", {
+    image: body.name,
+    aliases: body.alias ? [body.alias] : [],
+    cpu: body.cpuCount,
+    memory: body.memoryMB,
+    writableLayerSize: "2G",
+  });
+  if (upstream.status >= 400) return relay(res, upstream);
+  const created = JSON.parse(upstream.body) as Record<string, unknown>;
+  const templateID = String(created.templateID ?? "");
+  const buildID = String(created.jobID ?? templateID);
+
+  sendJson(res, 202, {
+    templateID,
+    buildID,
+    public: false,
+    names: body.name ? [body.name] : [],
+    tags: body.tags ?? [],
+    aliases: body.alias ? [body.alias] : [],
+    buildStatusEnum: e2bStatusFromCubeStatus(String(created.status)),
+    reason: created.status === "READY" ? "" : "build queued",
+    logs: [],
+  });
+}
+
+async function handleTemplateBuildTrigger(res: ServerResponse, pathname: string): Promise<void> {
+  // Step/ready/start cmd overrides would land here in a full v3 implementation.
+  // The cube-side build was already enqueued in handleTemplateV3Create, so
+  // acknowledge and let the status poll converge.
+  void pathname;
+  res.writeHead(202, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ message: "build already triggered by POST /v3/templates" }));
+}
+
+interface CubeTemplateDetail {
+  templateID: string;
+  status?: string;
+  jobID?: string;
+  aliases?: string[];
+  createdAt?: string;
+}
+
+async function handleTemplateBuildStatus(
+  ctx: ApiContext,
+  res: ServerResponse,
+  pathname: string
+): Promise<void> {
+  // Path shape: /templates/{templateID}/builds/{buildID}/status
+  const match = /^\/templates\/([^/]+)\/builds\/([^/]+)\/status$/.exec(pathname);
+  if (!match) return sendShimError(res, 400, "Malformed template build status path");
+  const [, templateID, buildID] = match;
+  const upstream = await ctx.cube.request("GET", `/templates/${templateID}`);
+  if (upstream.status >= 400) return relay(res, upstream);
+  const detail = JSON.parse(upstream.body) as CubeTemplateDetail;
+  sendJson(res, 200, {
+    templateID: detail.templateID,
+    buildID: detail.jobID ?? buildID,
+    status: e2bStatusFromCubeStatus(detail.status),
+    reason: detail.status === "READY" ? "" : "queued in cube-side builder",
+    logs: [],
+    logEntries: [],
+    aliases: detail.aliases ?? [],
+    createdAt: detail.createdAt ?? "",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -551,6 +667,12 @@ export async function handleApiRequest(
       const body = raw && raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
       return relay(res, await ctx.cube.request(method, pathname + url.search, body));
     }
+    if (method === "POST" && pathname === "/v3/templates")
+      return await handleTemplateV3Create(ctx, req, res);
+    if (method === "POST" && /^\/v2\/templates\/[^/]+\/builds\/[^/]+$/.test(pathname))
+      return await handleTemplateBuildTrigger(res, pathname);
+    if (method === "GET" && /^\/templates\/[^/]+\/builds\/[^/]+\/status$/.test(pathname))
+      return await handleTemplateBuildStatus(ctx, res, pathname);
 
     sendShimError(res, 404, `Not found: ${method} ${pathname}`);
   } catch (error) {

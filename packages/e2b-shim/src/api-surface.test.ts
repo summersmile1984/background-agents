@@ -305,6 +305,93 @@ describe("list filtering and pagination", () => {
   });
 });
 
+describe("template v3 build API", () => {
+  it("maps POST /v3/templates onto Cube from-image POST /templates", async () => {
+    const upstream = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === "/templates") {
+        const body = JSON.parse(req.body);
+        return {
+          status: 202,
+          body: {
+            templateID: "tpl-built",
+            jobID: "job-1",
+            status: "BUILDING",
+            aliases: body.aliases,
+          },
+        };
+      }
+      return undefined;
+    });
+    const shim = await startShim(upstream.url);
+    try {
+      const res = await fetch(`${shim.url}/v3/templates`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "localhost:5000/oi-e2b:latest", alias: "oi-e2b" }),
+      });
+      expect(res.status).toBe(202);
+      const body = await res.json();
+      expect(body.templateID).toBe("tpl-built");
+      expect(body.buildID).toBe("job-1");
+      expect(body.buildStatusEnum).toBe("building");
+      expect(body.names).toEqual(["localhost:5000/oi-e2b:latest"]);
+      expect(body.aliases).toEqual(["oi-e2b"]);
+
+      const forwarded = JSON.parse(upstream.requests[0].body);
+      expect(forwarded.image).toBe("localhost:5000/oi-e2b:latest");
+      expect(forwarded.aliases).toEqual(["oi-e2b"]);
+    } finally {
+      await shim.close();
+      await upstream.close();
+    }
+  });
+
+  it("build status translates Cube READY to E2B ready", async () => {
+    const upstream = await startMockUpstream((req) => {
+      if (req.method === "GET" && req.path === "/templates/tpl-built") {
+        return {
+          status: 200,
+          body: {
+            templateID: "tpl-built",
+            jobID: "job-1",
+            status: "READY",
+            aliases: ["oi-e2b"],
+            createdAt: "2026-09-05T00:00:00Z",
+          },
+        };
+      }
+      return undefined;
+    });
+    const shim = await startShim(upstream.url);
+    try {
+      const res = await fetch(`${shim.url}/templates/tpl-built/builds/job-1/status`, {
+        headers: { "X-API-Key": TEST_API_KEY },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe("ready");
+      expect(body.templateID).toBe("tpl-built");
+      expect(body.buildID).toBe("job-1");
+    } finally {
+      await shim.close();
+      await upstream.close();
+    }
+  });
+
+  it("trigger endpoint acknowledges without re-running", async () => {
+    const shim = await startShim("http://127.0.0.1:1");
+    try {
+      const res = await fetch(`${shim.url}/v2/templates/tpl-built/builds/job-1`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY },
+      });
+      expect(res.status).toBe(202);
+    } finally {
+      await shim.close();
+    }
+  });
+});
+
 describe("template alias resolution", () => {
   it("resolves an alias to its templateID before forwarding create", async () => {
     clearAliasCache();
