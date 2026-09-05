@@ -9,6 +9,9 @@
 export interface ShimConfig {
   /** Port the shim listens on (API surface and edge surface share it, split by Host). */
   listenPort: number;
+  /** Optional TLS material to enable an HTTPS listener (overrides plain HTTP when set). */
+  tlsKey?: string;
+  tlsCert?: string;
   /** API keys accepted on the E2B-facing surface. */
   apiKeys: string[];
   /** CubeAPI base URL, e.g. http://127.0.0.1:3000. */
@@ -52,6 +55,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ShimConfig {
   return {
     listenPort: Number.parseInt(env.SHIM_LISTEN_PORT ?? "3100", 10),
     apiKeys,
+    tlsKey: env.SHIM_TLS_KEY ?? "",
+    tlsCert: env.SHIM_TLS_CERT ?? "",
     cubeApiUrl: (env.CUBE_API_URL ?? "http://127.0.0.1:3000").replace(/\/+$/, ""),
     cubeApiKey,
     shimDomain: env.SHIM_DOMAIN ?? "",

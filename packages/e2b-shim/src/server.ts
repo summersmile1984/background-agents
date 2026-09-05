@@ -7,6 +7,7 @@
  */
 
 import http from "node:http";
+import https from "node:https";
 import type { ShimConfig } from "./config.js";
 import type { ShimStore } from "./store.js";
 import type { CubeClient } from "./cube-client.js";
@@ -18,6 +19,8 @@ export interface ServerDeps {
   config: ShimConfig;
   store: ShimStore;
   cube: CubeClient;
+  /** TLS material; when both key and cert are present the listener is HTTPS. */
+  tls?: { key: Buffer; cert: Buffer };
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -25,10 +28,10 @@ function json(res: http.ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-export function createShimServer(deps: ServerDeps): http.Server {
-  const { config, store, cube } = deps;
+export function createShimServer(deps: ServerDeps): http.Server | https.Server {
+  const { config, store, cube, tls } = deps;
 
-  const server = http.createServer((req, res) => {
+  const requestListener = (req: http.IncomingMessage, res: http.ServerResponse): void => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://shim.invalid");
 
@@ -62,7 +65,11 @@ export function createShimServer(deps: ServerDeps): http.Server {
         res.destroy();
       }
     });
-  });
+  };
+
+  const server = tls
+    ? https.createServer(tls, requestListener)
+    : http.createServer(requestListener);
 
   server.on("upgrade", (req, socket, head) => {
     const edgeTarget = parseEdgeHost(req.headers.host, config.shimDomain);
