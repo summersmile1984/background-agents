@@ -802,7 +802,6 @@ export class SessionMessageQueue {
     data: EnqueuePromptRequest
   ): Promise<{ messageId: string; status: "queued" }> {
     this.assertPromptableSession();
-    this.assertQueueCapacity();
     let participant = this.participantService.getByUserId(data.authorId);
     if (!participant) {
       const name = data.scmEnrichment?.name || data.authorId;
@@ -839,6 +838,7 @@ export class SessionMessageQueue {
       participant,
       userId: data.authorId,
       content: data.content,
+      clientRequestId: data.clientRequestId,
       source: data.source,
       model: data.model,
       reasoningEffort: data.reasoningEffort,

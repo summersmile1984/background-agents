@@ -140,6 +140,7 @@ function createE2BProviderFromEnv(env: Env): E2BSandboxProvider {
     apiUrl: env.E2B_API_URL || "https://api.e2b.app",
     apiKey: env.E2B_API_KEY,
     templateId,
+    sandboxUrl: normalizeHttpsBaseUrl("E2B_SANDBOX_URL", env.E2B_SANDBOX_URL),
   });
 
   return createE2BProvider(client, {
@@ -151,11 +152,6 @@ function createE2BProviderFromEnv(env: Env): E2BSandboxProvider {
       DEFAULT_E2B_SANDBOX_TIMEOUT_SECONDS
     ),
     autoPause: parseBooleanEnv("E2B_AUTO_PAUSE", env.E2B_AUTO_PAUSE, DEFAULT_E2B_AUTO_PAUSE),
-    useCreateTimeEnv: parseBooleanEnv(
-      "E2B_USE_CREATE_TIME_ENV",
-      env.E2B_USE_CREATE_TIME_ENV,
-      false
-    ),
     previewBaseUrl: normalizeHttpsBaseUrl("E2B_PREVIEW_BASE_URL", env.E2B_PREVIEW_BASE_URL),
     llmEnvVars: {
       XIAOMI_API_KEY: env.XIAOMI_API_KEY,

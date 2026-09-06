@@ -11,17 +11,14 @@ the template image, not runtime operations.
   `opencode-ai`, `code-server`, `agent-browser`, bun) plus `packages/sandbox-runtime` copied to
   `/app/sandbox_runtime`. **Toolchain versions are pinned — keep them in sync with the other sandbox
   providers when bumping.**
-- **`oi-launch.py`** — the template **start command**. E2B runs the start command once at build,
-  snapshots it, and resumes it per create — so it cannot receive per-session env. This launcher
-  waits for the control plane to drop `/tmp/oi-session.env` (via envd), loads it, and `exec`s the
-  supervisor (`python -m sandbox_runtime.entrypoint`) with that env +
-  `HOME=/home/user`/`PYTHONPATH`/`NODE_PATH`.
-- In CubeSandbox's create-time `envs` mode, values over 3500 UTF-8 bytes are sent as reserved
-  `OI_E2B_ENV_CHUNK_*` variables and reassembled by `oi-launch.py` before the supervisor starts.
-  Rebuild the Cube template whenever this launcher changes.
 - **`build-template.py`** — stages `sandbox_runtime`, then builds the template programmatically via
   the **E2B Template SDK** (`Template().from_dockerfile(...).copy(...).set_start_cmd(...)`),
   authenticated with the runtime API key. Used both for manual builds and by the Terraform module.
+
+Both managed E2B and Cube templates now start in an inert state. The control plane sends the full
+session environment through standard `POST /sandboxes` `envVars`, then starts
+`python -m sandbox_runtime.entrypoint` through authenticated envd `Process/Start`. This is the same
+boot contract for both backends; no provider-specific launcher or post-create env file is involved.
 
 ## Auth: one credential
 
@@ -49,7 +46,8 @@ Rebuild whenever `packages/sandbox-runtime` or this directory changes.
 > initial setup or debugging.
 >
 > E2B runs sandboxes as non-root `user` (HOME=`/home/user`) via a login shell and does not propagate
-> Docker `ENV` — the Dockerfile and launcher account for this.
+> Docker `ENV` to envd-started processes. The control plane includes the boot-critical static values
+> in create-time `envVars`.
 
 ## Verification
 

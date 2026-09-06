@@ -24,6 +24,10 @@ import { readStateFromRow, unreadSql, type ViewerReadStateRow } from "./session-
 import type { SqlDatabase, SqlStatement } from "./sql-database";
 import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
 import { SessionLaunchSpecStore } from "./session-launch-specs";
+import {
+  SessionCreateRequestStore,
+  type SessionCreateRequestClaim,
+} from "./session-create-requests";
 
 export type {
   ListSessionInboxOptions,
@@ -225,7 +229,7 @@ export class SessionIndexStore {
     return result !== null;
   }
 
-  async create(session: SessionEntry): Promise<void> {
+  async create(session: SessionEntry, createRequest?: SessionCreateRequestClaim): Promise<void> {
     const repository = normalizeSessionRepositoryFields(session);
 
     if ((session.scmConnectionId == null) !== (session.repositoryId == null)) {
@@ -316,11 +320,18 @@ export class SessionIndexStore {
     const launchSpecStmts = session.launchSpec
       ? [new SessionLaunchSpecStore(this.db).bindCreate(session.id, session.launchSpec)]
       : [];
+    if (createRequest && createRequest.sessionId !== session.id) {
+      throw new Error("Session create request claim must reference the new session");
+    }
+    const createRequestStmts = createRequest
+      ? [new SessionCreateRequestStore(this.db).bindCreate(createRequest)]
+      : [];
     const results = await this.db.batch([
       sessionStmt,
       ...repositoryStmts,
       ...manifestStmts,
       ...launchSpecStmts,
+      ...createRequestStmts,
     ]);
 
     // INSERT OR IGNORE swallows every constraint violation, which would leave

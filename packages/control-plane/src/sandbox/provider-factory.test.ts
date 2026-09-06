@@ -95,6 +95,20 @@ describe("createSandboxProviderFromEnv", () => {
     expect(() => createSandboxProviderFromEnv(env, "e2b")).not.toThrow();
   });
 
+  it("validates the official E2B stable sandbox gateway", () => {
+    const insecure = createEnv({
+      E2B_API_KEY: "e2b-key",
+      E2B_TEMPLATE_ID: "tmpl",
+      E2B_SANDBOX_URL: "http://sandbox.example.test",
+    });
+    expect(() => createSandboxProviderFromEnv(insecure, "e2b")).toThrow(
+      "E2B_SANDBOX_URL must be an HTTPS URL"
+    );
+
+    const secure = { ...insecure, E2B_SANDBOX_URL: " https://sandbox.example.test/// " };
+    expect(() => createSandboxProviderFromEnv(secure, "e2b")).not.toThrow();
+  });
+
   it("requires an OpenComputer template for starts but not existing-session cleanup", () => {
     const env = createEnv({
       OPENCOMPUTER_API_URL: "https://opencomputer.test",

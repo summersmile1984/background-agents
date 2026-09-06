@@ -9,10 +9,10 @@ harness protocol do not change when the backend changes.
 
 Use `sandbox_provider = "e2b"` for either of these deployment shapes:
 
-| Shape            | API and template path                                                           | Session environment delivery                     |
-| ---------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Managed E2B      | `api.e2b.app`; Terraform or the E2B Template SDK builds `e2b.Dockerfile`        | Secure envd file upload after create             |
-| Self-hosted Cube | Cube's E2B-compatible API; `build-cube-template.sh` registers `cube.Dockerfile` | Create-time `envs`; Cube starts a fresh launcher |
+| Shape            | API and template path                                                       | Session environment and startup                          |
+| ---------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Managed E2B      | `api.e2b.app`; Terraform or the E2B Template SDK builds `e2b.Dockerfile`    | Create-time `envVars`, then authenticated envd exec      |
+| Self-hosted Cube | E2B shim over CubeAPI; `build-cube-template.sh` registers `cube.Dockerfile` | The same standard create-time env and envd exec contract |
 
 Both shapes keep the same control plane, Web/bot clients, source-control connections, selected
 harness, and session event stream. Managed E2B pause/resume behavior is described below. Cube's
@@ -31,11 +31,11 @@ e2b_template_id = "open-inspect-sandbox" # template name to build/use
 
 # Optional
 # e2b_api_url                 = "https://api.e2b.app" # REST API base URL
+# e2b_sandbox_url             = "https://sandbox.e2b.app" # stable envd gateway
 # e2b_sandbox_timeout_seconds = 7200                  # sandbox TTL (default 2h)
 # e2b_preview_base_url = "https://preview.example.com" # optional trusted public preview gateway
 # e2b_auto_pause              = true                   # pause (recoverable), not kill, on TTL lapse
 # e2b_build_template          = true                   # false for a prebuilt self-hosted template
-# e2b_use_create_time_env     = false                  # true for CubeSandbox
 ```
 
 For GitHub Actions-based deployment, configure the matching repository secrets:
@@ -45,11 +45,11 @@ SANDBOX_PROVIDER=e2b
 E2B_API_KEY
 E2B_TEMPLATE_ID
 E2B_API_URL                 # optional
+E2B_SANDBOX_URL             # optional stable envd gateway
 E2B_SANDBOX_TIMEOUT_SECONDS # optional
 E2B_AUTO_PAUSE              # optional
 E2B_PREVIEW_BASE_URL        # optional trusted HTTPS preview gateway
 E2B_BUILD_TEMPLATE          # false for a prebuilt self-hosted template
-E2B_USE_CREATE_TIME_ENV     # true for CubeSandbox
 ```
 
 The provider also needs the normal Open-Inspect Cloudflare, authentication, source-control, harness,
@@ -100,7 +100,7 @@ Optional build knobs: `E2B_TEMPLATE_CPU` (default `2`), `E2B_TEMPLATE_MEM` MB (d
 these apply to **manual** builds. Terraform-managed production templates use `e2b_template_cpu` and
 `e2b_template_memory_mb`, which default to **4 vCPU / 8192 MB**. See
 [`packages/e2b-infra/README.md`](../packages/e2b-infra/README.md) for details on the template
-tooling and the launcher.
+tooling and boot contract.
 
 ### Self-Hosted Cube Template
 
@@ -113,8 +113,8 @@ CUBE_IMAGE_BUILD_LABEL=release-<unique> bash build-cube-template.sh
 
 The script builds `cube.Dockerfile`, pushes the image, and registers a new immutable Cube template.
 The production defaults are 4 vCPU and 8192 MB; override them with `CUBE_TEMPLATE_CPU_MILLICORES`
-and `CUBE_TEMPLATE_MEMORY_MB`. Set the returned template ID as `e2b_template_id`, keep
-`e2b_build_template = false`, and set `e2b_use_create_time_env = true`.
+and `CUBE_TEMPLATE_MEMORY_MB`. Set the returned template ID as `e2b_template_id` and keep
+`e2b_build_template = false`.
 
 Cube's `sandbox-code` image remains the VM/envd/code-interpreter base. A multi-stage build copies
 only Chromium and `@agent-infra/mcp-server-browser` from the pinned ByteDance Agent Infra AIO
@@ -123,28 +123,37 @@ Sandbox image. The supervisor exposes them only inside the VM at `127.0.0.1:9222
 
 ## Runtime Behavior
 
-The provider creates fresh sandboxes from the configured template. Managed E2B runs the template's
-start command once at build and does not pass the later session environment to that process. The
-launcher (`oi-launch`) works around this:
+The provider creates fresh sandboxes from the configured template using the same sequence on managed
+E2B and Cube:
 
-1. waits for the control plane to drop the per-session env file (`/tmp/oi-session.env`) over envd
-2. `exec`s the supervisor (`python -m sandbox_runtime.entrypoint`) with that env
-3. the supervisor clones or syncs the selected repositories, starts the selected agent harness and
+1. send the complete per-session environment in `POST /sandboxes` `envVars`;
+2. require `secure: true` and the returned `envdAccessToken`;
+3. start `python -m sandbox_runtime.entrypoint` through envd's framed Connect `Process/Start` RPC;
+4. the supervisor clones or syncs the selected repositories, starts the selected agent harness and
    code-server, and connects the Open-Inspect bridge back to the control plane
-4. agent events stream back through the control plane
+5. agent events stream back through the control plane
 
-Cube instead passes the session values as `envs` in `POST /sandboxes`; `cube-entry` and `oi-launch`
-start the supervisor from that create-time environment. The control plane deliberately skips its
-secure envd upload path in this mode because Cube does not return an E2B envd access token. The
-session still receives a fresh `SANDBOX_AUTH_TOKEN` and the same normalized launch specification.
+The E2B shim mints and enforces the secure envd token for Cube. To preserve E2B's unrestricted
+create-time environment contract without changing CubeSandbox, the shim removes `envVars` from the
+private CubeAPI request, waits for the VM, and posts the complete map to envd's private `/init`
+endpoint before returning the create response. This supports runtime path variables, multiline
+credentials, and values larger than CubeAPI's native limits while keeping the control-plane provider
+free of Cube-only startup branches. If envd initialization fails, the shim kills the new sandbox and
+returns a secret-safe error.
 
-Cube's create-time API limits the size of an individual environment value. The control plane keeps
-the `envs` contract compatible by splitting values larger than 3500 UTF-8 bytes into reserved
-`OI_E2B_ENV_CHUNK_*` variables; `oi-launch` reassembles and removes those transport variables before
-starting the supervisor. This is particularly important for Codex subscription `auth.json`, which is
-commonly larger than the limit. Missing, duplicate, malformed, or incomplete chunks fail closed. The
-Cube template must be rebuilt after changing `oi-launch.py`; updating the Worker alone cannot
-retrofit an already-registered template.
+For a public 1:1 deployment, use one root such as `example.com`: expose the REST API at
+`api.example.com`, the stable gateway at `sandbox.example.com`, and sandbox traffic at
+`<port>-<sandboxID>.example.com`. Set `SHIM_DOMAIN=example.com`; callers can then use the official
+SDK with only `E2B_API_KEY` and `E2B_DOMAIN=example.com`. The SDK derives the same `api.` and
+`sandbox.` subdomains it uses for E2B. The Cloudflare tunnel should have exact routes for existing
+non-sandbox applications before a final `*.example.com` shim route, and proxied DNS should point
+`api`, `sandbox`, and `*` at that tunnel.
+
+Snapshot restore and prebuilt images remain disabled in the provider capability flags. Managed E2B
+supports filesystem-only pause, but Cube 0.7 does not yet cold-boot from a rootfs-only pause. The
+shim therefore returns `501` for filesystem-only pause requests (`memory: false`, or
+`autoPauseMemory: false` with auto-pause enabled) instead of silently taking a full-memory snapshot
+with different semantics.
 
 ### Runtime-Owned Browser on Cube
 
@@ -173,7 +182,7 @@ as a **resumable pause**:
 - The next prompt **resumes** the paused sandbox in place (workspace state preserved); if E2B has
   since dropped it, the control plane spawns a fresh sandbox.
 - Only sandboxes that fail before becoming usable — a spawn that never connects, or one whose
-  session-env write fails — are **killed**, to avoid orphaning them.
+  authenticated envd entrypoint start fails — are **killed**, to avoid orphaning them.
 
 Paused E2B sandboxes are not billed and are retained indefinitely, so pausing is the default
 recoverable stop. `E2B_AUTO_PAUSE` controls the **TTL action** (pause vs kill when the timeout
@@ -190,8 +199,8 @@ Terraform passes these provider-level values to the control plane:
   authenticate the template build
 - `E2B_TEMPLATE_ID`
 - `E2B_API_URL` (optional)
+- `E2B_SANDBOX_URL` (optional stable envd gateway)
 - `E2B_PREVIEW_BASE_URL` (optional, HTTPS only)
-- `E2B_USE_CREATE_TIME_ENV` (`true` only for compatible self-hosted backends such as Cube)
 
 Repository credentials and model credentials have separate boundaries. GitHub uses minted App
 credentials; connection-pinned Gitea Git operations use a server-side proxy so the PAT never enters

@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   invokeRuntimeCommand: vi.fn(),
   sendPrompt: vi.fn(),
   updateThreadSession: vi.fn(),
+  initializeSingleCardLaunch: vi.fn(),
+  deliverSingleCardFollowUp: vi.fn(),
 }));
 
 vi.mock("../conversation/delivery", () => ({
@@ -69,6 +71,11 @@ vi.mock("../targets", () => ({
   listRepositoryTargets: vi.fn(),
 }));
 
+vi.mock("../interactions/launch-card-actions", () => ({
+  initializeSingleCardLaunch: mocks.initializeSingleCardLaunch,
+  deliverSingleCardFollowUp: mocks.deliverSingleCardFollowUp,
+}));
+
 import {
   canReuseThreadSession,
   handleFeishuEvent,
@@ -103,6 +110,19 @@ describe("canReuseThreadSession", () => {
     expect(canReuseThreadSession({ ...thread, harness: "opencode" })).toBe(false);
     expect(
       canReuseThreadSession({ ...thread, model: "openrouter/model", harness: "inherit" })
+    ).toBe(true);
+  });
+
+  it("reuses a target-aware V3 session without inferring a harness from its model name", () => {
+    expect(
+      canReuseThreadSession({
+        ...thread,
+        version: 3,
+        target: { kind: "none" },
+        repositoryKey: undefined,
+        harness: "claude",
+        model: "provider-neutral-model",
+      })
     ).toBe(true);
   });
 });
@@ -195,6 +215,8 @@ describe("handleFeishuEvent receipt", () => {
     mocks.storePendingRequest.mockResolvedValue("pending-1");
     mocks.getRuntimeCatalog.mockResolvedValue(null);
     mocks.inferRepositoryTarget.mockReturnValue(undefined);
+    mocks.initializeSingleCardLaunch.mockResolvedValue(undefined);
+    mocks.deliverSingleCardFollowUp.mockResolvedValue(true);
     mocks.listRepositoryCatalog.mockResolvedValue({
       connections: [
         {
@@ -217,6 +239,48 @@ describe("handleFeishuEvent receipt", () => {
         },
       ],
     });
+  });
+
+  it("hands a new top-level task directly to the single-card launch flow", async () => {
+    await handleFeishuEvent(
+      event,
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" },
+      "trace-single-card"
+    );
+
+    expect(mocks.initializeSingleCardLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: "feishu:tenant-1:user-1",
+        content: "检查项目",
+        incomingMessageId: "message-1",
+      })
+    );
+    expect(mocks.replySessionText).not.toHaveBeenCalled();
+    expect(mocks.storePendingRequest).not.toHaveBeenCalled();
+  });
+
+  it("uses one mutable turn card for a V3 session follow-up", async () => {
+    const existing = {
+      ...thread,
+      version: 3 as const,
+      target: { kind: "none" as const },
+      repositoryKey: undefined,
+      harness: "claude" as const,
+      model: "provider-neutral-model",
+      actorId: "feishu:tenant-1:user-1",
+    };
+    mocks.lookupThreadSession.mockResolvedValue(existing);
+
+    await handleFeishuEvent(
+      event,
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" },
+      "trace-single-card-followup"
+    );
+
+    expect(mocks.deliverSingleCardFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({ existing, content: "检查项目" })
+    );
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
   });
 
   it("routes a standalone /stop message to the control-plane command API", async () => {

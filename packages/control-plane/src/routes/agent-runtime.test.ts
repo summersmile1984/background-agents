@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
-import type { Route, UserRouteContext } from "./shared";
+import type { RequestContext, Route, UserRouteContext } from "./shared";
 
 const mocks = vi.hoisted(() => ({
   admin: true,
@@ -123,6 +123,27 @@ function context(): UserRouteContext {
   } as unknown as UserRouteContext;
 }
 
+function feishuContext(actor = true): RequestContext {
+  return {
+    db: {},
+    principal: {
+      kind: "service",
+      service: "feishu-bot",
+      actor: actor
+        ? {
+            provider: "feishu",
+            providerUserId: "ou_1",
+            canonicalUserId: null,
+            participantUserId: "feishu:tenant-1:ou_1",
+          }
+        : null,
+    },
+    request_id: "request-1",
+    trace_id: "trace-1",
+    executionCtx: { submit() {} },
+  } as unknown as RequestContext;
+}
+
 const env = {
   REPO_SECRETS_ENCRYPTION_KEY: "encryption-key",
   MODEL_RELAY_ADMIN_URL: "https://relay-admin.example.com",
@@ -217,5 +238,55 @@ describe("agent runtime routes", () => {
         relayReady: true,
       })
     );
+  });
+
+  it("allows a verified Feishu actor to resolve with integration and actor scopes", async () => {
+    mocks.resolveDraft.mockResolvedValue({
+      resolverVersion: "1",
+      capabilityCatalogVersion: "test",
+      checkedAt: 1,
+      draftDigest: "a".repeat(64),
+      launchable: true,
+      effective: {},
+      options: { harnesses: [], models: [], efforts: [], commands: [] },
+      issues: [],
+    });
+    const { route, match } = routeFor("POST", "/agent-runtime/resolve-draft");
+    expect(route.authentication.kind).toBe("user-or-service");
+    const response = await route.handler(
+      new Request("https://control.example.com/agent-runtime/resolve-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: { kind: "none" } }),
+      }),
+      env,
+      match,
+      feishuContext()
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.resolveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        configurationOwners: [
+          { scope: "integration", id: "feishu" },
+          { scope: "user", id: "feishu:tenant-1:ou_1" },
+        ],
+      })
+    );
+  });
+
+  it("rejects an actorless service without widening credential routes", async () => {
+    const resolve = routeFor("POST", "/agent-runtime/resolve-draft");
+    const response = await resolve.route.handler(
+      new Request("https://control.example.com/agent-runtime/resolve-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: { kind: "none" } }),
+      }),
+      env,
+      resolve.match,
+      feishuContext(false)
+    );
+    expect(response.status).toBe(403);
+    expect(routeFor("GET", "/agent-runtime/credentials").route.authentication.kind).toBe("user");
   });
 });

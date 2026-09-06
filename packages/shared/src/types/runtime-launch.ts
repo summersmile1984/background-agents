@@ -314,7 +314,7 @@ export interface RuntimeLaunchInput {
   skills?: SessionSkillSelection;
 }
 
-const runtimeConfigurationScopeSchema = z.enum([
+export const runtimeConfigurationScopeSchema = z.enum([
   "installation",
   "user",
   "integration",
@@ -335,7 +335,7 @@ function resolvedRuntimeValueSchema<T extends z.ZodTypeAny>(value: T) {
   });
 }
 
-const resolvedRuntimeRepositorySnapshotSchema = z.object({
+export const resolvedRuntimeRepositorySnapshotSchema = z.object({
   repositoryKey: z.string().min(1),
   connectionId: z.string().min(1),
   externalRepositoryId: z.string().min(1),
@@ -347,13 +347,172 @@ const resolvedRuntimeRepositorySnapshotSchema = z.object({
   cloneUrl: z.string().url(),
 });
 
-const resolvedRuntimeTargetSnapshotSchema = z.object({
+export const resolvedRuntimeTargetSnapshotSchema = z.object({
   kind: z.enum(["none", "repository", "repository-set", "environment"]),
   connectionId: z.string().min(1).nullable(),
   provider: sourceControlProviderNameSchema.nullable(),
   environmentId: z.string().min(1).nullable(),
   repositories: z.array(resolvedRuntimeRepositorySnapshotSchema),
 });
+
+export const runtimeSelectionIssueCodeSchema = z.enum([
+  "TARGET_REQUIRED",
+  "TARGET_UNAVAILABLE",
+  "SCM_CONNECTION_MISMATCH",
+  "HARNESS_DISABLED",
+  "RUNTIME_UNAVAILABLE",
+  "ROUTE_NOT_READY",
+  "PROVIDER_UNAVAILABLE",
+  "MODEL_DISABLED",
+  "MODEL_INCOMPATIBLE",
+  "CREDENTIAL_MISSING",
+  "CREDENTIAL_EXPIRED",
+  "RELAY_UNAVAILABLE",
+  "EFFORT_UNSUPPORTED",
+  "SETTING_INVALID",
+  "COMMAND_UNAVAILABLE",
+  "CAPABILITY_CHANGED",
+]);
+
+export const runtimeSelectionFieldSchema = z.enum([
+  "target",
+  "harness",
+  "route",
+  "model",
+  "effort",
+  "settings",
+  "command",
+]);
+
+export const runtimeSelectionIssueSchema = z.object({
+  code: runtimeSelectionIssueCodeSchema,
+  field: runtimeSelectionFieldSchema,
+  severity: z.enum(["error", "warning"]),
+  message: z.string().min(1),
+  remediation: z
+    .object({
+      kind: z.enum(["open-settings", "contact-operator", "choose-another-route"]),
+      href: z.string().url().optional(),
+    })
+    .optional(),
+}) satisfies z.ZodType<RuntimeSelectionIssue>;
+
+export const runtimeEffortOptionSchema = z.object({
+  value: z.string().min(1),
+  label: z.string().min(1),
+  nativeValue: z.string().min(1),
+  isDefault: z.boolean(),
+}) satisfies z.ZodType<RuntimeEffortOption>;
+
+export const runtimeModelOptionSchema = z.object({
+  model: z.string().min(1),
+  displayName: z.string().min(1),
+  description: z.string(),
+  category: z.string(),
+  routeId: z.string().min(1),
+  provider: z.string().min(1),
+  enabled: z.boolean(),
+  ready: z.boolean(),
+  disabledReason: z.string().optional(),
+  efforts: z.array(runtimeEffortOptionSchema),
+  supportsAttachments: z.boolean(),
+  supportsToolEvents: z.boolean(),
+  supportsLiveModelSwitch: z.boolean(),
+}) satisfies z.ZodType<RuntimeModelOption>;
+
+export const runtimeRouteOptionSchema = z.object({
+  routeId: z.string().min(1),
+  harness: agentHarnessSchema,
+  provider: z.string().min(1),
+  transport: z.enum(["native", "host-relay", "opencode-provider"]),
+  displayName: z.string().min(1),
+  ready: z.boolean(),
+  code: z.union([runtimeSelectionIssueCodeSchema, z.literal("READY")]),
+  message: z.string().optional(),
+  models: z.array(runtimeModelOptionSchema),
+}) satisfies z.ZodType<RuntimeRouteOption>;
+
+export const runtimeSettingDefinitionSchema = z.object({
+  key: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string(),
+  type: z.enum(["boolean", "string", "integer", "enum", "string-list"]),
+  defaultValue: z.unknown(),
+  enumOptions: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+  allowedScopes: z.array(runtimeConfigurationScopeSchema),
+  mutability: z.enum(["session-start", "per-turn"]),
+  visibility: z.enum(["user", "operator", "read-only"]),
+  sensitive: z.literal(false),
+  constraints: z.record(z.string(), z.unknown()).optional(),
+}) satisfies z.ZodType<RuntimeSettingDefinition>;
+
+export const runtimeHarnessOptionSchema = z.object({
+  harness: agentHarnessSchema,
+  displayName: z.string().min(1),
+  description: z.string(),
+  enabled: z.boolean(),
+  runtimeAvailable: z.boolean(),
+  ready: z.boolean(),
+  disabledReason: z.string().optional(),
+  settingsSchemaVersion: z.string().min(1),
+  settings: z.array(runtimeSettingDefinitionSchema),
+  liveMutation: z.object({
+    model: z.boolean(),
+    effort: z.boolean(),
+    settings: z.array(z.string()),
+  }),
+  routes: z.array(runtimeRouteOptionSchema),
+}) satisfies z.ZodType<RuntimeHarnessOption>;
+
+export const runtimeCommandOptionSchema = z.object({
+  id: z.string().min(1),
+  slashName: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string(),
+  group: z.enum(["session", "runtime", "harness"]),
+  owner: z.enum(["product", "harness"]),
+  harnesses: z.union([z.array(agentHarnessSchema), z.literal("all")]),
+  contexts: z.array(z.enum(["draft", "idle-session", "running-session"])),
+  execution: z.enum(["control-plane", "driver", "prompt-transform"]),
+  arguments: z.array(
+    z.object({
+      name: z.string().min(1),
+      label: z.string().min(1),
+      type: z.enum(["string", "enum"]),
+      required: z.boolean(),
+      options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+    })
+  ),
+  mutates: z.array(z.enum(["session", "model", "effort", "context"])),
+  available: z.boolean(),
+  unavailableReason: z.string().optional(),
+}) satisfies z.ZodType<RuntimeCommandOption>;
+
+export const resolvedRuntimeLaunchDraftSchema = z.object({
+  target: resolvedRuntimeTargetSnapshotSchema,
+  harness: resolvedRuntimeValueSchema(agentHarnessSchema).nullable(),
+  routeId: resolvedRuntimeValueSchema(z.string().min(1)).nullable(),
+  model: resolvedRuntimeValueSchema(z.string().min(1)).nullable(),
+  effort: resolvedRuntimeValueSchema(z.string().min(1).nullable()).nullable(),
+  nativeEffort: z.string().min(1).nullable(),
+  settings: z.record(z.string(), resolvedRuntimeValueSchema(z.unknown())),
+}) satisfies z.ZodType<ResolvedRuntimeLaunchDraft>;
+
+export const resolveRuntimeLaunchDraftResponseSchema = z.object({
+  resolverVersion: z.string().min(1),
+  capabilityCatalogVersion: z.string().min(1),
+  checkedAt: z.number().finite().nonnegative(),
+  draftDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  launchable: z.boolean(),
+  effective: resolvedRuntimeLaunchDraftSchema,
+  options: z.object({
+    harnesses: z.array(runtimeHarnessOptionSchema),
+    models: z.array(runtimeModelOptionSchema),
+    efforts: z.array(runtimeEffortOptionSchema),
+    commands: z.array(runtimeCommandOptionSchema),
+  }),
+  issues: z.array(runtimeSelectionIssueSchema),
+}) satisfies z.ZodType<ResolveRuntimeLaunchDraftResponse>;
 
 export const runtimeLaunchCallerChannelSchema = z.enum([
   "web",

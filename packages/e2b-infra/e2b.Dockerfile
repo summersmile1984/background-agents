@@ -9,7 +9,7 @@
 # WORKDIR / start-command steps programmatically (API-key auth, no access token).
 #
 # Start command (set by build-template.py / Terraform, not ENTRYPOINT here):
-#   python /usr/local/bin/oi-launch
+#   sleep infinity
 
 FROM python:3.12-slim-bookworm
 
@@ -88,8 +88,8 @@ RUN printf '%s\n' '#!/bin/sh' 'exec python3 -m sandbox_runtime.credentials.git_c
   && git config --system credential.useHttpPath true
 
 # Build-time env only. E2B does NOT propagate Docker ENV to the runtime process,
-# so the start command (build-template.py) re-exports PYTHONPATH / NODE_PATH;
-# control-plane-injected vars (CONTROL_PLANE_URL, etc.) arrive via E2B envVars.
+# control-plane-injected vars (HOME, PYTHONPATH, CONTROL_PLANE_URL, secrets,
+# etc.) arrive via create-time E2B envVars and are inherited by envd starts.
 ENV HOME=/root \
     NODE_ENV=development \
     PATH=/usr/local/bin:/usr/bin:/bin \
@@ -97,7 +97,7 @@ ENV HOME=/root \
     NODE_PATH=/usr/lib/node_modules \
     SANDBOX_VERSION=e2b-v17-visual-verification
 
-# NOTE: file staging (sandbox_runtime, oi-launch.py), WORKDIR, and the start/ready
+# NOTE: file staging (sandbox_runtime), WORKDIR, and the start/ready
 # commands are applied by build-template.py via the E2B Template SDK
 # (.copy()/.setWorkdir()/.setStartCmd()) — not here. This Dockerfile defines only
 # the base image layers; it is not built standalone.

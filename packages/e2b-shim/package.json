@@ -1,0 +1,21 @@
+{
+  "name": "@open-inspect/e2b-shim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "E2B SaaS-compatible shim in front of self-hosted CubeSandbox: aligns lifecycle, security-token, list/filter, metrics and template APIs so the control plane and official E2B SDKs see pure E2B semantics.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "node --experimental-strip-types --no-warnings src/index.ts",
+    "test:e2e": "npm run build && node dist/smoke.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.0"
+  }
+}

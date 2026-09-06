@@ -2,6 +2,7 @@ import { messageSourceSchema } from "@open-inspect/shared/types/sessions";
 import { sessionAttachmentReferencesSchema } from "@open-inspect/shared/types/session-attachments";
 import {
   BLANK_PROMPT_MESSAGE,
+  clientRequestIdSchema,
   isBlankPrompt,
   promptContentSchema,
 } from "@open-inspect/shared/types/prompts";
@@ -11,6 +12,7 @@ import { visualVerificationSelectionSchema } from "@open-inspect/shared/types/vi
 export const enqueuePromptRequestSchema = z
   .object({
     content: promptContentSchema,
+    clientRequestId: clientRequestIdSchema.optional(),
     authorId: z.string(),
     canonicalUserId: z.string().nullable().optional(),
     source: messageSourceSchema,

@@ -3,7 +3,7 @@ import { sessionSkillSelectionSchema } from "./skills";
 import type { AgentResponse } from "./artifacts";
 import { sessionRepositoriesInputSchema } from "./repositories";
 import type { EventResponse } from "./sandbox-events";
-import { MAX_WEB_PROMPT_CHARS, promptContentSchema } from "./prompts";
+import { clientRequestIdSchema, MAX_WEB_PROMPT_CHARS, promptContentSchema } from "./prompts";
 import {
   messageSourceSchema,
   sessionStatusSchema,
@@ -12,7 +12,10 @@ import {
   type SessionStatus,
 } from "./sessions";
 import { agentHarnessSchema } from "./agent-harness";
-import { runtimeConfigFragmentSchema } from "./runtime-launch";
+import {
+  resolveRuntimeLaunchDraftResponseSchema,
+  runtimeConfigFragmentSchema,
+} from "./runtime-launch";
 import { visualVerificationSelectionSchema } from "./visual-verification";
 
 export interface UserPreferences {
@@ -67,7 +70,10 @@ export const feishuCallbackContextSchema = z.object({
   harness: z.union([agentHarnessSchema, z.literal("inherit")]).optional(),
   /** A card sent by Open-Inspect itself, eligible for a later status update. */
   workingMessageId: nonEmptyStringSchema.optional(),
+  /** Immutable delivery contract for turns created by the Card JSON 2.0 lifecycle flow. */
+  cardLifecycle: z.literal("single-card-v2").optional(),
   targetLabel: nonEmptyStringSchema,
+  routeId: nonEmptyStringSchema.optional(),
   model: nonEmptyStringSchema,
   reasoningEffort: nonEmptyStringSchema.optional(),
 });
@@ -165,6 +171,8 @@ export type CallbackContext = z.infer<typeof callbackContextSchema>;
 export const sendPromptRequestSchema = z
   .object({
     content: promptContentSchema,
+    /** Stable caller-generated key used to deduplicate HTTP prompt retries. */
+    clientRequestId: clientRequestIdSchema.optional(),
     source: messageSourceSchema.optional(),
     model: z.string().optional(),
     reasoningEffort: z.string().optional(),
@@ -250,6 +258,8 @@ function hasExclusiveSessionTarget(
 }
 
 const createSessionRequestBaseSchema = z.object({
+  /** Stable caller-generated key used to deduplicate ambiguous session-create retries. */
+  clientRequestId: clientRequestIdSchema.optional(),
   /** Preferred stable single-repository target. */
   repositoryKey: z.string().trim().min(1).nullish(),
   repoOwner: z.string().trim().min(1).nullish(),
@@ -371,6 +381,15 @@ export const createSessionResponseSchema = z.object({
 });
 
 export type CreateSessionResponse = z.infer<typeof createSessionResponseSchema>;
+
+export const createSessionErrorResponseSchema = z.object({
+  error: z.string().min(1),
+  code: z.string().min(1).optional(),
+  draft: resolveRuntimeLaunchDraftResponseSchema.optional(),
+  sessionId: z.string().min(1).optional(),
+});
+
+export type CreateSessionErrorResponse = z.infer<typeof createSessionErrorResponseSchema>;
 
 export const sendPromptResponseSchema = z.object({
   messageId: z.string().min(1),

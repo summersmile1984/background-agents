@@ -4,6 +4,10 @@
 
 **Implemented（Web 发布范围）— 生产线程路由、单话题续办、单仓库绑定、视觉截图/预览回传、私聊多会话和 rollout 回滚 E2E 已验收。跨用户负向路径和飞书原生移动 App 均不作为本次发布验收条件。**
 
+> 展示层演进：本文保留并行话题、actor、root/thread 和 session 绑定不变量。新的“每回合一张可更新卡片”、target-aware 工作区/Runtime 编辑和完成态 PATCH 由
+> [飞书单卡片任务启动与生命周期对齐方案](./feishu-single-card-launch.md) 接管，并受默认关闭的
+> `FEISHU_SINGLE_CARD_LAUNCH_ENABLED` 控制；关闭时继续兼容本文记录的 staged cards。
+
 > 验收范围（2026-08-30 更新）：本版本以飞书 Web（桌面浏览器及窄屏响应式视口）为支持目标；跨用户负向验证可在后续补充，原生飞书手机 App 的键盘遮挡和按钮操作不作为发布阻塞项，后续如需支持再单独安排真机验收。
 
 本文是把飞书多会话体验对齐 Slack thread 的实施依据。它聚焦已经上线的

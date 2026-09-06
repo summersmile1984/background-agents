@@ -336,6 +336,12 @@ variable "feishu_bound_thread_followups_enabled" {
   default     = false
 }
 
+variable "feishu_single_card_launch_enabled" {
+  description = "Use one target-aware Card JSON 2.0 lifecycle card per Feishu prompt turn. Keep false until PATCH and VM E2E pass."
+  type        = bool
+  default     = false
+}
+
 variable "feishu_app_id" {
   description = "Feishu self-built app ID (cli_...)"
   type        = string
@@ -633,6 +639,17 @@ variable "e2b_api_url" {
   default     = "https://api.e2b.app"
 }
 
+variable "e2b_sandbox_url" {
+  description = "Optional stable E2B sandbox/envd gateway URL (E2B_SANDBOX_URL)"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.e2b_sandbox_url) == "" || startswith(trimspace(var.e2b_sandbox_url), "https://")
+    error_message = "e2b_sandbox_url must be an HTTPS URL when set."
+  }
+}
+
 variable "e2b_preview_base_url" {
   description = "Optional trusted HTTPS gateway base URL for user-facing E2B-compatible sandbox previews"
   type        = string
@@ -698,7 +715,7 @@ variable "e2b_auto_pause" {
 }
 
 variable "e2b_use_create_time_env" {
-  description = "Inject session env in POST /sandboxes for compatible self-hosted backends such as CubeSandbox"
+  description = "DEPRECATED: managed E2B and Cube now use create-time envVars plus envd process start; this compatibility input is ignored."
   type        = bool
   default     = false
 }

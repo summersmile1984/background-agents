@@ -15,6 +15,7 @@ import { cleanD1Tables } from "./cleanup";
 const SERVICE_SECRET: Record<ServiceName, string> = {
   web: "test-service-secret-web",
   "slack-bot": "test-service-secret-slack-bot",
+  "feishu-bot": "test-service-secret-feishu-bot",
   "github-bot": "test-service-secret-github-bot",
   "linear-bot": "test-service-secret-linear-bot",
   "control-plane": "outbound-only-secret",
@@ -223,6 +224,57 @@ describe("sig1 service-credential authentication", () => {
         spawnSource: "slack-bot",
       })
     );
+  });
+
+  it("deduplicates Feishu session creation and rejects key reuse with another request", async () => {
+    const clientRequestId = "feishu-session:pending-1";
+    const body = JSON.stringify({
+      clientRequestId,
+      title: "Idempotent Feishu session",
+      model: "anthropic/claude-haiku-4-5",
+    });
+    const first = await signedFetch({
+      service: "feishu-bot",
+      method: "POST",
+      url: "https://test.local/sessions",
+      actor: "feishu:tenant-1:ou_1",
+      body,
+    });
+    expect(first.status).toBe(201);
+    const firstBody = await first.json<{ sessionId: string }>();
+
+    const replay = await signedFetch({
+      service: "feishu-bot",
+      method: "POST",
+      url: "https://test.local/sessions",
+      actor: "feishu:tenant-1:ou_1",
+      body,
+    });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ sessionId: firstBody.sessionId });
+
+    const conflict = await signedFetch({
+      service: "feishu-bot",
+      method: "POST",
+      url: "https://test.local/sessions",
+      actor: "feishu:tenant-1:ou_1",
+      body: JSON.stringify({
+        clientRequestId,
+        title: "Different request",
+        model: "anthropic/claude-haiku-4-5",
+      }),
+    });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "SESSION_CREATE_REQUEST_CONFLICT" });
+
+    const sessions = await env.DB.prepare("SELECT COUNT(*) AS count FROM sessions").first<{
+      count: number;
+    }>();
+    const claims = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM session_create_requests"
+    ).first<{ count: number }>();
+    expect(sessions?.count).toBe(1);
+    expect(claims?.count).toBe(1);
   });
 
   it("requires a user or signed actor before any service can create a session", async () => {

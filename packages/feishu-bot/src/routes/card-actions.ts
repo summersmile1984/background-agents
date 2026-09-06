@@ -6,6 +6,10 @@ import {
   handleFeishuCardAction,
   parseFeishuCardAction,
 } from "../interactions/card-actions";
+import {
+  handleFeishuLaunchCardAction,
+  parseFeishuLaunchCardAction,
+} from "../interactions/launch-card-actions";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
 
@@ -36,17 +40,21 @@ cardActionRoutes.post("/card-actions", async (c) => {
     return c.json({ challenge: verificationPayload.data.challenge });
   }
 
-  if (!parseFeishuCardAction(verified.payload)) {
+  const launchAction = parseFeishuLaunchCardAction(verified.payload);
+  const legacyAction = launchAction ? null : parseFeishuCardAction(verified.payload);
+  if (!launchAction && !legacyAction) {
     return c.json(cardActionResponse({ ok: false, content: "请求无效，请重新发起。" }));
   }
 
   // The card callback has a short response deadline. Loading the catalog and
-  // replying with the next card can take several seconds, so acknowledge the
+  // mutating the lifecycle card can take several seconds, so acknowledge the
   // interaction first and keep that work alive with the Worker execution
-  // context. The background operation posts the repository card to the same
-  // Feishu thread when it finishes.
+  // context.
   c.executionCtx.waitUntil(
-    handleFeishuCardAction(verified.payload, c.env, traceId)
+    (launchAction
+      ? handleFeishuLaunchCardAction(verified.payload, c.env, traceId)
+      : handleFeishuCardAction(verified.payload, c.env, traceId)
+    )
       .then((result) => {
         log[result.ok ? "info" : "warn"]("card_action.completed", {
           trace_id: traceId,

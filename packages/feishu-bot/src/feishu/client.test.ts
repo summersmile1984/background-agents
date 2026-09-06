@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../types";
+import { buildTurnWorkingCard } from "../launch-cards";
 import {
   clearTenantAccessTokenCache,
   replyFeishuImage,
   replyFeishuText,
   resolveFeishuBotOpenId,
+  updateFeishuCard,
   uploadFeishuMessageImage,
 } from "./client";
 
@@ -192,6 +194,214 @@ describe("Feishu message client", () => {
       resolveFeishuBotOpenId({ ...env, FEISHU_BOT_OPEN_ID: "ou_configured" })
     ).resolves.toBe("ou_configured");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("patches a bot-owned card in place using Card JSON 2.0", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 0, msg: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const card = buildTurnWorkingCard({
+      sessionId: "session-1",
+      targetLabel: "owner/repo",
+      webAppUrl: "https://open-inspect.example",
+      model: "openai/gpt-5.6-luna",
+      task: "检查项目",
+    });
+
+    await expect(updateFeishuCard(env, "om/card", card)).resolves.toEqual({
+      messageId: "om/card",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://open.feishu.cn/open-apis/im/v1/messages/om%2Fcard",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ content: JSON.stringify(card) }),
+      })
+    );
+  });
+
+  it("retries a transient card update and classifies definite fallback failures", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 500, msg: "busy" }), {
+          status: 503,
+          headers: { "Retry-After": "0" },
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const card = { schema: "2.0", config: { update_multi: true }, body: { elements: [] } };
+    await expect(updateFeishuCard(env, "card-1", card)).resolves.toEqual({
+      messageId: "card-1",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ code: 230031, msg: "Message can only be modified within 14 days" }, 400)
+    );
+    await expect(updateFeishuCard(env, "card-2", card)).rejects.toMatchObject({
+      reason: "not_editable",
+      status: 400,
+    });
+  });
+
+  it("uses Feishu API codes for rate limits and definite missing-card failures", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code: 230020, msg: "frequency limit" }, 400))
+      .mockResolvedValueOnce(jsonResponse({ code: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const card = { schema: "2.0", config: { update_multi: true }, body: { elements: [] } };
+
+    await expect(updateFeishuCard(env, "card-rate-limited", card)).resolves.toEqual({
+      messageId: "card-rate-limited",
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ code: 230110, msg: "message has been deleted" }, 400)
+    );
+    await expect(updateFeishuCard(env, "card-deleted", card)).rejects.toMatchObject({
+      reason: "target_missing",
+      status: 400,
+    });
+  });
+
+  it.each([
+    [401, "permission", 1],
+    [403, "permission", 1],
+    [404, "target_missing", 1],
+    [429, "rate_limited", 2],
+  ] as const)(
+    "classifies PATCH HTTP %i as %s after %i attempt(s)",
+    async (status, reason, updateAttempts) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+        );
+      for (let attempt = 0; attempt < updateAttempts; attempt += 1) {
+        fetchMock.mockResolvedValueOnce(jsonResponse({ code: 999, msg: "failure" }, status));
+      }
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(
+        updateFeishuCard(env, `card-http-${status}`, {
+          schema: "2.0",
+          config: { update_multi: true },
+          body: { elements: [] },
+        })
+      ).rejects.toMatchObject({ reason, status });
+      expect(fetchMock).toHaveBeenCalledTimes(1 + updateAttempts);
+    }
+  );
+
+  it.each([
+    [230027, "permission"],
+    [230099, "invalid_card"],
+  ] as const)("classifies PATCH API code %i as %s", async (code, reason) => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockResolvedValueOnce(jsonResponse({ code, msg: "official error" }, 400));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateFeishuCard(env, `card-code-${code}`, {
+        schema: "2.0",
+        config: { update_multi: true },
+        body: { elements: [] },
+      })
+    ).rejects.toMatchObject({ reason, status: 400 });
+  });
+
+  it("rejects mutable cards that omit Feishu's update_multi contract before network access", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateFeishuCard(env, "card-1", { schema: "2.0", body: { elements: [] } })
+    ).rejects.toMatchObject({ reason: "invalid_card" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects cards larger than Feishu's 30 KB limit before network access", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateFeishuCard(env, "card-oversized", {
+        schema: "2.0",
+        config: { update_multi: true },
+        body: { elements: [{ tag: "markdown", content: "x".repeat(31 * 1024) }] },
+      })
+    ).rejects.toMatchObject({ reason: "invalid_card" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "a legacy action component",
+      elements: [{ tag: "action", actions: [] }],
+    },
+    {
+      name: "a button without behaviors",
+      elements: [{ tag: "button", text: { tag: "plain_text", content: "Start" } }],
+    },
+    {
+      name: "a form without a submit button",
+      elements: [{ tag: "form", name: "settings", elements: [] }],
+    },
+    {
+      name: "more than 200 components",
+      elements: Array.from({ length: 201 }, () => ({ tag: "markdown", content: "x" })),
+    },
+  ])("rejects $name before network access", async ({ elements }) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateFeishuCard(env, "card-invalid-v2", {
+        schema: "2.0",
+        config: { update_multi: true },
+        body: { elements },
+      })
+    ).rejects.toMatchObject({ reason: "invalid_card" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an ambiguous card update into a duplicate reply decision", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({ code: 0, tenant_access_token: "tenant-token", expire: 3600 })
+      )
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockRejectedValueOnce(new Error("timeout"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      updateFeishuCard(env, "card-1", {
+        schema: "2.0",
+        config: { update_multi: true },
+        body: { elements: [] },
+      })
+    ).rejects.toMatchObject({ reason: "ambiguous" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 

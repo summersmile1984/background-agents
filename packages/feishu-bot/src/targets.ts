@@ -1,4 +1,5 @@
 import { controlPlaneReposResponseSchema } from "@open-inspect/shared/types/repository-catalog";
+import { listEnvironmentsResponseSchema } from "@open-inspect/shared/types/environments";
 import type { z } from "zod";
 import { signedControlPlaneFetch, type ControlPlaneEnv } from "./internal-auth";
 import { createLogger } from "./logger";
@@ -27,6 +28,13 @@ export interface FeishuRepositoryConnection {
 export interface FeishuRepositoryCatalog {
   targets: FeishuRepositoryTarget[];
   connections: FeishuRepositoryConnection[];
+}
+
+export interface FeishuEnvironmentTarget {
+  environmentId: string;
+  name: string;
+  description?: string;
+  repositoryKeys: string[];
 }
 
 type ControlPlaneRepositoryCatalog = z.infer<typeof controlPlaneReposResponseSchema>;
@@ -142,6 +150,43 @@ export async function listRepositoryTargets(
   traceId?: string
 ): Promise<FeishuRepositoryTarget[]> {
   return (await listRepositoryCatalog(env, traceId)).targets;
+}
+
+export async function listEnvironmentTargets(
+  env: ControlPlaneEnv,
+  traceId?: string
+): Promise<FeishuEnvironmentTarget[]> {
+  try {
+    const response = await signedControlPlaneFetch(
+      env,
+      { method: "GET", url: "https://internal/environments", traceId },
+      {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS),
+      }
+    );
+    if (!response.ok) return [];
+    const parsed = listEnvironmentsResponseSchema.safeParse(
+      await response.json().catch(() => null)
+    );
+    if (!parsed.success) return [];
+    return parsed.data.environments.flatMap((environment) => {
+      const keys = environment.repositories.flatMap((repository) =>
+        repository.repositoryKey ? [repository.repositoryKey] : []
+      );
+      if (keys.length !== environment.repositories.length || keys.length === 0) return [];
+      return [
+        {
+          environmentId: environment.id,
+          name: environment.name,
+          ...(environment.description ? { description: environment.description } : {}),
+          repositoryKeys: keys,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export function findRepositoryTarget(

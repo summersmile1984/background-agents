@@ -7,7 +7,6 @@ import type {
 import type {
   ResolveRuntimeLaunchDraftResponse,
   RuntimeLaunchTarget,
-  SessionLaunchSpecV1,
 } from "@open-inspect/shared/types/runtime-launch";
 import type { AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import { generateId } from "../auth/crypto";
@@ -22,6 +21,10 @@ import { resolveScmProviderFromEnv } from "../source-control";
 import { EnvironmentStore } from "../db/environments";
 import { ScmConnectionStore } from "../db/scm-connections";
 import { ScmRepositoryStore } from "../db/scm-repositories";
+import {
+  SessionCreateRequestStore,
+  type SessionCreateRequestResult,
+} from "../db/session-create-requests";
 import { AgentRuntimePreferencesStore } from "../db/agent-runtime-preferences";
 import { UserStore } from "../db/user-store";
 import { createLogger } from "../logger";
@@ -34,9 +37,15 @@ import {
 } from "../agent-runtime/selection";
 import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
 import { createSessionLaunchSpec } from "../agent-runtime/launch-spec";
+import { buildSessionInternalUrl, SessionInternalPaths } from "../session/contracts";
+import {
+  runtimeCallerChannel,
+  runtimeConfigurationOwnersForRequest,
+} from "../agent-runtime/request-context";
 import { resolveGitHubEnrichmentForRequest } from "../session/identity";
 import { resolveSessionScopedSettings } from "../session/integration-settings-resolution";
 import { resolveManagedSkills, SkillResolutionError } from "../session/skill-resolution";
+import { buildSessionCreateIdempotency } from "../session/create-idempotency";
 import type { Env } from "../types";
 import {
   normalizeOptionalRepositoryPair,
@@ -55,9 +64,88 @@ import {
 
 const logger = createLogger("router:session-create");
 const INVALID_SESSION_REQUEST_BODY_ERROR = "Invalid session request body";
+const IDEMPOTENT_REPLAY_READY_ATTEMPTS = 6;
+const IDEMPOTENT_REPLAY_READY_INTERVAL_MS = 100;
 
 // Defense in depth on top of schema validation — matches git ref charsets.
 const BRANCH_NAME_PATTERN = /^[\w.\-/]+$/;
+
+async function waitForExistingSessionInitialization(
+  env: Env,
+  sessionId: string,
+  ctx: RequestContext
+): Promise<boolean> {
+  const stub = env.SESSION.get(env.SESSION.idFromName(sessionId));
+  for (let attempt = 1; attempt <= IDEMPOTENT_REPLAY_READY_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await stub.fetch(
+        new Request(buildSessionInternalUrl(SessionInternalPaths.state), {
+          method: "GET",
+          headers: {
+            "x-trace-id": ctx.trace_id,
+            "x-request-id": ctx.request_id,
+          },
+        })
+      );
+      if (response.ok) {
+        await response.body?.cancel();
+        return true;
+      }
+      await response.body?.cancel();
+    } catch {
+      // The winning request may not have reached the Durable Object yet.
+    }
+    if (attempt < IDEMPOTENT_REPLAY_READY_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, IDEMPOTENT_REPLAY_READY_INTERVAL_MS));
+    }
+  }
+  return false;
+}
+
+async function existingCreateResponse(input: {
+  env: Env;
+  ctx: RequestContext;
+  existing: SessionCreateRequestResult;
+  requestFingerprint: string;
+}): Promise<Response> {
+  const { existing } = input;
+  if (existing.requestFingerprint !== input.requestFingerprint) {
+    return json(
+      {
+        error: "clientRequestId was already used for a different session request",
+        code: "SESSION_CREATE_REQUEST_CONFLICT",
+      },
+      409
+    );
+  }
+  if (existing.sessionStatus === "failed") {
+    return json(
+      {
+        error: "The idempotent session creation previously failed",
+        code: "SESSION_CREATE_FAILED",
+        sessionId: existing.sessionId,
+      },
+      409
+    );
+  }
+  if (
+    existing.sessionStatus === "created" &&
+    !(await waitForExistingSessionInitialization(input.env, existing.sessionId, input.ctx))
+  ) {
+    return new Response(
+      JSON.stringify({
+        error: "The idempotent session creation is still initializing",
+        code: "SESSION_CREATE_IN_PROGRESS",
+        sessionId: existing.sessionId,
+      }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json", "Retry-After": "1" },
+      }
+    );
+  }
+  return json({ sessionId: existing.sessionId, status: existing.sessionStatus });
+}
 
 function runtimeTargetFromBody(
   body: CreateSessionInput,
@@ -83,18 +171,6 @@ function runtimeTargetFromBody(
   return null;
 }
 
-function callerChannel(
-  ctx: RequestContext,
-  provider: SessionLaunchSpecV1["target"]["provider"]
-): SessionLaunchSpecV1["caller"]["channel"] {
-  if (ctx.principal?.kind === "user" || ctx.principal?.kind !== "service") return "web";
-  if (ctx.principal.service === "slack-bot") return "slack";
-  if (ctx.principal.service === "feishu-bot") return "feishu";
-  if (ctx.principal.service === "linear-bot") return "linear";
-  if (ctx.principal.service === "github-bot") return provider === "gitea" ? "gitea" : "github";
-  return "web";
-}
-
 async function handleCreateSession(
   request: Request,
   env: Env,
@@ -111,6 +187,28 @@ async function handleCreateSession(
   const enforcement = applyIdentityEnforcement(ctx, "session-create", parsed.raw);
   if (enforcement.rejection) return enforcement.rejection;
   const enforced = enforcement.enforced;
+  const participantUserId = enforced.participantUserId;
+  const spawnSource = enforced.spawnSource ?? undefined;
+  const createIdempotency = await buildSessionCreateIdempotency({
+    service: ctx.principal?.kind === "service" ? ctx.principal.service : "user",
+    participantUserId,
+    body,
+  });
+  const createRequestStore = new SessionCreateRequestStore(ctx.db);
+  if (createIdempotency) {
+    const existing = await createRequestStore.get(
+      createIdempotency.callerKey,
+      createIdempotency.clientRequestId
+    );
+    if (existing) {
+      return existingCreateResponse({
+        env,
+        ctx,
+        existing,
+        requestFingerprint: createIdempotency.requestFingerprint,
+      });
+    }
+  }
 
   let repositoryContext: RepositoryPair | null;
   try {
@@ -229,9 +327,6 @@ async function handleCreateSession(
     }
   }
 
-  const participantUserId = enforced.participantUserId;
-  const spawnSource = enforced.spawnSource ?? undefined;
-
   // Resolve canonical user model ID (for D1 session index) from the verified
   // principal, failing closed; body display fields stay cosmetic.
   const userStore = new UserStore(ctx.db);
@@ -302,21 +397,8 @@ async function handleCreateSession(
         db: ctx.db,
         env,
         relayReady: false,
-        configurationOwners: [
-          ...(callerChannel(ctx, selectedConnection?.provider ?? null) === "web"
-            ? []
-            : [
-                {
-                  scope: "integration" as const,
-                  id: callerChannel(ctx, selectedConnection?.provider ?? null),
-                },
-              ]),
-          ...(participantUserId
-            ? [{ scope: "user" as const, id: participantUserId }]
-            : resolvedUserId
-              ? [{ scope: "user" as const, id: resolvedUserId }]
-              : []),
-        ],
+        configurationOwners:
+          runtimeConfigurationOwnersForRequest(ctx, selectedConnection?.provider ?? null) ?? [],
         request: {
           target: runtimeTarget,
           runtime: body.runtime ?? {
@@ -429,7 +511,7 @@ async function handleCreateSession(
         resolved: resolvedRuntimeDraft,
         skillsManifestId: managedSkillsManifest.manifestSha256,
         caller: (() => {
-          const channel = callerChannel(ctx, resolvedRuntimeDraft.effective.target.provider);
+          const channel = runtimeCallerChannel(ctx, resolvedRuntimeDraft.effective.target.provider);
           return {
             channel,
             canonicalUserId: resolvedUserId,
@@ -469,11 +551,46 @@ async function handleCreateSession(
     spawnSource,
     managedSkillsManifest,
     launchSpec,
+    ...(createIdempotency
+      ? {
+          createRequestClaim: {
+            ...createIdempotency,
+            sessionId,
+            createdAt: Date.now(),
+          },
+        }
+      : {}),
   };
 
   try {
     await initializeSession(env, input, ctx);
   } catch (e) {
+    if (createIdempotency) {
+      const winner = await createRequestStore
+        .get(createIdempotency.callerKey, createIdempotency.clientRequestId)
+        .catch(() => null);
+      if (winner) {
+        if (winner.sessionId !== sessionId) {
+          return existingCreateResponse({
+            env,
+            ctx,
+            existing: winner,
+            requestFingerprint: createIdempotency.requestFingerprint,
+          });
+        }
+        if (
+          winner.requestFingerprint !== createIdempotency.requestFingerprint ||
+          winner.sessionStatus === "failed"
+        ) {
+          return existingCreateResponse({
+            env,
+            ctx,
+            existing: winner,
+            requestFingerprint: createIdempotency.requestFingerprint,
+          });
+        }
+      }
+    }
     logger.error("Failed to initialize session", {
       error: e instanceof Error ? e.message : String(e),
       session_id: sessionId,

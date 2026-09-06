@@ -6,8 +6,13 @@
  * E2B-specific plumbing. Sandboxes are created with auto-pause (a lapsed TTL pauses
  * recoverably rather than killing) and secure envd access; provider-side auto-resume is
  * disabled so resume stays control-plane-driven (connectSandbox) and stray traffic can't
- * wake a paused box. Per-session env is delivered via an envd file write because the
- * template's start command runs at build time.
+ * wake a paused box. Per-session env rides the standard create-time `envVars`
+ * field, then the control plane starts the supervisor through envd.
+ *
+ * This file intentionally carries no CubeSandbox-specific branches: the
+ * @open-inspect/e2b-shim façade presents pure E2B SaaS semantics (secure
+ * envdAccessToken, autoPause lifecycle mapping, connect status codes), so the
+ * provider code stays identical whether it talks to managed E2B or to the shim.
  */
 
 import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
@@ -16,7 +21,6 @@ import {
   buildSandboxEnvVars,
   deriveCodeServerPassword,
   deriveVncPassword,
-  prepareE2BCreateTimeEnv,
   scmCloneIdentityForConfig,
 } from "../sandbox-env";
 import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
@@ -43,28 +47,17 @@ const log = createLogger("e2b-provider");
 export const DEFAULT_E2B_SANDBOX_TIMEOUT_SECONDS = DEFAULT_SANDBOX_TIMEOUT_SECONDS;
 /** Default to a recoverable stop: pause on TTL (not kill), so it stays resumable. */
 export const DEFAULT_E2B_AUTO_PAUSE = true;
-/** Cube's create response can precede an early shim exit; observe it past that window. */
-export const DEFAULT_E2B_CREATE_TIME_ENV_VERIFY_DELAY_MS = 8_000;
-/** One transparent replacement makes an intermittent Cube restore failure self-healing. */
-export const DEFAULT_E2B_CREATE_TIME_ENV_MAX_ATTEMPTS = 2;
 
-const CUBE_TERMINAL_LIFECYCLE_MARKERS = [
-  /wait container[\s\S]{0,256}?exit code\s*[:=]?\s*\d+/i,
-  /taskexit(?: event)?/i,
-  /destroy sandbox/i,
-  /shutdown sandbox/i,
-];
+const E2B_SUPERVISOR_LOG_PATH = "/tmp/oi-supervisor.log";
+const E2B_ENTRYPOINT_COMMAND = `nohup python -m sandbox_runtime.entrypoint >${E2B_SUPERVISOR_LOG_PATH} 2>&1 &`;
 
-class E2BRuntimeStartupError extends Error {
-  constructor(
-    message: string,
-    readonly definitive: boolean,
-    cause?: Error
-  ) {
-    super(message, cause ? { cause } : undefined);
-    this.name = "E2BRuntimeStartupError";
-  }
-}
+/** Static boot-critical env that E2B templates do not propagate at runtime. */
+const E2B_SANDBOX_ENV: Record<string, string> = {
+  HOME: "/home/user",
+  PYTHONPATH: "/app",
+  NODE_PATH: "/usr/lib/node_modules",
+  OI_SCM_CRED_CACHE_DIR: "/tmp/oi",
+};
 
 export interface E2BProviderConfig {
   scmProvider: SourceControlProviderName;
@@ -76,15 +69,6 @@ export interface E2BProviderConfig {
    * control-plane-driven (connectSandbox); provider-side auto-resume is not used.
    */
   autoPause: boolean;
-  /**
-   * Inject per-session env through POST /sandboxes for compatible self-hosted
-   * backends such as CubeSandbox, whose launcher starts fresh on each create.
-   */
-  useCreateTimeEnv?: boolean;
-  /** Internal/test override for Cube's post-create observation window. */
-  createTimeEnvVerifyDelayMs?: number;
-  /** Internal/test override for bounded Cube startup replacement attempts. */
-  createTimeEnvMaxAttempts?: number;
   /**
    * Optional trusted HTTPS gateway used for user-facing service previews.
    * The gateway must route `/sandbox/:providerObjectId/:port/` to the
@@ -132,38 +116,6 @@ export class E2BSandboxProvider implements SandboxProvider {
   ) {}
 
   async createSandbox(config: CreateSandboxConfig): Promise<CreateSandboxResult> {
-    const useCreateTimeEnv = this.providerConfig.useCreateTimeEnv ?? false;
-    const maxAttempts = useCreateTimeEnv
-      ? Math.max(
-          1,
-          this.providerConfig.createTimeEnvMaxAttempts ?? DEFAULT_E2B_CREATE_TIME_ENV_MAX_ATTEMPTS
-        )
-      : 1;
-
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        return await this.createSandboxAttempt(config, useCreateTimeEnv);
-      } catch (error) {
-        lastError = error;
-        if (!(error instanceof E2BRuntimeStartupError) || attempt >= maxAttempts) break;
-        log.warn("e2b.create_time_runtime_retry", {
-          attempt,
-          max_attempts: maxAttempts,
-          session_id: config.sessionId,
-          // The error is intentionally summarized; lifecycle logs may contain secrets.
-          reason: error.message,
-        });
-      }
-    }
-
-    throw this.classifyError("Failed to create E2B sandbox", lastError, "create");
-  }
-
-  private async createSandboxAttempt(
-    config: CreateSandboxConfig,
-    useCreateTimeEnv: boolean
-  ): Promise<CreateSandboxResult> {
     try {
       const codeServerPassword = config.codeServerEnabled
         ? await deriveCodeServerPassword(
@@ -189,30 +141,16 @@ export class E2BSandboxProvider implements SandboxProvider {
       for (const [key, value] of Object.entries(this.providerConfig.llmEnvVars ?? {})) {
         if (value) envVars[key] = value;
       }
-      // E2B sandboxes run as a non-root user and /run is a root-owned tmpfs, so
-      // the git credential helper can't create its default cache dir (/run/oi)
-      // and fails before brokering a token. Point it at a user-writable path.
-      envVars.OI_SCM_CRED_CACHE_DIR = "/tmp/oi";
-      if (useCreateTimeEnv) {
-        envVars.OI_USE_CREATE_TIME_ENV = "1";
-        if (this.providerConfig.scmProvider === "github" && !config.scmGitProxyBaseUrl) {
-          envVars.VCS_CLONE_BASE_URL = `${config.controlPlaneUrl.replace(/\/+$/, "")}/git/${encodeURIComponent(config.sessionId)}`;
-        }
-      }
-      // CubeSandbox enforces a per-value limit on its create-time `envs`
-      // payload. Split oversized secrets (notably Codex auth.json) into
-      // reserved chunks that the template launcher reassembles before exec.
-      const createTimeEnvVars = useCreateTimeEnv ? prepareE2BCreateTimeEnv(envVars) : undefined;
+      Object.assign(envVars, E2B_SANDBOX_ENV);
       const metadata = this.buildMetadata(config);
       const sandbox = await this.client.createSandbox({
         templateID: this.client.config.templateId,
-        ...(useCreateTimeEnv ? { envVars: createTimeEnvVars, envVarsField: "envs" as const } : {}),
+        envVars,
         metadata,
         timeoutSeconds,
         autoPause: this.providerConfig.autoPause,
-        // Require secure envd access: the per-session env we upload carries
-        // SANDBOX_AUTH_TOKEN + user secrets, so envd must reject writes lacking the
-        // returned access token (otherwise the upload is anonymous over the public host).
+        // Require secure envd access: only the control plane may start the
+        // supervisor over envd's public endpoint.
         secure: true,
         // Deliberately NOT auto-resume: resume is control-plane-driven (resumeSandbox →
         // connectSandbox). Provider-side auto-resume would wake a paused sandbox from
@@ -221,36 +159,9 @@ export class E2BSandboxProvider implements SandboxProvider {
       });
 
       try {
-        if (useCreateTimeEnv) {
-          // CubeSandbox creates a fresh launcher process with these variables.
-          // No envd endpoint is exposed publicly and no anonymous secret write
-          // is needed when its E2B compatibility response omits an access token.
-          await this.verifyCreateTimeRuntime(sandbox.sandboxID);
-          return this.createResult(config, sandbox, codeServerPassword, vncPassword);
-        }
-        // Deliver per-session env to the supervisor. E2B's template start command
-        // runs once at build and never sees create-time env vars, so the launcher
-        // (oi-launch.py) waits for this file and execs the supervisor with it.
-        const envdAccessToken = sandbox.envdAccessToken;
-        if (!envdAccessToken) {
-          // Some self-hosted E2B-compatible backends (CubeSandbox) do not return
-          // an envd access token even with secure:true, but their envd accepts
-          // anonymous writes. writeSessionEnv omits the X-Access-Token header in
-          // that case so the standard envd file upload still lands
-          // /tmp/oi-session.env. Managed E2B always returns a token, so its write
-          // stays authenticated.
-          log.warn("e2b.write_session_env_without_token", {
-            sandbox_id: sandbox.sandboxID,
-            domain: sandbox.domain,
-          });
-        }
-        await this.client.writeSessionEnv(sandbox.sandboxID, envVars, {
-          domain: sandbox.domain,
-          envdAccessToken,
-        });
+        await this.startEntrypoint(sandbox);
       } catch (error) {
-        // The sandbox exists but will never get its session env — kill it rather
-        // than leak a running launcher-only sandbox until its TTL.
+        // The sandbox exists but cannot boot; do not leak it until its TTL.
         try {
           await this.client.killSandbox(sandbox.sandboxID);
         } catch (killError) {
@@ -262,59 +173,41 @@ export class E2BSandboxProvider implements SandboxProvider {
         throw error;
       }
 
-      return this.createResult(config, sandbox, codeServerPassword, vncPassword);
+      const { codeServerUrl, vncUrl, tunnelUrls } = this.buildTunnelUrls(
+        sandbox.sandboxID,
+        config.codeServerEnabled,
+        config.vncEnabled,
+        config.sandboxSettings,
+        sandbox.domain
+      );
+
+      return {
+        sandboxId: config.sandboxId,
+        providerObjectId: sandbox.sandboxID,
+        status: "running",
+        createdAt: Date.now(),
+        codeServerUrl,
+        codeServerPassword,
+        vncAccess: createVncAccess(vncUrl, vncPassword),
+        tunnelUrls,
+      };
     } catch (error) {
-      if (error instanceof Error) throw error;
-      throw new Error("E2B create failed with a non-Error value");
+      throw this.classifyError("Failed to create E2B sandbox", error, "create");
     }
   }
 
-  /**
-   * Cube may acknowledge POST /sandboxes and keep reporting `running` after
-   * its restored foreground task has already exited. Wait through the observed
-   * early-exit window, then combine the advertised state with the shim log.
-   * This remains create-time-env-only so standard E2B behaviour is unchanged.
-   */
-  private async verifyCreateTimeRuntime(
-    sandboxId: string,
-    options: { checkLifecycleLogs?: boolean } = {}
-  ): Promise<void> {
-    const delayMs = Math.max(
-      0,
-      this.providerConfig.createTimeEnvVerifyDelayMs ?? DEFAULT_E2B_CREATE_TIME_ENV_VERIFY_DELAY_MS
-    );
-    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
-
-    try {
-      const sandbox = await this.client.getSandbox(sandboxId);
-      if (sandbox.state !== "running") {
-        throw new E2BRuntimeStartupError(
-          `Cube runtime left running state during startup (${sandbox.state})`,
-          true
-        );
-      }
-
-      // A resumed sandbox's lifecycle log accumulates the pause-time TaskExit:
-      // Cube's checkpoint stops the container, which records a containerd
-      // TaskExit event. Re-checking those markers on resume misclassifies a
-      // healthy restore as a dead runtime and forces a fresh spawn. Skip the
-      // log probe on resume — the state check above plus the authenticated
-      // Bridge reconnect (see the lifecycle manager) are the authoritative
-      // health signal for a restarted sandbox.
-      if (options.checkLifecycleLogs === false) return;
-
-      const lifecycleLogs = await this.client.getSandboxLogs(sandboxId);
-      if (CUBE_TERMINAL_LIFECYCLE_MARKERS.some((marker) => marker.test(lifecycleLogs))) {
-        throw new E2BRuntimeStartupError("Cube runtime exited during startup", true);
-      }
-    } catch (error) {
-      if (error instanceof E2BRuntimeStartupError) throw error;
-      throw new E2BRuntimeStartupError(
-        "Cube runtime readiness could not be verified",
-        false,
-        error instanceof Error ? error : undefined
+  private async startEntrypoint(sandbox: E2BSandboxCreated): Promise<void> {
+    const envdAccessToken = sandbox.envdAccessToken;
+    if (!envdAccessToken) {
+      throw new SandboxProviderError(
+        "E2B create did not return an envd access token (secure access required)",
+        "permanent"
       );
     }
+    await this.client.startProcess(sandbox.sandboxID, E2B_ENTRYPOINT_COMMAND, {
+      domain: sandbox.domain,
+      envdAccessToken,
+    });
   }
 
   async resumeSandbox(config: ResumeConfig): Promise<ResumeResult> {
@@ -359,45 +252,6 @@ export class E2BSandboxProvider implements SandboxProvider {
         throw error;
       }
 
-      if (this.providerConfig.useCreateTimeEnv) {
-        try {
-          // Cube may report a paused/running object whose restored foreground
-          // task has since exited. Reuse the create-time shim probe so the
-          // lifecycle manager replaces the dead object immediately instead of
-          // spending the full connecting watchdog on it. The log-marker check
-          // is disabled here: a paused sandbox's lifecycle log records the
-          // checkpoint TaskExit, which would misclassify every healthy restore
-          // as dead and force a fresh spawn.
-          await this.verifyCreateTimeRuntime(config.providerObjectId, {
-            checkLifecycleLogs: false,
-          });
-        } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "Cube runtime readiness could not be verified";
-          if (error instanceof E2BRuntimeStartupError && !error.definitive) {
-            // A control-plane/log API outage is not evidence that the paused
-            // workspace died. Preserve it and let the authenticated Bridge or
-            // the connecting watchdog make the authoritative decision.
-            log.warn("e2b.resume_runtime_probe_unavailable", {
-              sandbox_id: config.providerObjectId,
-              session_id: config.sessionId,
-              reason: message,
-            });
-          } else {
-            log.warn("e2b.resume_runtime_unhealthy", {
-              sandbox_id: config.providerObjectId,
-              session_id: config.sessionId,
-              reason: message,
-            });
-            return {
-              success: false,
-              error: message,
-              shouldSpawnFresh: true,
-            };
-          }
-        }
-      }
-
       const codeServerPassword = config.codeServerEnabled
         ? await deriveCodeServerPassword(
             config.sandboxId,
@@ -433,7 +287,7 @@ export class E2BSandboxProvider implements SandboxProvider {
    * supportsPersistentResume, and resumeSandbox brings the sandbox back).
    * Terminal stops (a sandbox that never connected) instead KILL: the manager
    * marks that session `failed` and won't resume it, so pausing would orphan a
-   * sandbox E2B retains indefinitely.
+   * sandbox the provider retains indefinitely.
    */
   async stopSandbox(config: StopConfig): Promise<StopResult> {
     const terminal = E2BSandboxProvider.TERMINAL_STOP_REASONS.has(config.reason);
@@ -462,11 +316,10 @@ export class E2BSandboxProvider implements SandboxProvider {
   }
 
   /**
-   * Cube may reject DELETE on a paused/pausing sandbox and ask the client to
-   * retry ("is pausing; retry DELETE after 2 seconds", or "could not be resumed
-   * before delete; retry DELETE after 5 seconds"). Treating those 409/408
-   * responses as success would silently leak the provider object, so retry a
-   * bounded number of times while honouring the caller's deadline.
+   * A backend may reject DELETE on a paused/pausing sandbox and ask the client
+   * to retry (409 Conflict, or 408 with a retry hint). Treating those responses
+   * as success would silently leak the provider object, so retry a bounded
+   * number of times while honouring the caller's deadline.
    */
   private async killSandboxWithRetry(config: StopConfig): Promise<void> {
     const maxAttempts = 3;
@@ -506,31 +359,6 @@ export class E2BSandboxProvider implements SandboxProvider {
       metadata.openinspect_repo = `${config.repoOwner}/${config.repoName}`;
     }
     return metadata;
-  }
-
-  private createResult(
-    config: CreateSandboxConfig,
-    sandbox: E2BSandboxCreated,
-    codeServerPassword?: string,
-    vncPassword?: string
-  ): CreateSandboxResult {
-    const { codeServerUrl, vncUrl, tunnelUrls } = this.buildTunnelUrls(
-      sandbox.sandboxID,
-      config.codeServerEnabled,
-      config.vncEnabled,
-      config.sandboxSettings,
-      sandbox.domain
-    );
-    return {
-      sandboxId: config.sandboxId,
-      providerObjectId: sandbox.sandboxID,
-      status: "running",
-      createdAt: Date.now(),
-      codeServerUrl,
-      codeServerPassword,
-      vncAccess: createVncAccess(vncUrl, vncPassword),
-      tunnelUrls,
-    };
   }
 
   private buildTunnelUrls(
@@ -578,9 +406,6 @@ export class E2BSandboxProvider implements SandboxProvider {
   ): SandboxProviderError {
     // Already classified (e.g. the secure-access guard) — don't double-wrap and lose its message.
     if (error instanceof SandboxProviderError) return error;
-    if (error instanceof E2BRuntimeStartupError) {
-      return new SandboxProviderError(`${message}: ${error.message}`, "transient", error);
-    }
     if (error instanceof E2BApiError) {
       if (error.status === 429) {
         // Rate limiting is temporary — classify transient so it isn't counted

@@ -50,9 +50,16 @@ describe("boundary schemas", () => {
       const result = createSessionRequestSchema.safeParse({
         title: "Incident sweep",
         model: "anthropic/claude-sonnet-4-6",
+        clientRequestId: "feishu-session:request-1",
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it("rejects an oversized session creation idempotency key", () => {
+      expect(
+        createSessionRequestSchema.safeParse({ clientRequestId: "x".repeat(129) }).success
+      ).toBe(false);
     });
 
     it("rejects a partial repository session creation request", () => {
@@ -307,6 +314,7 @@ describe("boundary schemas", () => {
     it("parses a valid prompt request with a Slack callback context", () => {
       const result = sendPromptRequestSchema.safeParse({
         content: "Investigate the failure",
+        clientRequestId: "feishu-prompt:request-1",
         source: "slack",
         model: "anthropic/claude-sonnet-4-6",
         reasoningEffort: "high",
@@ -322,6 +330,15 @@ describe("boundary schemas", () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it("rejects an oversized prompt idempotency key", () => {
+      expect(
+        sendPromptRequestSchema.safeParse({
+          content: "Investigate the failure",
+          clientRequestId: "x".repeat(129),
+        }).success
+      ).toBe(false);
     });
 
     it("rejects a malformed prompt request", () => {

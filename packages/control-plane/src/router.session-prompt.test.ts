@@ -168,6 +168,27 @@ describe("session prompt identity enrichment", () => {
     expect(sessionFetch).toHaveBeenCalledOnce();
   });
 
+  it("forwards a caller idempotency key to the session runtime", async () => {
+    vi.mocked(UserStore).mockImplementation(function () {
+      return { getUserById: async () => ({ id: "user-1" }) } as never;
+    });
+    const sessionFetch = vi.fn(async (request: Request) => {
+      await expect(request.json()).resolves.toMatchObject({
+        clientRequestId: "feishu-followup:message-1",
+      });
+      return Response.json({ messageId: "message-1", status: "queued" });
+    });
+    const response = await handleRequest(
+      await userPromptRequest({
+        content: "Fix the bug",
+        clientRequestId: "feishu-followup:message-1",
+      }),
+      createEnv(sessionFetch) as never,
+      TEST_BACKGROUND_TASK_CONTEXT
+    );
+    expect(response.status).toBe(200);
+  });
+
   it("rejects a caller-asserted authorId without forwarding to the runtime", async () => {
     const sessionFetch = vi.fn(async () => Response.json({ status: "queued" }));
     const response = await handleRequest(

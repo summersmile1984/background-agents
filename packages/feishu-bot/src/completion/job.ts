@@ -13,7 +13,12 @@ export const feishuCompletionJobSchema = z.object({
   chatType: z.enum(["p2p", "group"]).optional(),
   threadId: z.string().min(1).optional(),
   replyMode: z.enum(["thread", "flat"]).optional(),
+  /** Bot-owned per-turn lifecycle card to update in place. */
+  workingMessageId: z.string().min(1).optional(),
+  /** Immutable delivery contract copied from the signed callback context. */
+  cardLifecycle: z.literal("single-card-v2").optional(),
   targetLabel: z.string().min(1),
+  routeId: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
   harness: z.enum(["opencode", "codex", "claude", "deepseek", "inherit"]).optional(),
   model: z.string().min(1),
