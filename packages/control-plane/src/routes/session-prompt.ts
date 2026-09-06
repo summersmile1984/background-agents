@@ -131,6 +131,7 @@ async function handleSessionPrompt(
 
   const promptRequest = {
     content: body.content,
+    clientRequestId: body.clientRequestId,
     authorId,
     canonicalUserId,
     source: body.source || "web",

@@ -25,6 +25,8 @@ export interface Env {
   FEISHU_THREAD_REPLIES_ENABLED?: string;
   /** Allow the owner to continue a bound group topic without repeating an @mention. */
   FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED?: string;
+  /** Use one target-aware Card JSON 2.0 lifecycle card per prompt turn. */
+  FEISHU_SINGLE_CARD_LAUNCH_ENABLED?: string;
   /** Required to distinguish a bot @mention from an ordinary group mention. */
   FEISHU_BOT_OPEN_ID?: string;
   /** Mainland Feishu by default; Terraform allow-lists the value. */

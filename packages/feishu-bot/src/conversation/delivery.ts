@@ -1,5 +1,10 @@
 import type { FeishuCard, FeishuSentMessage } from "../feishu/client";
-import { replyFeishuCard, replyFeishuImage, replyFeishuText } from "../feishu/client";
+import {
+  replyFeishuCard,
+  replyFeishuImage,
+  replyFeishuText,
+  updateFeishuCard,
+} from "../feishu/client";
 import type { Env } from "../types";
 import { storeThreadMessageAlias, type FeishuConversationCoordinates } from "./store";
 
@@ -67,6 +72,15 @@ export function replySessionCard(
   return Promise.resolve(
     replyFeishuCard(env, coordinates.rootMessageId, card, replyOptions(coordinates, idempotencyKey))
   ).then((sent) => rememberOutboundMessage(env, coordinates, sent));
+}
+
+/** Update a message id loaded from trusted server-side state; never from card action values. */
+export function updateSessionCard(
+  env: FeishuDeliveryEnv,
+  messageId: string,
+  card: FeishuCard
+): Promise<FeishuSentMessage | undefined> {
+  return updateFeishuCard(env, messageId, card);
 }
 
 /** Reply with an uploaded image on the same flat/thread surface as the session. */

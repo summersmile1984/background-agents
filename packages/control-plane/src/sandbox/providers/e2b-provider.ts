@@ -6,8 +6,8 @@
  * E2B-specific plumbing. Sandboxes are created with auto-pause (a lapsed TTL pauses
  * recoverably rather than killing) and secure envd access; provider-side auto-resume is
  * disabled so resume stays control-plane-driven (connectSandbox) and stray traffic can't
- * wake a paused box. Per-session env is delivered via an envd file write because the
- * template's start command runs at build time.
+ * wake a paused box. Per-session env rides the standard create-time `envVars`
+ * field, then the control plane starts the supervisor through envd.
  *
  * This file intentionally carries no CubeSandbox-specific branches: the
  * @open-inspect/e2b-shim façade presents pure E2B SaaS semantics (secure
@@ -25,7 +25,7 @@ import {
 } from "../sandbox-env";
 import { resolveServicePorts, resolveTunnelPorts } from "./port-resolution";
 import type { SourceControlProviderName } from "../../source-control";
-import type { E2BRestClient, E2BSandboxDetail } from "../e2b-rest-client";
+import type { E2BRestClient, E2BSandboxCreated, E2BSandboxDetail } from "../e2b-rest-client";
 import { E2BApiError, E2BConflictError, E2BNotFoundError } from "../e2b-rest-client";
 import {
   DEFAULT_SANDBOX_TIMEOUT_SECONDS,
@@ -47,6 +47,17 @@ const log = createLogger("e2b-provider");
 export const DEFAULT_E2B_SANDBOX_TIMEOUT_SECONDS = DEFAULT_SANDBOX_TIMEOUT_SECONDS;
 /** Default to a recoverable stop: pause on TTL (not kill), so it stays resumable. */
 export const DEFAULT_E2B_AUTO_PAUSE = true;
+
+const E2B_SUPERVISOR_LOG_PATH = "/tmp/oi-supervisor.log";
+const E2B_ENTRYPOINT_COMMAND = `nohup python -m sandbox_runtime.entrypoint >${E2B_SUPERVISOR_LOG_PATH} 2>&1 &`;
+
+/** Static boot-critical env that E2B templates do not propagate at runtime. */
+const E2B_SANDBOX_ENV: Record<string, string> = {
+  HOME: "/home/user",
+  PYTHONPATH: "/app",
+  NODE_PATH: "/usr/lib/node_modules",
+  OI_SCM_CRED_CACHE_DIR: "/tmp/oi",
+};
 
 export interface E2BProviderConfig {
   scmProvider: SourceControlProviderName;
@@ -130,19 +141,16 @@ export class E2BSandboxProvider implements SandboxProvider {
       for (const [key, value] of Object.entries(this.providerConfig.llmEnvVars ?? {})) {
         if (value) envVars[key] = value;
       }
-      // E2B sandboxes run as a non-root user and /run is a root-owned tmpfs, so
-      // the git credential helper can't create its default cache dir (/run/oi)
-      // and fails before brokering a token. Point it at a user-writable path.
-      envVars.OI_SCM_CRED_CACHE_DIR = "/tmp/oi";
+      Object.assign(envVars, E2B_SANDBOX_ENV);
       const metadata = this.buildMetadata(config);
       const sandbox = await this.client.createSandbox({
         templateID: this.client.config.templateId,
+        envVars,
         metadata,
         timeoutSeconds,
         autoPause: this.providerConfig.autoPause,
-        // Require secure envd access: the per-session env we upload carries
-        // SANDBOX_AUTH_TOKEN + user secrets, so envd must reject writes lacking the
-        // returned access token (otherwise the upload is anonymous over the public host).
+        // Require secure envd access: only the control plane may start the
+        // supervisor over envd's public endpoint.
         secure: true,
         // Deliberately NOT auto-resume: resume is control-plane-driven (resumeSandbox →
         // connectSandbox). Provider-side auto-resume would wake a paused sandbox from
@@ -151,27 +159,9 @@ export class E2BSandboxProvider implements SandboxProvider {
       });
 
       try {
-        // Deliver per-session env to the supervisor. E2B's template start command
-        // runs once at build and never sees create-time env vars, so the launcher
-        // (oi-launch.py) waits for this file and execs the supervisor with it.
-        const envdAccessToken = sandbox.envdAccessToken;
-        if (!envdAccessToken) {
-          // secure:true always returns a token, so a missing one is systemic (secure
-          // unsupported / API change), not intermittent — classify permanent to trip the
-          // circuit breaker rather than looping create→kill. Fail closed: the env write
-          // (SANDBOX_AUTH_TOKEN + secrets) never happens; the catch below kills the sandbox.
-          throw new SandboxProviderError(
-            "E2B create did not return an envd access token (secure access required)",
-            "permanent"
-          );
-        }
-        await this.client.writeSessionEnv(sandbox.sandboxID, envVars, {
-          domain: sandbox.domain,
-          envdAccessToken,
-        });
+        await this.startEntrypoint(sandbox);
       } catch (error) {
-        // The sandbox exists but will never get its session env — kill it rather
-        // than leak a running launcher-only sandbox until its TTL.
+        // The sandbox exists but cannot boot; do not leak it until its TTL.
         try {
           await this.client.killSandbox(sandbox.sandboxID);
         } catch (killError) {
@@ -204,6 +194,20 @@ export class E2BSandboxProvider implements SandboxProvider {
     } catch (error) {
       throw this.classifyError("Failed to create E2B sandbox", error, "create");
     }
+  }
+
+  private async startEntrypoint(sandbox: E2BSandboxCreated): Promise<void> {
+    const envdAccessToken = sandbox.envdAccessToken;
+    if (!envdAccessToken) {
+      throw new SandboxProviderError(
+        "E2B create did not return an envd access token (secure access required)",
+        "permanent"
+      );
+    }
+    await this.client.startProcess(sandbox.sandboxID, E2B_ENTRYPOINT_COMMAND, {
+      domain: sandbox.domain,
+      envdAccessToken,
+    });
   }
 
   async resumeSandbox(config: ResumeConfig): Promise<ResumeResult> {

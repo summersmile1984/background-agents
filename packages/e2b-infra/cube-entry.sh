@@ -8,4 +8,7 @@ set -eu
 # envd remains on 49983 for E2B compatibility.
 python /usr/local/bin/oi-cube-health &
 CODE_INTERPRETER_PORT=49998 /usr/local/bin/start-lightweight-code-interpreter.sh &
-exec python /usr/local/bin/oi-launch
+
+# Match managed E2B: the base sandbox stays inert until the control plane starts
+# the supervisor through envd with the create-time environment.
+exec sleep infinity

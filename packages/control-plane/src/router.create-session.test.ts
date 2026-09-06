@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Principal } from "./auth/principal";
 import { SessionIndexStore } from "./db/session-index";
 import { UserStore } from "./db/user-store";
+import { buildSessionCreateIdempotency } from "./session/create-idempotency";
 import { handleRequest } from "./router";
 import {
   signedServiceRequest,
@@ -291,6 +292,55 @@ describe("handleCreateSession D1 ordering", () => {
     expect(create).toHaveBeenCalledOnce();
     expect(initFetch).toHaveBeenCalledOnce();
     expect(create.mock.invocationCallOrder[0]).toBeLessThan(initFetch.mock.invocationCallOrder[0]);
+  });
+
+  it("waits for the winning SessionDO before returning an idempotent replay", async () => {
+    const body = {
+      clientRequestId: "feishu-session:pending-1",
+      title: "Idempotent session",
+      model: "anthropic/claude-haiku-4-5",
+    };
+    const idempotency = await buildSessionCreateIdempotency({
+      service: "slack-bot",
+      participantUserId: "slack:U0123",
+      body,
+    });
+    expect(idempotency).not.toBeNull();
+
+    const initFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Session not found", { status: 404 }))
+      .mockResolvedValueOnce(Response.json({ id: "session-winner", status: "created" }));
+    const env = createEnv(initFetch);
+    const statement = {
+      bind: vi.fn(() => statement),
+      first: vi.fn(async () => ({
+        caller_key: idempotency!.callerKey,
+        client_request_id: body.clientRequestId,
+        request_fingerprint: idempotency!.requestFingerprint,
+        session_id: "session-winner",
+        created_at: 1,
+        session_status: "created",
+      })),
+      all: vi.fn(async () => ({ results: [] })),
+      run: vi.fn(async () => ({ meta: { changes: 0 } })),
+    };
+    (env.DB as { prepare: ReturnType<typeof vi.fn> }).prepare = vi.fn(() => statement);
+
+    const response = await createSessionRequestWithBody(env, body);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      sessionId: "session-winner",
+      status: "created",
+    });
+    expect(initFetch).toHaveBeenCalledTimes(2);
+    expect(initFetch.mock.calls.every(([request]) => request.method === "GET")).toBe(true);
+    expect(
+      initFetch.mock.calls.every(
+        ([request]) => new URL(request.url).pathname === SessionInternalPaths.state
+      )
+    ).toBe(true);
   });
 
   it("enriches SCM fields from the resolved user's linked GitHub identity", async () => {

@@ -75,6 +75,7 @@ module "feishu_bot_worker" {
     { name = "FEISHU_MEDIA_DELIVERY_ENABLED", value = var.feishu_media_delivery_enabled ? "true" : "false" },
     { name = "FEISHU_THREAD_REPLIES_ENABLED", value = var.feishu_thread_replies_enabled ? "true" : "false" },
     { name = "FEISHU_BOUND_THREAD_FOLLOWUPS_ENABLED", value = var.feishu_bound_thread_followups_enabled ? "true" : "false" },
+    { name = "FEISHU_SINGLE_CARD_LAUNCH_ENABLED", value = var.feishu_single_card_launch_enabled ? "true" : "false" },
     { name = "FEISHU_BOT_OPEN_ID", value = var.feishu_bot_open_id },
   ]
 

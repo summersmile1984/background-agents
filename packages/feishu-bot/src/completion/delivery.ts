@@ -1,13 +1,20 @@
 import { extractAgentResponse } from "@open-inspect/shared/completion/extractor";
 import { resolveOutboundCredential } from "@open-inspect/shared/service-auth";
 import { buildCompletionCard } from "../cards";
-import { replySessionCard } from "../conversation/delivery";
+import { buildTurnCompletionCard } from "../launch-cards";
+import { replySessionCard, updateSessionCard } from "../conversation/delivery";
 import { updateThreadSession, type FeishuConversationCoordinates } from "../conversation/store";
 import { signedControlPlaneFetch } from "../internal-auth";
 import { createLogger } from "../logger";
 import type { Env } from "../types";
+import { FeishuApiError } from "../feishu/client";
 import type { FeishuCompletionJob } from "./job";
 import { deliverFeishuMediaArtifacts } from "./media-upload";
+import {
+  completionCardDeliveryIdempotencyKey,
+  getCompletionCardDeliveryState,
+  setCompletionCardDeliveryState,
+} from "./card-delivery-store";
 
 const log = createLogger("completion-delivery");
 const TUNNEL_URL_FETCH_TIMEOUT_MS = 5_000;
@@ -120,28 +127,72 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
     await updateThreadSession(env, coordinates, {
       state: completed ? "completed" : "failed",
     }).catch(() => undefined);
-    await replySessionCard(
-      env,
-      coordinates,
-      buildCompletionCard({
-        sessionId: job.sessionId,
-        targetLabel: job.targetLabel,
-        textContent: responseText,
-        success: job.success && response.success,
-        error: response.error || job.error,
-        webAppUrl: env.WEB_APP_URL,
-        pullRequestUrl: pullRequestUrl(response.artifacts),
-        previewUrl,
-        visualVerification: response.visualVerification,
-        ...(job.branch ? { branch: job.branch } : {}),
-        ...(job.harness ? { harness: job.harness } : {}),
-        model: job.model,
-        ...(job.reasoningEffort ? { reasoningEffort: job.reasoningEffort } : {}),
-        chatType: coordinates.chatType,
-        replyMode: coordinates.replyMode,
-      }),
-      job.deliveryId
-    );
+    const completionInput = {
+      sessionId: job.sessionId,
+      targetLabel: job.targetLabel,
+      textContent: responseText,
+      success: job.success && response.success,
+      error: response.error || job.error,
+      webAppUrl: env.WEB_APP_URL,
+      pullRequestUrl: pullRequestUrl(response.artifacts),
+      previewUrl,
+      visualVerification: response.visualVerification,
+      ...(job.branch ? { branch: job.branch } : {}),
+      ...(job.harness ? { harness: job.harness } : {}),
+      ...(job.routeId ? { routeId: job.routeId } : {}),
+      model: job.model,
+      ...(job.reasoningEffort ? { reasoningEffort: job.reasoningEffort } : {}),
+      chatType: coordinates.chatType,
+      replyMode: coordinates.replyMode,
+    };
+    // The launch-time contract, not the current rollout flag, owns completion
+    // delivery. This lets an in-flight lifecycle card finish after a rollback
+    // without converting legacy working cards into mutable lifecycle cards.
+    const usesSingleCardLifecycle =
+      job.cardLifecycle === "single-card-v2" && Boolean(job.workingMessageId);
+    const completionCard = usesSingleCardLifecycle
+      ? buildTurnCompletionCard(completionInput)
+      : buildCompletionCard(completionInput);
+    let deliveryMode: "patched" | "fallback" | "legacy" | "deduplicated" = "legacy";
+    const priorCardState = usesSingleCardLifecycle
+      ? await getCompletionCardDeliveryState(env, job)
+      : null;
+    if (priorCardState === "patched" || priorCardState === "fallback") {
+      deliveryMode = "deduplicated";
+    } else if (usesSingleCardLifecycle && job.workingMessageId) {
+      try {
+        await updateSessionCard(env, job.workingMessageId, completionCard);
+        await setCompletionCardDeliveryState(env, job, "patched");
+        deliveryMode = "patched";
+      } catch (error) {
+        const canFallback =
+          error instanceof FeishuApiError &&
+          ["target_missing", "not_editable", "invalid_card"].includes(error.reason);
+        if (!canFallback) {
+          if (error instanceof FeishuApiError && error.reason === "ambiguous") {
+            await setCompletionCardDeliveryState(env, job, "ambiguous");
+          }
+          throw error;
+        }
+        // A card-content rejection will reject the same V2 payload on a new
+        // message as well. Downgrade only that case to the proven legacy
+        // completion card; missing/expired targets can safely reuse V2.
+        const fallbackCard =
+          error.reason === "invalid_card" ? buildCompletionCard(completionInput) : completionCard;
+        const fallbackId = await completionCardDeliveryIdempotencyKey(job);
+        await replySessionCard(env, coordinates, fallbackCard, fallbackId);
+        await setCompletionCardDeliveryState(env, job, "fallback");
+        deliveryMode = "fallback";
+        log.warn("completion.card_fallback", {
+          delivery_id: job.deliveryId,
+          session_id: job.sessionId,
+          working_message_id: job.workingMessageId,
+          failure: error.reason,
+        });
+      }
+    } else {
+      await replySessionCard(env, coordinates, completionCard, job.deliveryId);
+    }
     if (env.FEISHU_MEDIA_DELIVERY_ENABLED === "true" && response.mediaArtifacts.length > 0) {
       await deliverFeishuMediaArtifacts({
         env,
@@ -165,6 +216,7 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       root_message_id: job.rootMessageId,
       ...(job.threadId ? { thread_id: job.threadId } : {}),
       reply_mode: job.replyMode ?? "flat",
+      delivery_mode: deliveryMode,
       outcome: "success",
     });
   } catch (error) {
@@ -178,5 +230,6 @@ export async function processFeishuCompletion(job: FeishuCompletionJob, env: Env
       outcome: "error",
       error: error instanceof Error ? error : new Error(String(error)),
     });
+    throw error;
   }
 }

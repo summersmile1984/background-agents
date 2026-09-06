@@ -1,5 +1,4 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
-import type { VisualVerificationSelection } from "@open-inspect/shared/types/visual-verification";
 import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
 import { RUNTIME_COMMANDS } from "@open-inspect/shared/runtime-commands";
 import {
@@ -39,31 +38,18 @@ import {
 } from "../targets";
 import type { Env } from "../types";
 import { parseSessionReference } from "../conversation/session-short-id";
+import { deliveryIdempotencyKey } from "../conversation/delivery-id";
 import { parseFeishuMessageText, type FeishuEventEnvelope } from "./payload";
+import { visualVerificationForPrompt } from "./visual-verification";
+import {
+  deliverSingleCardFollowUp,
+  initializeSingleCardLaunch,
+} from "../interactions/launch-card-actions";
 
 const log = createLogger("event-dispatcher");
 
 function actorId(tenantKey: string, openId: string): string {
   return `feishu:${tenantKey}:${openId}`;
-}
-
-/**
- * Feishu retries a request with the same event ID, while the reply endpoint
- * deduplicates a UUID for one hour. Derive one valid UUID per logical delivery
- * so duplicate event deliveries and transient 429/5xx retries share identity.
- */
-async function deliveryIdempotencyKey(messageId: string, kind: string): Promise<string> {
-  // Feishu validates this field as a UUID. A SHA-256-derived UUID keeps the
-  // value stable across duplicate event deliveries while remaining opaque.
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`feishu:${messageId}:${kind}`)
-  );
-  const bytes = new Uint8Array(digest).slice(0, 16);
-  bytes[6] = (bytes[6] & 0x0f) | 0x50; // UUID version 5 (name-derived)
-  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function messageCoordinates(
@@ -104,29 +90,7 @@ function isSessionListRequest(content: string): boolean {
   );
 }
 
-/**
- * Keep visual verification opt-in for chat entrypoints while allowing users to
- * request it in ordinary language instead of relying on a slash command.
- */
-export function visualVerificationForPrompt(
-  content: string
-): VisualVerificationSelection | undefined {
-  const normalized = content.trim().toLowerCase();
-  return normalized.includes("视觉验证") ||
-    normalized.includes("截图验证") ||
-    normalized.includes("截图") ||
-    normalized.includes("截个图") ||
-    normalized.includes("截一张图") ||
-    normalized.includes("截屏") ||
-    normalized.includes("预览") ||
-    normalized.includes("screenshot") ||
-    normalized.includes("screen shot") ||
-    normalized.includes("preview") ||
-    normalized.includes("capture") ||
-    /(?:验证|verify)\s*ui\b/i.test(normalized)
-    ? {}
-    : undefined;
-}
+export { visualVerificationForPrompt } from "./visual-verification";
 
 /**
  * Feishu is not a Slack slash-command endpoint: a message beginning with `/`
@@ -263,7 +227,10 @@ async function handleRuntimeCommand(input: {
  * than guessing how it was launched.
  */
 export function canReuseThreadSession(existing: FeishuThreadSession): boolean {
-  return existing.state !== "stale" && existing.harness === defaultHarnessForModel(existing.model);
+  return (
+    existing.state !== "stale" &&
+    (existing.version === 3 || existing.harness === defaultHarnessForModel(existing.model))
+  );
 }
 
 function receiptTextForConversation(existing: FeishuThreadSession | null, actor: string): string {
@@ -356,6 +323,7 @@ async function deliverFollowUp(input: {
     actorId: input.actor,
     callbackContext,
     visualVerification: visualVerificationForPrompt(input.content),
+    clientRequestId: `feishu-followup:${input.messageId}`.slice(0, 128),
     traceId: input.traceId,
   });
   if (!result.ok) {
@@ -579,6 +547,51 @@ export async function handleFeishuEvent(
       coordinates.chatId,
       buildSessionListCard({ sessions, webAppUrl: env.WEB_APP_URL })
     );
+    return;
+  }
+
+  if (env.FEISHU_SINGLE_CARD_LAUNCH_ENABLED === "true") {
+    try {
+      if (existing) {
+        if (!canReuseThreadSession(existing) || existing.actorId !== actor) {
+          await deliverFollowUp({
+            env,
+            coordinates,
+            existing,
+            actor,
+            messageId,
+            content,
+            traceId,
+          });
+        } else {
+          await deliverSingleCardFollowUp({
+            env,
+            coordinates,
+            existing,
+            actorId: actor,
+            incomingMessageId: messageId,
+            content,
+            traceId,
+          });
+        }
+      } else {
+        await initializeSingleCardLaunch({
+          env,
+          coordinates,
+          actorId: actor,
+          content,
+          incomingMessageId: messageId,
+          traceId,
+        });
+      }
+    } catch (error) {
+      log.error("single_card.processing_failed", {
+        trace_id: traceId,
+        message_id: messageId,
+        root_message_id: coordinates.rootMessageId,
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+    }
     return;
   }
 
@@ -811,6 +824,7 @@ export async function startNewSession(input: {
     actorId: input.actor,
     callbackContext,
     visualVerification: visualVerificationForPrompt(input.content),
+    clientRequestId: `feishu-legacy:${input.coordinates.rootMessageId}`.slice(0, 128),
     traceId: input.traceId,
   });
   if (!delivered.ok) {

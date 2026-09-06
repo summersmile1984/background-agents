@@ -3,12 +3,13 @@ import type { RequestContext } from "../routes/shared";
 import type { SpawnSource } from "@open-inspect/shared/types/sessions";
 import type { RepositoryRef } from "@open-inspect/shared/types/repositories";
 import type { SandboxSettings } from "@open-inspect/shared/types/integrations";
-import { SessionIndexStore } from "../db/session-index";
+import { SessionIndexStore, type SessionEntry } from "../db/session-index";
 import { buildSessionInternalUrl, SessionInternalPaths } from "./contracts";
 import { createLogger } from "../logger";
 import type { SessionSkillManifestInput } from "./skill-resolution";
 import { DEFAULT_AGENT_HARNESS, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import type { SessionLaunchSpecV1 } from "@open-inspect/shared/types/runtime-launch";
+import type { SessionCreateRequestClaim } from "../db/session-create-requests";
 
 const logger = createLogger("session-init");
 
@@ -78,6 +79,8 @@ export interface SessionInitInput {
   managedSkillsManifest?: SessionSkillManifestInput;
   managedSkillsSourceSessionId?: string;
   launchSpec?: SessionLaunchSpecV1;
+  /** Optional idempotency claim committed atomically with the D1 session row. */
+  createRequestClaim?: SessionCreateRequestClaim;
 }
 
 /**
@@ -148,7 +151,7 @@ export async function initializeSession(
 
   // Step 1: D1 index (must succeed before DO init starts sandbox warming)
   const sessionStore = new SessionIndexStore(ctx.db);
-  await sessionStore.create({
+  const sessionEntry: SessionEntry = {
     id: input.sessionId,
     title: input.title || null,
     repoOwner: input.repoOwner,
@@ -174,7 +177,12 @@ export async function initializeSession(
     skillManifest: input.managedSkillsManifest,
     skillManifestSourceSessionId: input.managedSkillsSourceSessionId,
     launchSpec: input.launchSpec,
-  });
+  };
+  if (input.createRequestClaim) {
+    await sessionStore.create(sessionEntry, input.createRequestClaim);
+  } else {
+    await sessionStore.create(sessionEntry);
+  }
 
   // Step 2: DO init
   const doId = env.SESSION.idFromName(input.sessionId);

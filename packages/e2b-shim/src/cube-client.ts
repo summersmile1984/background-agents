@@ -22,6 +22,8 @@ export interface CubeResponse {
   /** Raw body text; empty for 204 responses. */
   body: string;
   contentType: string;
+  /** Response headers needed for E2B pagination passthrough. */
+  headers: Headers;
 }
 
 export class CubeClient {
@@ -31,7 +33,7 @@ export class CubeClient {
   ) {}
 
   async request(
-    method: "GET" | "POST" | "DELETE" | "PATCH",
+    method: "GET" | "POST" | "DELETE" | "PATCH" | "PUT",
     path: string,
     body?: unknown
   ): Promise<CubeResponse> {
@@ -48,11 +50,12 @@ export class CubeClient {
       status: response.status,
       body: await response.text(),
       contentType: response.headers.get("content-type") ?? "",
+      headers: response.headers,
     };
   }
 
   async requestJson<T>(
-    method: "GET" | "POST" | "DELETE" | "PATCH",
+    method: "GET" | "POST" | "DELETE" | "PATCH" | "PUT",
     path: string,
     body?: unknown
   ): Promise<{ status: number; data: T }> {

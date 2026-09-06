@@ -1392,6 +1392,25 @@ describe("SessionMessageQueue", () => {
   });
 
   describe("enqueuePromptFromApi", () => {
+    it("forwards an HTTP client request id into the existing prompt idempotency record", async () => {
+      const h = buildQueue();
+
+      await h.queue.enqueuePromptFromApi({
+        content: "Fix bug",
+        clientRequestId: "feishu-followup:message-1",
+        authorId: "feishu:tenant-1:ou_1",
+        source: "feishu",
+      });
+
+      expect(h.repository.getMessageByClientRequestId).toHaveBeenCalledWith(
+        "feishu-followup:message-1"
+      );
+      expect(h.repository.createMessageWithAttachments).toHaveBeenCalledWith(
+        expect.objectContaining({ clientRequestId: "feishu-followup:message-1" }),
+        []
+      );
+    });
+
     it.each(["cancelled", "archived"] as const)(
       "rejects prompts for a %s session before inserting a message",
       async (status) => {

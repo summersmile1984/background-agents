@@ -19,9 +19,10 @@ export async function consumeFeishuCompletions(
       message.ack();
       continue;
     }
+    // Card PATCH and legacy replies use stable idempotency identities, while
+    // media delivery has its own persistent artifact record. Let a thrown
+    // transport failure retry the same job instead of ACKing a lost completion.
     await processFeishuCompletion(parsed.data, env);
-    // A posting failure may have created a message remotely. Do not retry a
-    // queue job blindly and risk duplicate completion cards.
     message.ack();
   }
 }

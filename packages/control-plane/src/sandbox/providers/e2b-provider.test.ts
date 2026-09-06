@@ -26,7 +26,7 @@ function mockClient(overrides: Partial<E2BRestClient> = {}): E2BRestClient {
       templateID: "tmpl",
       envdAccessToken: "envd-token",
     })),
-    writeSessionEnv: vi.fn(async () => {}),
+    startProcess: vi.fn(async () => {}),
     getSandbox: vi.fn(
       async (): Promise<E2BSandboxDetail> => ({
         sandboxID: "e2b-id",
@@ -35,15 +35,22 @@ function mockClient(overrides: Partial<E2BRestClient> = {}): E2BRestClient {
       })
     ),
     pauseSandbox: vi.fn(async () => {}),
-    connectSandbox: vi.fn(async (): Promise<void> => {}),
+    connectSandbox: vi.fn(async () => ({
+      sandboxID: "e2b-id",
+      templateID: "tmpl",
+      envdAccessToken: "envd-token",
+    })),
     killSandbox: vi.fn(async () => {}),
     setSandboxTimeout: vi.fn(async () => {}),
-    getSandboxLogs: vi.fn(async () =>
-      JSON.stringify({ logEntries: [{ message: "start container finish" }] })
-    ),
     getHostnameForPort: vi.fn((id: string, port: number) => `https://${port}-${id}.e2b.app`),
     ...overrides,
   } as unknown as E2BRestClient;
+}
+
+function createEnv(client: E2BRestClient): Record<string, string> {
+  const [params] = vi.mocked(client.createSandbox).mock.calls.at(-1)!;
+  if (!params.envVars) throw new Error("createSandbox did not receive envVars");
+  return params.envVars;
 }
 
 const baseCreateConfig = {
@@ -70,6 +77,11 @@ describe("E2BSandboxProvider", () => {
     expect(result.codeServerUrl).toBe("https://8080-e2b-id.e2b.app");
     const expected = (await computeHmacHex("code-server:sandbox-logical", "secret")).slice(0, 32);
     expect(result.codeServerPassword).toBe(expected);
+    expect(client.startProcess).toHaveBeenCalledWith(
+      "e2b-id",
+      expect.stringContaining("python -m sandbox_runtime.entrypoint"),
+      { domain: undefined, envdAccessToken: "envd-token" }
+    );
   });
 
   it("injects and returns VNC access without including its port in generic tunnels", async () => {
@@ -80,7 +92,7 @@ describe("E2BSandboxProvider", () => {
       vncEnabled: true,
       sandboxSettings: { vncPort: 6099, tunnelPorts: [6099, 3000] },
     });
-    const [, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    const env = createEnv(client);
     const expected = await deriveVncPassword("sandbox-logical", "secret");
 
     expect(env).toMatchObject({ VNC_PASSWORD: expected, NOVNC_PORT: "6099" });
@@ -108,16 +120,11 @@ describe("E2BSandboxProvider", () => {
     });
   });
 
-  it("system vars override user vars (delivered via writeSessionEnv)", async () => {
+  it("system vars override user vars delivered at create time", async () => {
     const client = mockClient();
     const provider = new E2BSandboxProvider(client, providerConfig);
     await provider.createSandbox({ ...baseCreateConfig, userEnvVars: { SANDBOX_ID: "evil" } });
-    // Per-session env is delivered as a file, not via POST /sandboxes envVars.
-    expect(client.createSandbox).toHaveBeenCalledWith(
-      expect.not.objectContaining({ envVars: expect.anything() })
-    );
-    const [sbxId, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
-    expect(sbxId).toBe("e2b-id");
+    const env = createEnv(client);
     expect(env.SANDBOX_ID).toBe("sandbox-logical");
     // Token-free: git auth is brokered per-request via the credential helper,
     // never embedded in sandbox env (would expire on long-running/resumed sessions).
@@ -138,7 +145,7 @@ describe("E2BSandboxProvider", () => {
 
     await provider.createSandbox(baseCreateConfig);
 
-    const [, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    const env = createEnv(client);
     expect(env.VCS_HOST).toBe("bitbucket.org");
     expect(env.VCS_CLONE_USERNAME).toBe("x-token-auth");
   });
@@ -156,7 +163,7 @@ describe("E2BSandboxProvider", () => {
       scmGitCapability: "oig-capability",
     });
 
-    const [, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    const env = createEnv(client);
     expect(env).toMatchObject({
       VCS_HOST: "control-plane.example",
       VCS_CLONE_USERNAME: "open-inspect-capability",
@@ -381,16 +388,12 @@ describe("E2BSandboxProvider", () => {
     expect(client.createSandbox).toHaveBeenCalledWith(
       expect.objectContaining({ timeoutSeconds: 1800 })
     );
-    expect(client.writeSessionEnv).toHaveBeenCalledWith(
-      "e2b-id",
-      expect.objectContaining({ SANDBOX_TIMEOUT_SECONDS: "1800" }),
-      expect.any(Object)
-    );
+    expect(createEnv(client)).toMatchObject({ SANDBOX_TIMEOUT_SECONDS: "1800" });
   });
 
-  it("kills the created sandbox when writeSessionEnv fails (no leak)", async () => {
+  it("kills the created sandbox when the envd entrypoint start fails (no leak)", async () => {
     const client = mockClient({
-      writeSessionEnv: vi.fn(async () => {
+      startProcess: vi.fn(async () => {
         throw new E2BApiError("envd unreachable", 502);
       }),
     });
@@ -404,7 +407,7 @@ describe("E2BSandboxProvider", () => {
 
   it("still surfaces the original error when the cleanup kill also fails", async () => {
     const client = mockClient({
-      writeSessionEnv: vi.fn(async () => {
+      startProcess: vi.fn(async () => {
         throw new E2BApiError("envd unreachable", 502);
       }),
       killSandbox: vi.fn(async () => {
@@ -441,8 +444,8 @@ describe("E2BSandboxProvider", () => {
     expect(client.createSandbox).toHaveBeenCalledWith(
       expect.objectContaining({ secure: true, autoPause: true, autoResume: false })
     );
-    // secure create returns the token; it must be threaded to the env upload
-    const [, , opts] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    // secure create returns the token; it must be threaded to the envd exec.
+    const [, , opts] = vi.mocked(client.startProcess).mock.calls[0];
     expect(opts).toMatchObject({ envdAccessToken: "envd-token" });
   });
 
@@ -456,8 +459,8 @@ describe("E2BSandboxProvider", () => {
       errorType: "permanent",
       message: expect.stringContaining("envd access token"),
     });
-    // Fail-closed: never write the session env and tear the sandbox down.
-    expect(client.writeSessionEnv).not.toHaveBeenCalled();
+    // Fail-closed: never start the supervisor and tear the sandbox down.
+    expect(client.startProcess).not.toHaveBeenCalled();
     expect(client.killSandbox).toHaveBeenCalledWith("e2b-id");
   });
 
@@ -485,7 +488,7 @@ describe("E2BSandboxProvider", () => {
         { repoOwner: "o2", repoName: "r2", baseBranch: "dev" },
       ],
     });
-    const [, env] = vi.mocked(client.writeSessionEnv).mock.calls[0];
+    const env = createEnv(client);
     const sessionConfig = JSON.parse(env.SESSION_CONFIG);
     expect(sessionConfig.mcp_servers).toHaveLength(1);
     expect(sessionConfig.repositories).toEqual([
@@ -499,14 +502,14 @@ describe("E2BSandboxProvider", () => {
     const provider = new E2BSandboxProvider(client, providerConfig);
 
     await provider.createSandbox(baseCreateConfig);
-    expect(vi.mocked(client.writeSessionEnv).mock.calls[0][1].CODE_SERVER_PORT).toBe("8080");
+    expect(createEnv(client).CODE_SERVER_PORT).toBe("8080");
 
     vi.clearAllMocks();
     const result = await provider.createSandbox({
       ...baseCreateConfig,
       sandboxSettings: { codeServerPort: 9999 } as never,
     });
-    expect(vi.mocked(client.writeSessionEnv).mock.calls[0][1].CODE_SERVER_PORT).toBe("9999");
+    expect(createEnv(client).CODE_SERVER_PORT).toBe("9999");
     // The configured port must drive the code-server URL too, not a hardcoded 8080.
     expect(result.codeServerUrl).toBe("https://9999-e2b-id.e2b.app");
   });

@@ -1,11 +1,12 @@
 /**
  * E2B-facing API surface: request routing plus the per-route semantic
- * alignment between official E2B SaaS and CubeSandbox v0.6.0.
+ * alignment between official E2B SaaS and CubeSandbox v0.7.0.
  *
  * Alignments implemented here:
- *  - create: top-level `autoPause`/`autoResume` map onto Cube's nested
- *    `lifecycle{onTimeout,autoResume}` object (Cube silently ignores the
- *    top-level fields and would otherwise kill on TTL expiry);
+ *  - create: top-level `autoPause`/`autoResume` also map onto Cube's nested
+ *    `lifecycle{onTimeout,autoResume}` object for compatibility with older
+ *    Cube templates; `envVars` bypass Cube's narrower admission limits and
+ *    initialize envd privately after VM startup;
  *    `secure:true` mints a shim-side envdAccessToken; the response gains
  *    startedAt/endAt (merged from Cube's GET) and the rewritten domain.
  *  - connect: E2B answers 200 when already running, 201 after a paused
@@ -13,11 +14,12 @@
  *  - list (v1 + v2): state/metadata filtering and cursor pagination done
  *    in memory (Cube v2 lacks metadata filtering and its nextToken is
  *    parsed but unimplemented); Cube-internal metadata keys are stripped.
- *  - get/kill/pause/timeout/logs/templates: passthrough with domain and
- *    metadata normalization.
+ *  - fork: one Cube full-memory snapshot plus N independent snapshot restores.
+ *  - lifecycle, network, snapshot, volume, log and template APIs: passthrough
+ *    with E2B status, domain and metadata normalization where Cube differs.
  */
 
-import { get as httpGet } from "node:http";
+import { get as httpGet, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ShimConfig } from "./config.js";
 import type { ShimStore } from "./store.js";
@@ -33,6 +35,8 @@ export interface ApiContext {
 /** Metadata keys Cube injects that must not leak to E2B clients. */
 const CUBE_INTERNAL_METADATA = /^cube\./;
 const EXTRA_INTERNAL_METADATA_KEYS = new Set(["X-Caller"]);
+const ENVD_PORT = 49983;
+const ENVD_INIT_TIMEOUT_MS = 15_000;
 
 export function stripInternalMetadata(
   metadata: unknown,
@@ -54,7 +58,7 @@ export function normalizeSandbox(
   config: ShimConfig
 ): Record<string, unknown> {
   const out = { ...sandbox };
-  if (config.shimDomain && "domain" in out) {
+  if (config.shimDomain) {
     out.domain = config.shimDomain;
   }
   const stripped = stripInternalMetadata(out.metadata, config.stripCubeMetadata);
@@ -71,6 +75,16 @@ async function readBody(req: IncomingMessage): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const raw = await readBody(req);
+  if (raw.length === 0) return undefined;
+  try {
+    return JSON.parse(raw.toString("utf8"));
+  } catch {
+    throw new ShimHttpError(400, "Invalid JSON body");
+  }
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -84,11 +98,16 @@ function sendShimError(res: ServerResponse, status: number, message: string): vo
 /** Relay Cube's response verbatim (status + body + content-type). */
 function relay(
   res: ServerResponse,
-  upstream: { status: number; body: string; contentType: string }
+  upstream: { status: number; body: string; contentType: string; headers?: Headers }
 ): void {
-  res.writeHead(upstream.status, {
+  const headers: Record<string, string> = {
     "Content-Type": upstream.contentType || "application/json",
-  });
+  };
+  for (const name of ["x-next-token", "x-total-running"]) {
+    const value = upstream.headers?.get(name);
+    if (value) headers[name] = value;
+  }
+  res.writeHead(upstream.status, headers);
   res.end(upstream.body);
 }
 
@@ -103,9 +122,94 @@ interface CreateRequestBody {
   timeout?: number;
   secure?: boolean;
   autoPause?: boolean;
+  autoPauseMemory?: boolean;
   autoResume?: { enabled?: boolean };
   lifecycle?: { onTimeout?: string; autoResume?: boolean };
   [key: string]: unknown;
+}
+
+function parseCreateEnvVars(value: unknown): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new ShimHttpError(400, "envVars must be an object whose values are strings");
+  }
+
+  const envVars: Record<string, string> = {};
+  for (const [name, envValue] of Object.entries(value)) {
+    if (!name || name.includes("=") || name.includes("\0")) {
+      throw new ShimHttpError(400, `invalid environment variable name: ${JSON.stringify(name)}`);
+    }
+    if (typeof envValue !== "string") {
+      throw new ShimHttpError(400, `environment variable ${JSON.stringify(name)} must be a string`);
+    }
+    if (envValue.includes("\0")) {
+      throw new ShimHttpError(400, `environment variable ${JSON.stringify(name)} contains NUL`);
+    }
+    envVars[name] = envValue;
+  }
+  return envVars;
+}
+
+/**
+ * Initialize envd over Cube's private proxy after the VM is ready.
+ *
+ * Cube 0.7 deliberately constrains `POST /sandboxes.envVars` (loader/path
+ * names, 4 KiB values and a 16 KiB aggregate annotation). E2B's public
+ * contract does not impose those Cube-specific restrictions. Keeping the
+ * variables out of CubeAPI and posting the complete map to envd here gives
+ * official SDK callers the E2B create-time environment semantics without a
+ * CubeSandbox source patch. The create response is held until init succeeds,
+ * so no caller can start a process against a partially initialized sandbox.
+ */
+async function initializeCubeEnvd(
+  ctx: ApiContext,
+  sandboxId: string,
+  envVars: Record<string, string>
+): Promise<void> {
+  if (Object.keys(envVars).length === 0) return;
+
+  const proxy = new URL(ctx.config.cubeProxyUrl);
+  if (proxy.protocol !== "http:") {
+    throw new Error("CUBE_PROXY_URL must use http for private envd initialization");
+  }
+  const payload = Buffer.from(JSON.stringify({ envVars }), "utf8");
+
+  await new Promise<void>((resolve, reject) => {
+    const request = httpRequest(
+      {
+        hostname: proxy.hostname,
+        port: proxy.port || 80,
+        method: "POST",
+        path: "/init",
+        headers: {
+          Host: `${ENVD_PORT}-${sandboxId}.${ctx.config.cubeDomain}`,
+          "Content-Type": "application/json",
+          "Content-Length": String(payload.length),
+        },
+        timeout: ENVD_INIT_TIMEOUT_MS,
+      },
+      (response) => {
+        response.resume();
+        response.on("end", () => {
+          const status = response.statusCode ?? 502;
+          if (status >= 200 && status < 300) resolve();
+          else reject(new Error(`envd init returned HTTP ${status}`));
+        });
+      }
+    );
+    request.on("timeout", () => request.destroy(new Error("envd init timed out")));
+    request.on("error", reject);
+    request.end(payload);
+  });
+}
+
+async function cleanupFailedCreate(ctx: ApiContext, sandboxId: string): Promise<void> {
+  try {
+    await ctx.cube.request("DELETE", `/sandboxes/${sandboxId}`);
+  } catch {
+    // The public error must stay deterministic and must not risk echoing
+    // create-time secret values. The orphan is still bounded by its TTL.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +275,12 @@ async function handleCreate(
   if (!body.templateID) {
     return sendShimError(res, 400, "templateID is required");
   }
+  const envVars = parseCreateEnvVars(body.envVars ?? body.envs);
+  // Do not send E2B envVars through CubeAPI. Cube-specific admission and
+  // annotation limits are implementation details of the backend, not part of
+  // the E2B contract exposed by this service.
+  delete body.envVars;
+  delete body.envs;
   body.templateID = await resolveTemplateRef(ctx, body.templateID);
 
   // Map E2B's top-level convenience fields onto Cube's nested lifecycle object.
@@ -185,6 +295,13 @@ async function handleCreate(
   ) {
     lifecycle.autoResume = body.autoResume.enabled === true;
   }
+  if (lifecycle.onTimeout === "pause" && body.autoPauseMemory === false) {
+    return sendShimError(
+      res,
+      501,
+      "filesystem-only auto-pause (autoPauseMemory=false) is not supported by Cube yet"
+    );
+  }
   delete body.autoPause;
   delete body.autoResume;
   if (Object.keys(lifecycle).length > 0)
@@ -195,6 +312,15 @@ async function handleCreate(
 
   const created = JSON.parse(upstream.body) as Record<string, unknown>;
   const sandboxId = String(created.sandboxID);
+
+  if (envVars) {
+    try {
+      await initializeCubeEnvd(ctx, sandboxId, envVars);
+    } catch {
+      await cleanupFailedCreate(ctx, sandboxId);
+      return sendShimError(res, 502, "Sandbox environment initialization failed");
+    }
+  }
 
   let envdToken: string | null = null;
   if (body.secure === true) {
@@ -246,10 +372,40 @@ async function handleKill(ctx: ApiContext, res: ServerResponse, id: string): Pro
   relay(res, upstream);
 }
 
-async function handlePause(ctx: ApiContext, res: ServerResponse, id: string): Promise<void> {
-  const upstream = await ctx.cube.request("POST", `/sandboxes/${id}/pause`);
+async function handlePause(
+  ctx: ApiContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string
+): Promise<void> {
+  const body = await readJsonBody(req);
+  if (typeof body === "object" && body !== null && "memory" in body && body.memory === false) {
+    return sendShimError(
+      res,
+      501,
+      "filesystem-only pause (memory=false) is not supported by Cube yet"
+    );
+  }
+  const upstream = await ctx.cube.request("POST", `/sandboxes/${id}/pause`, body);
   if (upstream.status < 400) ctx.store.setState(id, "paused");
   relay(res, upstream);
+}
+
+async function handleResume(
+  ctx: ApiContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string
+): Promise<void> {
+  const body = await readJsonBody(req);
+  const upstream = await ctx.cube.request("POST", `/sandboxes/${id}/resume`, body);
+  if (upstream.status >= 400) return relay(res, upstream);
+
+  ctx.store.setState(id, "running");
+  const resumed = upstream.body ? (JSON.parse(upstream.body) as Record<string, unknown>) : {};
+  const row = ctx.store.getSandbox(id);
+  if (row?.envdToken) resumed.envdAccessToken = row.envdToken;
+  sendJson(res, 201, normalizeSandbox(resumed, ctx.config));
 }
 
 async function handleConnect(
@@ -258,13 +414,7 @@ async function handleConnect(
   res: ServerResponse,
   id: string
 ): Promise<void> {
-  const raw = await readBody(req);
-  let body: unknown;
-  try {
-    body = raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
-  } catch {
-    return sendShimError(res, 400, "Invalid JSON body");
-  }
+  const body = await readJsonBody(req);
 
   // E2B status semantics: 200 when already running, 201 when this call
   // resumed a paused sandbox. Cube returns 200 for both, so consult the
@@ -295,15 +445,125 @@ async function handleSetTimeout(
   res: ServerResponse,
   id: string
 ): Promise<void> {
-  const raw = await readBody(req);
-  let body: unknown;
-  try {
-    body = raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
-  } catch {
-    return sendShimError(res, 400, "Invalid JSON body");
-  }
+  const body = await readJsonBody(req);
   const upstream = await ctx.cube.request("POST", `/sandboxes/${id}/timeout`, body);
   relay(res, upstream);
+}
+
+async function handleJsonPassthrough(
+  ctx: ApiContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: "POST" | "PATCH" | "PUT",
+  path: string
+): Promise<void> {
+  const body = await readJsonBody(req);
+  relay(res, await ctx.cube.request(method, path, body));
+}
+
+interface ForkRequestBody {
+  timeout?: number;
+  count?: number;
+}
+
+function e2bErrorFromCube(upstream: { status: number; body: string }): {
+  code: number;
+  message: string;
+} {
+  try {
+    const parsed = JSON.parse(upstream.body) as { code?: unknown; message?: unknown };
+    return {
+      code: typeof parsed.code === "number" ? parsed.code : upstream.status,
+      message:
+        typeof parsed.message === "string"
+          ? parsed.message
+          : `Cube returned HTTP ${upstream.status}`,
+    };
+  } catch {
+    return { code: upstream.status, message: `Cube returned HTTP ${upstream.status}` };
+  }
+}
+
+/**
+ * Emulate E2B's fork endpoint with Cube's native full-memory snapshot plus
+ * snapshot restore. The source sandbox keeps its identity and resumes after
+ * Cube captures the snapshot; every requested fork is reported independently.
+ */
+async function handleFork(
+  ctx: ApiContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string
+): Promise<void> {
+  const rawBody = await readJsonBody(req);
+  if (rawBody !== undefined && (typeof rawBody !== "object" || rawBody === null)) {
+    return sendShimError(res, 400, "fork body must be an object");
+  }
+  const body = (rawBody ?? {}) as ForkRequestBody;
+  const count = body.count ?? 1;
+  const timeout = body.timeout ?? 15;
+  if (!Number.isInteger(count) || count < 1 || count > 100) {
+    return sendShimError(res, 400, "count must be an integer between 1 and 100");
+  }
+  if (!Number.isInteger(timeout) || timeout < 0) {
+    return sendShimError(res, 400, "timeout must be a non-negative integer");
+  }
+
+  const snapshot = await ctx.cube.request("POST", `/sandboxes/${id}/snapshots`, {});
+  if (snapshot.status >= 400) return relay(res, snapshot);
+
+  const snapshotBody = JSON.parse(snapshot.body) as { snapshotID?: unknown };
+  if (typeof snapshotBody.snapshotID !== "string" || !snapshotBody.snapshotID) {
+    return sendShimError(res, 502, "Cube snapshot response did not contain snapshotID");
+  }
+
+  const source = ctx.store.getSandbox(id);
+  let results: Array<
+    { sandbox: Record<string, unknown> } | { error: { code: number; message: string } }
+  >;
+  try {
+    results = await Promise.all(
+      Array.from({ length: count }, async () => {
+        try {
+          const upstream = await ctx.cube.request("POST", "/sandboxes", {
+            templateID: snapshotBody.snapshotID,
+            timeout,
+            secure: source?.envdToken != null,
+          });
+          if (upstream.status >= 400) return { error: e2bErrorFromCube(upstream) };
+
+          const sandbox = JSON.parse(upstream.body) as Record<string, unknown>;
+          const sandboxId = String(sandbox.sandboxID ?? "");
+          if (!sandboxId) throw new Error("missing sandboxID");
+          const envdToken = source?.envdToken ? generateEnvdToken() : null;
+          if (envdToken) sandbox.envdAccessToken = envdToken;
+          ctx.store.recordSandbox({
+            sandboxId,
+            templateId: String(sandbox.templateID ?? snapshotBody.snapshotID),
+            createdAtMs: Date.now(),
+            timeoutSeconds: timeout,
+            autoPause: false,
+            lastKnownState: "running",
+            envdToken,
+          });
+          return { sandbox: normalizeSandbox(sandbox, ctx.config) };
+        } catch {
+          return { error: { code: 502, message: "Cube fork creation failed" } };
+        }
+      })
+    );
+  } finally {
+    // Cube persists user-created snapshots as templates. E2B's fork checkpoint
+    // is internal to the operation, so remove the temporary artifact after all
+    // restored sandboxes are ready. Failure here must not invalidate live forks.
+    try {
+      await ctx.cube.request("DELETE", `/templates/${encodeURIComponent(snapshotBody.snapshotID)}`);
+    } catch {
+      // Best effort: an operator can sweep a leaked temporary snapshot later.
+    }
+  }
+
+  sendJson(res, 201, results);
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +572,9 @@ async function handleSetTimeout(
 
 interface ListedSandbox {
   sandboxID: string;
+  templateID?: string;
+  alias?: string;
+  startedAt?: string;
   state?: string;
   metadata?: Record<string, string>;
   [key: string]: unknown;
@@ -345,9 +608,14 @@ function decodeCursor(token: string | null): number {
 }
 
 async function fetchAllSandboxes(ctx: ApiContext): Promise<ListedSandbox[]> {
-  // Cube's v2 supports state/limit but not metadata/cursor; pull unfiltered
-  // (v1 shape, which includes paused sandboxes) and normalize in memory.
-  const upstream = await ctx.cube.requestJson<ListedSandbox[]>("GET", "/v2/sandboxes");
+  // Cube 0.7 applies `limit` to its host page before collecting sandboxes, and
+  // does not implement E2B's nextToken. Request the complete host inventory so
+  // the shim can apply sandbox-level filtering and pagination without silently
+  // losing sandboxes that live after Cube's default 100-host page.
+  const upstream = await ctx.cube.requestJson<ListedSandbox[]>(
+    "GET",
+    "/v2/sandboxes?limit=2147483647"
+  );
   return upstream.data;
 }
 
@@ -365,13 +633,14 @@ async function handleList(
     return sendShimError(res, 502, error instanceof Error ? error.message : "upstream list failed");
   }
 
-  const stateFilter = (url.searchParams.get("state") ?? "")
+  const requestedStates = (url.searchParams.get("state") ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const metadataFilter = v2
-    ? parseMetadataFilter(url.searchParams.get("metadata"))
-    : parseMetadataFilter(url.searchParams.get("metadata"));
+  // The deprecated v1 endpoint is defined as "list running sandboxes" and
+  // accepts metadata only. State selection belongs to /v2/sandboxes.
+  const stateFilter = v2 ? requestedStates : ["running"];
+  const metadataFilter = parseMetadataFilter(url.searchParams.get("metadata"));
 
   let filtered = all.map((s) => normalizeSandbox(s, ctx.config) as ListedSandbox);
   if (stateFilter.length > 0) {
@@ -384,6 +653,36 @@ async function handleList(
     filtered = filtered.filter((s) => {
       const metadata: Record<string, string> = s.metadata ?? {};
       return metadataEntries.every(([k, v]) => metadata[k] === v);
+    });
+  }
+
+  if (v2) {
+    const template = url.searchParams.get("template");
+    if (template) {
+      filtered = filtered.filter((s) => s.templateID === template || s.alias === template);
+    }
+
+    const startedAfter = url.searchParams.get("startedAfter");
+    if (startedAfter) {
+      const thresholdMs = Date.parse(startedAfter);
+      if (!Number.isFinite(thresholdMs)) {
+        return sendShimError(res, 400, "startedAfter must be an RFC 3339 timestamp");
+      }
+      filtered = filtered.filter((s) => {
+        const startedMs = s.startedAt ? Date.parse(s.startedAt) : Number.NaN;
+        return Number.isFinite(startedMs) && startedMs >= thresholdMs;
+      });
+    }
+
+    const order = url.searchParams.get("order") ?? "desc";
+    if (order !== "asc" && order !== "desc") {
+      return sendShimError(res, 400, "order must be asc or desc");
+    }
+    const direction = order === "asc" ? 1 : -1;
+    filtered.sort((a, b) => {
+      const aMs = a.startedAt ? Date.parse(a.startedAt) : 0;
+      const bMs = b.startedAt ? Date.parse(b.startedAt) : 0;
+      return (aMs - bMs) * direction;
     });
   }
 
@@ -401,7 +700,7 @@ async function handleList(
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (nextOffset < filtered.length) headers["X-Next-Token"] = encodeCursor(nextOffset);
-  headers["X-Total-Running"] = String(totalRunning);
+  if (stateFilter.includes("running")) headers["X-Total-Running"] = String(totalRunning);
   res.writeHead(200, headers);
   res.end(JSON.stringify(page));
 }
@@ -425,6 +724,7 @@ export function transformEnvdMetrics(payload: string): unknown[] {
     if (typeof parsed.ts !== "number") return [];
     return [
       {
+        timestamp: new Date(parsed.ts * 1000).toISOString(),
         timestampUnix: parsed.ts,
         cpuCount: parsed.cpu_count ?? 0,
         cpuUsedPct: parsed.cpu_used_pct ?? 0,
@@ -620,7 +920,8 @@ async function handleTemplateBuildStatus(
 // Router
 // ---------------------------------------------------------------------------
 
-const SANDBOX_ID_RE = /^\/sandboxes\/([^/]+)(\/(pause|connect|timeout|metrics))?$/;
+const SANDBOX_ID_RE =
+  /^\/sandboxes\/([^/]+)(\/(pause|resume|fork|connect|timeout|network|refreshes|snapshots|metrics))?$/;
 
 export async function handleApiRequest(
   ctx: ApiContext,
@@ -647,25 +948,52 @@ export async function handleApiRequest(
         if (method === "GET") return await handleGet(ctx, res, id);
         if (method === "DELETE") return await handleKill(ctx, res, id);
       }
-      if (action === "pause" && method === "POST") return await handlePause(ctx, res, id);
+      if (action === "pause" && method === "POST") return await handlePause(ctx, req, res, id);
+      if (action === "resume" && method === "POST") return await handleResume(ctx, req, res, id);
+      if (action === "fork" && method === "POST") return await handleFork(ctx, req, res, id);
       if (action === "connect" && method === "POST") return await handleConnect(ctx, req, res, id);
       if (action === "timeout" && method === "POST")
         return await handleSetTimeout(ctx, req, res, id);
+      if (action === "network" && method === "PUT")
+        return await handleJsonPassthrough(ctx, req, res, "PUT", `/sandboxes/${id}/network`);
+      if (action === "refreshes" && method === "POST")
+        return await handleJsonPassthrough(ctx, req, res, "POST", `/sandboxes/${id}/refreshes`);
+      if (action === "snapshots" && method === "POST")
+        return await handleJsonPassthrough(ctx, req, res, "POST", `/sandboxes/${id}/snapshots`);
       if (action === "metrics" && method === "GET") return await handleMetrics(ctx, res, id);
     }
 
-    // Logs and templates: straight passthrough (Cube's shapes already match).
-    if (method === "GET" && /^\/v2\/sandboxes\/[^/]+\/logs$/.test(pathname)) {
+    // Logs, snapshots and volumes: Cube v0.7 shapes and status codes match E2B.
+    if (
+      method === "GET" &&
+      (/^\/(v2\/)?sandboxes\/[^/]+\/logs$/.test(pathname) || pathname === "/snapshots")
+    ) {
       return relay(res, await ctx.cube.request("GET", pathname + url.search));
     }
     if (
+      (pathname === "/volumes" && (method === "GET" || method === "POST")) ||
+      (/^\/volumes\/[^/]+$/.test(pathname) && (method === "GET" || method === "DELETE"))
+    ) {
+      if (method === "GET" || method === "DELETE") {
+        return relay(res, await ctx.cube.request(method, pathname + url.search));
+      }
+      return await handleJsonPassthrough(ctx, req, res, "POST", pathname + url.search);
+    }
+
+    // Templates implemented natively by Cube v0.7.
+    if (
       (method === "GET" && (pathname === "/templates" || /^\/templates\/[^/]+$/.test(pathname))) ||
       (method === "POST" && pathname === "/templates") ||
-      (method === "DELETE" && /^\/templates\/[^/]+$/.test(pathname))
+      ((method === "POST" || method === "PATCH" || method === "DELETE") &&
+        /^\/templates\/[^/]+$/.test(pathname)) ||
+      (method === "PUT" && /^\/templates\/[^/]+\/alias$/.test(pathname)) ||
+      (method === "GET" && /^\/templates\/aliases\/[^/]+$/.test(pathname)) ||
+      (method === "GET" && /^\/templates\/[^/]+\/builds\/[^/]+\/logs$/.test(pathname))
     ) {
-      const raw = method === "GET" ? undefined : await readBody(req);
-      const body = raw && raw.length ? JSON.parse(raw.toString("utf8")) : undefined;
-      return relay(res, await ctx.cube.request(method, pathname + url.search, body));
+      if (method === "GET" || method === "DELETE") {
+        return relay(res, await ctx.cube.request(method, pathname + url.search));
+      }
+      return await handleJsonPassthrough(ctx, req, res, method, pathname + url.search);
     }
     if (method === "POST" && pathname === "/v3/templates")
       return await handleTemplateV3Create(ctx, req, res);

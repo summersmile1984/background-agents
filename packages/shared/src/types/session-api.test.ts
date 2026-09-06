@@ -24,6 +24,9 @@ describe("Feishu callback context", () => {
         replyMode: "thread",
         branch: "codex/topic-a",
         harness: "codex",
+        workingMessageId: "working-card-1",
+        cardLifecycle: "single-card-v2",
+        routeId: "codex:openai:subscription",
         reasoningEffort: "high",
       })
     ).toMatchObject({
@@ -32,6 +35,9 @@ describe("Feishu callback context", () => {
       replyMode: "thread",
       branch: "codex/topic-a",
       harness: "codex",
+      workingMessageId: "working-card-1",
+      cardLifecycle: "single-card-v2",
+      routeId: "codex:openai:subscription",
       reasoningEffort: "high",
     });
   });

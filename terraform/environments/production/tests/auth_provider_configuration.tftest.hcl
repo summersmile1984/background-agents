@@ -14,17 +14,22 @@ mock_provider "random" {}
 mock_provider "vercel" {}
 
 variables {
-  cloudflare_api_token        = "test-cloudflare-token"
-  cloudflare_account_id       = "test-account"
-  cloudflare_worker_subdomain = "test-account"
-  github_app_id               = "1"
-  github_app_private_key      = "test-private-key"
-  github_app_installation_id  = "1"
-  anthropic_api_key           = "test-anthropic-key"
-  token_encryption_key        = "test-token-key"
-  repo_secrets_encryption_key = "test-repo-key"
-  nextauth_secret             = "test-browser-auth-secret-with-32-characters"
-  deployment_name             = "auth-provider-test"
+  cloudflare_api_token                   = "test-cloudflare-token"
+  cloudflare_account_id                  = "test-account"
+  cloudflare_worker_subdomain            = "test-account"
+  cloudflare_custom_domain               = ""
+  cloudflare_control_plane_custom_domain = ""
+  github_app_id                          = "1"
+  github_app_private_key                 = "test-private-key"
+  github_app_installation_id             = "1"
+  anthropic_api_key                      = "test-anthropic-key"
+  token_encryption_key                   = "test-token-key"
+  repo_secrets_encryption_key            = "test-repo-key"
+  nextauth_secret                        = "test-browser-auth-secret-with-32-characters"
+  deployment_name                        = "auth-provider-test"
+  # Keep this auth-only test independent from an operator's local production
+  # sandbox_provider setting and its provider-specific credentials.
+  sandbox_provider = "modal"
 
   modal_token_id     = "test-modal-token-id"
   modal_token_secret = "test-modal-token-secret"

@@ -18,6 +18,7 @@ import {
   unavailableHostRelayStatus,
 } from "../agent-runtime/model-relay-admin-client";
 import { resolveRuntimeLaunchDraft, RuntimeLaunchResolutionError } from "../agent-runtime/resolver";
+import { runtimeConfigurationOwnersForRequest } from "../agent-runtime/request-context";
 import { isDeploymentAdmin } from "../auth/deployment-admin";
 import {
   AgentRuntimePreferencesStore,
@@ -39,6 +40,7 @@ import {
   json,
   parseJsonBody,
   parsePattern,
+  type RequestContext,
   type Route,
   type UserRouteContext,
 } from "./shared";
@@ -279,7 +281,7 @@ async function getHostRelay(env: Env, ctx: UserRouteContext): Promise<Response> 
 async function resolveLaunchDraft(
   request: Request,
   env: Env,
-  ctx: UserRouteContext
+  ctx: RequestContext
 ): Promise<Response> {
   const body = await parseJsonBody<unknown>(request);
   if (body instanceof Response) return body;
@@ -289,6 +291,10 @@ async function resolveLaunchDraft(
   }
   const client = relayAdminClient(env);
   const hostRelay = client ? await client.status() : unavailableHostRelayStatus();
+  const configurationOwners = runtimeConfigurationOwnersForRequest(ctx);
+  if (!configurationOwners) {
+    return error("A verified user or service actor is required to resolve a launch draft", 403);
+  }
   try {
     return json(
       await resolveRuntimeLaunchDraft({
@@ -296,7 +302,7 @@ async function resolveLaunchDraft(
         env,
         request: parsed.data,
         relayReady: hostRelay.connected && hostRelay.deepseek.configured,
-        configurationOwners: [{ scope: "user", id: ctx.principal.userId }],
+        configurationOwners,
       })
     );
   } catch (cause) {
@@ -403,11 +409,6 @@ export const agentRuntimeRoutes: Route[] = [
       handler: async (_request, env, _match, ctx) => getReadiness(env, ctx),
     },
     {
-      method: "POST",
-      pattern: parsePattern("/agent-runtime/resolve-draft"),
-      handler: async (request, env, _match, ctx) => resolveLaunchDraft(request, env, ctx),
-    },
-    {
       method: "GET",
       pattern: parsePattern("/agent-runtime/host-relay"),
       handler: async (_request, env, _match, ctx) => getHostRelay(env, ctx),
@@ -429,6 +430,11 @@ export const agentRuntimeRoutes: Route[] = [
     },
   ]),
   ...defineRoutes(SCM_AGNOSTIC_USER_OR_SERVICE_ROUTE, [
+    {
+      method: "POST",
+      pattern: parsePattern("/agent-runtime/resolve-draft"),
+      handler: async (request, env, _match, ctx) => resolveLaunchDraft(request, env, ctx),
+    },
     {
       method: "GET",
       pattern: parsePattern("/agent-runtime/catalog"),

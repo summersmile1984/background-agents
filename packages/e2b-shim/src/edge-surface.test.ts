@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import http from "node:http";
 import type { IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
-import { parseEdgeHost, isEnvdAuthorized } from "./edge-surface.js";
+import { parseEdgeHeaders, parseEdgeHost, isEnvdAuthorized } from "./edge-surface.js";
 import { fileSignature } from "./auth.js";
 import { ShimStore } from "./store.js";
 import { startMockUpstream, startShim, TEST_API_KEY } from "./test-helpers.js";
@@ -28,6 +28,29 @@ describe("parseEdgeHost", () => {
       port: 49983,
       sandboxId: "abc123",
     });
+  });
+});
+
+describe("parseEdgeHeaders", () => {
+  it("parses the official stable sandbox gateway headers", () => {
+    expect(
+      parseEdgeHeaders({
+        "e2b-sandbox-id": "abc123",
+        "e2b-sandbox-port": "49983",
+      })
+    ).toEqual({ port: 49983, sandboxId: "abc123" });
+  });
+
+  it("rejects malformed ids and ports", () => {
+    expect(
+      parseEdgeHeaders({ "e2b-sandbox-id": "bad-id", "e2b-sandbox-port": "49983" })
+    ).toBeNull();
+    expect(
+      parseEdgeHeaders({ "e2b-sandbox-id": "abc123", "e2b-sandbox-port": "70000" })
+    ).toBeNull();
+    expect(
+      parseEdgeHeaders({ "e2b-sandbox-id": "abc123", "e2b-sandbox-port": "49983x" })
+    ).toBeNull();
   });
 });
 
@@ -163,6 +186,8 @@ describe("edge proxy integration", () => {
       // envd x-internal endpoints are refused even with a valid token.
       const internal = await edgeCall({ "X-Access-Token": envdAccessToken }, "/init");
       expect(internal.status).toBe(403);
+      const upgrade = await edgeCall({ "X-Access-Token": envdAccessToken }, "/upgrade");
+      expect(upgrade.status).toBe(403);
 
       // Valid token → proxied with Cube-domain Host, token header stripped.
       const allowed = await edgeCall({ "X-Access-Token": envdAccessToken });
@@ -170,6 +195,17 @@ describe("edge proxy integration", () => {
       expect(seen.host).toBe("49983-edge1.cube.app");
       expect(seen.xAccessToken).toBeUndefined();
       expect(seen.path).toBe("/files?path=/tmp/x&username=user");
+
+      // Official SDKs use this form when E2B_SANDBOX_URL points at the same
+      // stable gateway hostname as E2B_API_URL.
+      const stable = await edgeCall({
+        Host: "cubeapi.test",
+        "X-Access-Token": envdAccessToken,
+        "E2b-Sandbox-Id": "edge1",
+        "E2b-Sandbox-Port": "49983",
+      });
+      expect(stable.status).toBe(200);
+      expect(seen.host).toBe("49983-edge1.cube.app");
     } finally {
       await shim.close();
       await upstream.close();

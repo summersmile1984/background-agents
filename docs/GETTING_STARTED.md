@@ -237,7 +237,8 @@ runtime for the E2B REST API, and the `e2b-infra` module uses it to build the sa
 the E2B Template SDK). Create it at the [E2B dashboard](https://e2b.dev) → API Keys.
 
 1. Set `sandbox_provider = "e2b"` in `terraform.tfvars`.
-2. Set `e2b_api_key` and `e2b_template_id` (e.g. `open-inspect-sandbox`).
+2. Set `e2b_api_key` and `e2b_template_id` (e.g. `open-inspect-sandbox`). For a self-hosted
+   endpoint, also set `e2b_api_url` and the stable `e2b_sandbox_url`.
 3. Terraform's `e2b-infra` module builds the template automatically on `terraform apply`, and
    rebuilds it when `packages/e2b-infra` or `packages/sandbox-runtime` change. To build manually:
    ```bash
@@ -250,14 +251,15 @@ For a self-hosted E2B-compatible runtime with an existing template, set
 `e2b_build_template = false`. Terraform will skip the official E2B Template SDK build and pass the
 configured `e2b_template_id` directly to the control plane.
 
-CubeSandbox starts the template launcher fresh for each sandbox and injects `envVars` during
-creation instead of returning an envd access token. Set `e2b_use_create_time_env = true` for
-CubeSandbox; keep the default `false` for managed E2B so session secrets continue through secure
-envd upload. If GitHub is the configured SCM provider, create-time-env sandboxes clone through the
-control plane's authenticated smart-HTTP endpoint. This supports sandbox networks that can reach a
-Cloudflare custom domain but cannot connect to `github.com` directly. Each request must present the
-session's sandbox capability; the control plane forwards the short-lived GitHub installation token
-only to `github.com`.
+Managed E2B and CubeSandbox use the same boot contract: the control plane sends the session
+environment in standard create-time `envVars`, requires `secure: true`, then starts the supervisor
+through authenticated envd `Process/Start`. For Cube, point `e2b_api_url` and `e2b_sandbox_url` at
+the E2B shim's public `api.<domain>` and `sandbox.<domain>` hosts rather than CubeAPI directly; the
+shim mints and enforces the envd access token while preserving the official control-plane contract.
+External SDK callers can set only `E2B_DOMAIN=<domain>` and keep E2B's standard subdomain layout. If
+GitHub is the configured SCM provider, sandboxes can clone through the control plane's authenticated
+smart-HTTP endpoint. Each request must present the session's sandbox capability; the control plane
+forwards the short-lived GitHub installation token only to `github.com`.
 
 The control plane calls the E2B REST API directly from Cloudflare Workers. Each session runs in a
 single long-lived sandbox: when its TTL (`e2b_sandbox_timeout_seconds`, default 7200) expires the

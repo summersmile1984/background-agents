@@ -10,6 +10,8 @@ describe("browser auth proxy route contract", () => {
       ["GET", "/api/auth/get-session"],
       ["POST", "/api/auth/sign-out"],
       ["GET", "/api/auth/error"],
+      ["POST", "/api/auth/sign-in/email"],
+      ["POST", "/api/auth/sign-up/email"],
     ]);
 
     expect(isBrowserAuthProxyRoute("get", "/api/auth/get-session")).toBe(true);

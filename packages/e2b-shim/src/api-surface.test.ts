@@ -122,6 +122,23 @@ describe("create sandbox", () => {
     expect(forwarded.lifecycle).toEqual({ onTimeout: "kill" });
   });
 
+  it("fails closed instead of pretending filesystem-only auto-pause works", async () => {
+    const before = upstream.requests.length;
+    const res = await fetch(`${shim.url}/sandboxes`, {
+      method: "POST",
+      headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        templateID: "tpl-x",
+        autoPause: true,
+        autoPauseMemory: false,
+      }),
+    });
+
+    expect(res.status).toBe(501);
+    expect(await res.json()).toMatchObject({ code: 501 });
+    expect(upstream.requests).toHaveLength(before);
+  });
+
   it("mints envdAccessToken when secure and records the sandbox", async () => {
     const res = await fetch(`${shim.url}/sandboxes`, {
       method: "POST",
@@ -170,6 +187,108 @@ describe("create sandbox", () => {
   });
 });
 
+describe("create-time environment compatibility", () => {
+  it("initializes the complete E2B env map through private envd instead of CubeAPI", async () => {
+    const cubeApi = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === "/sandboxes") {
+        return { status: 201, body: cubeCreated() };
+      }
+      if (req.method === "GET" && req.path === `/sandboxes/${SANDBOX_ID}`) {
+        return { status: 200, body: cubeDetail() };
+      }
+      return undefined;
+    });
+    const envd = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === "/init") return { status: 204 };
+      return undefined;
+    });
+    const shim = await startShim(cubeApi.url, { cubeProxyUrl: envd.url });
+    const envVars = {
+      PYTHONPATH: "/app:/workspace",
+      MULTILINE_SECRET: "line one\nline two",
+      LARGE_CREDENTIAL: "x".repeat(5_000),
+    };
+
+    try {
+      const res = await fetch(`${shim.url}/sandboxes`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ templateID: "tpl-x", envVars, secure: true }),
+      });
+
+      expect(res.status).toBe(201);
+      const forwardedCreate = JSON.parse(cubeApi.requests[0]?.body ?? "{}");
+      expect(forwardedCreate.envVars).toBeUndefined();
+      expect(forwardedCreate.envs).toBeUndefined();
+
+      expect(envd.requests).toHaveLength(1);
+      expect(envd.requests[0]?.headers.host).toBe(`49983-${SANDBOX_ID}.cube.app`);
+      expect(JSON.parse(envd.requests[0]?.body ?? "{}")).toEqual({ envVars });
+    } finally {
+      await shim.close();
+      await envd.close();
+      await cubeApi.close();
+    }
+  });
+
+  it("kills a newly created sandbox when envd initialization fails without echoing secrets", async () => {
+    const cubeApi = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === "/sandboxes") {
+        return { status: 201, body: cubeCreated() };
+      }
+      if (req.method === "DELETE" && req.path === `/sandboxes/${SANDBOX_ID}`) {
+        return { status: 204 };
+      }
+      return undefined;
+    });
+    const secret = "super-secret-multiline\ncredential";
+    const envd = await startMockUpstream((req) => ({
+      status: 500,
+      body: { message: `rejected ${req.body}` },
+    }));
+    const shim = await startShim(cubeApi.url, { cubeProxyUrl: envd.url });
+
+    try {
+      const res = await fetch(`${shim.url}/sandboxes`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ templateID: "tpl-x", envVars: { SECRET: secret } }),
+      });
+
+      expect(res.status).toBe(502);
+      const responseText = await res.text();
+      expect(responseText).not.toContain(secret);
+      expect(responseText).toContain("Sandbox environment initialization failed");
+      expect(cubeApi.requests.map((req) => `${req.method} ${req.path}`)).toEqual([
+        "POST /sandboxes",
+        `DELETE /sandboxes/${SANDBOX_ID}`,
+      ]);
+      expect(shim.store.getSandbox(SANDBOX_ID)).toBeNull();
+    } finally {
+      await shim.close();
+      await envd.close();
+      await cubeApi.close();
+    }
+  });
+
+  it("rejects malformed envVars before creating a Cube sandbox", async () => {
+    const cubeApi = await startMockUpstream(() => ({ status: 500 }));
+    const shim = await startShim(cubeApi.url);
+    try {
+      const res = await fetch(`${shim.url}/sandboxes`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ templateID: "tpl-x", envVars: { BAD: 123 } }),
+      });
+      expect(res.status).toBe(400);
+      expect(cubeApi.requests).toHaveLength(0);
+    } finally {
+      await shim.close();
+      await cubeApi.close();
+    }
+  });
+});
+
 describe("pause/connect status semantics", () => {
   let upstream: MockUpstream;
   let shim: RunningShim;
@@ -189,6 +308,10 @@ describe("pause/connect status semantics", () => {
       if (req.method === "POST" && req.path === `/sandboxes/${SANDBOX_ID}/connect`) {
         state = "running";
         return { status: 200, body: cubeCreated() };
+      }
+      if (req.method === "POST" && req.path === `/sandboxes/${SANDBOX_ID}/resume`) {
+        state = "running";
+        return { status: 201, body: cubeCreated() };
       }
       return undefined;
     });
@@ -220,8 +343,10 @@ describe("pause/connect status semantics", () => {
 
     await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/pause`, {
       method: "POST",
-      headers: { "X-API-Key": TEST_API_KEY },
+      headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ memory: true }),
     });
+    expect(JSON.parse(upstream.requests.at(-1)?.body ?? "{}")).toEqual({ memory: true });
 
     const resumed = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/connect`, {
       method: "POST",
@@ -233,6 +358,158 @@ describe("pause/connect status semantics", () => {
     expect(body.envdAccessToken).toBe(token);
     expect(body.domain).toBe("sb.test");
   });
+
+  it("exposes the deprecated resume route with E2B's 201 response", async () => {
+    const token = await createSecure();
+    await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/pause`, {
+      method: "POST",
+      headers: { "X-API-Key": TEST_API_KEY },
+    });
+
+    const resumed = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/resume`, {
+      method: "POST",
+      headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ timeout: 900, autoPause: true }),
+    });
+
+    expect(resumed.status).toBe(201);
+    expect(await resumed.json()).toMatchObject({
+      sandboxID: SANDBOX_ID,
+      domain: "sb.test",
+      envdAccessToken: token,
+    });
+    expect(JSON.parse(upstream.requests.at(-1)?.body ?? "{}")).toEqual({
+      timeout: 900,
+      autoPause: true,
+    });
+  });
+
+  it("fails closed instead of treating memory=false as a full-memory pause", async () => {
+    const token = await createSecure();
+    expect(token).toMatch(/^v1_/);
+    const before = upstream.requests.length;
+
+    const res = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/pause`, {
+      method: "POST",
+      headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ memory: false }),
+    });
+
+    expect(res.status).toBe(501);
+    expect(await res.json()).toMatchObject({ code: 501 });
+    expect(upstream.requests).toHaveLength(before);
+  });
+});
+
+describe("fork compatibility", () => {
+  it("maps E2B fork onto one Cube snapshot and independently restored sandboxes", async () => {
+    let createCount = 0;
+    const cubeApi = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === "/sandboxes") {
+        createCount++;
+        if (createCount === 1) return { status: 201, body: cubeCreated() };
+        return {
+          status: 201,
+          body: cubeCreated({ sandboxID: `fork-${createCount - 1}`, templateID: "snap-fork" }),
+        };
+      }
+      if (req.method === "GET" && req.path === `/sandboxes/${SANDBOX_ID}`) {
+        return { status: 200, body: cubeDetail() };
+      }
+      if (req.method === "POST" && req.path === `/sandboxes/${SANDBOX_ID}/snapshots`) {
+        return { status: 201, body: { snapshotID: "snap-fork", names: [] } };
+      }
+      if (req.method === "DELETE" && req.path === "/templates/snap-fork") {
+        return { status: 204 };
+      }
+      return undefined;
+    });
+    const shim = await startShim(cubeApi.url);
+
+    try {
+      await fetch(`${shim.url}/sandboxes`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ templateID: "tpl-x", secure: true }),
+      });
+
+      const res = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/fork`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ timeout: 900, count: 2 }),
+      });
+
+      expect(res.status).toBe(201);
+      const results = await res.json();
+      expect(results).toHaveLength(2);
+      expect(results[0].sandbox).toMatchObject({
+        sandboxID: "fork-1",
+        domain: "sb.test",
+      });
+      expect(results[1].sandbox).toMatchObject({
+        sandboxID: "fork-2",
+        domain: "sb.test",
+      });
+      expect(results[0].sandbox.envdAccessToken).toMatch(/^v1_/);
+      expect(results[1].sandbox.envdAccessToken).toMatch(/^v1_/);
+      expect(results[0].sandbox.envdAccessToken).not.toBe(results[1].sandbox.envdAccessToken);
+
+      const restored = cubeApi.requests.filter(
+        (request) => request.method === "POST" && request.path === "/sandboxes"
+      );
+      expect(restored).toHaveLength(3);
+      expect(JSON.parse(restored[1]?.body ?? "{}")).toEqual({
+        templateID: "snap-fork",
+        timeout: 900,
+        secure: true,
+      });
+      expect(cubeApi.requests.at(-1)).toMatchObject({
+        method: "DELETE",
+        path: "/templates/snap-fork",
+      });
+      expect(shim.store.getSandbox("fork-1")?.envdToken).toBe(results[0].sandbox.envdAccessToken);
+    } finally {
+      await shim.close();
+      await cubeApi.close();
+    }
+  });
+
+  it("returns per-fork Cube failures without failing successful siblings", async () => {
+    let forkCreate = 0;
+    const cubeApi = await startMockUpstream((req) => {
+      if (req.method === "POST" && req.path === `/sandboxes/${SANDBOX_ID}/snapshots`) {
+        return { status: 201, body: { snapshotID: "snap-fork", names: [] } };
+      }
+      if (req.method === "POST" && req.path === "/sandboxes") {
+        forkCreate++;
+        if (forkCreate === 1) {
+          return { status: 429, body: { code: 429, message: "capacity exceeded" } };
+        }
+        return { status: 201, body: cubeCreated({ sandboxID: "fork-ok" }) };
+      }
+      if (req.method === "DELETE" && req.path === "/templates/snap-fork") {
+        return { status: 204 };
+      }
+      return undefined;
+    });
+    const shim = await startShim(cubeApi.url);
+
+    try {
+      const res = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/fork`, {
+        method: "POST",
+        headers: { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({ count: 2 }),
+      });
+      expect(res.status).toBe(201);
+      expect(await res.json()).toEqual([
+        { error: { code: 429, message: "capacity exceeded" } },
+        { sandbox: cubeCreated({ sandboxID: "fork-ok", domain: "sb.test" }) },
+      ]);
+    } finally {
+      await shim.close();
+      await cubeApi.close();
+    }
+  });
 });
 
 describe("list filtering and pagination", () => {
@@ -240,14 +517,33 @@ describe("list filtering and pagination", () => {
   let shim: RunningShim;
 
   const entries = [
-    { sandboxID: "s1", state: "running", metadata: { team: "blue", "cube.product": "cubebox" } },
-    { sandboxID: "s2", state: "paused", metadata: { team: "blue" } },
-    { sandboxID: "s3", state: "running", metadata: { team: "red" } },
+    {
+      sandboxID: "s1",
+      templateID: "tpl-a",
+      alias: "alpha",
+      startedAt: "2026-09-04T03:00:00Z",
+      state: "running",
+      metadata: { team: "blue", "cube.product": "cubebox" },
+    },
+    {
+      sandboxID: "s2",
+      templateID: "tpl-b",
+      startedAt: "2026-09-04T02:00:00Z",
+      state: "paused",
+      metadata: { team: "blue" },
+    },
+    {
+      sandboxID: "s3",
+      templateID: "tpl-a",
+      startedAt: "2026-09-04T01:00:00Z",
+      state: "running",
+      metadata: { team: "red" },
+    },
   ];
 
   beforeEach(async () => {
     upstream = await startMockUpstream((req) => {
-      if (req.method === "GET" && req.path === "/v2/sandboxes")
+      if (req.method === "GET" && req.path === "/v2/sandboxes?limit=2147483647")
         return { status: 200, body: entries };
       return undefined;
     });
@@ -266,6 +562,7 @@ describe("list filtering and pagination", () => {
     expect(body.map((s: { sandboxID: string }) => s.sandboxID)).toEqual(["s1", "s3"]);
     expect(body[0].metadata).toEqual({ team: "blue" });
     expect(res.headers.get("X-Total-Running")).toBe("2");
+    expect(upstream.requests[0]?.path).toBe("/v2/sandboxes?limit=2147483647");
   });
 
   it("v2 filters by embedded metadata query", async () => {
@@ -296,12 +593,113 @@ describe("list filtering and pagination", () => {
     expect(page2.headers.get("X-Next-Token")).toBeNull();
   });
 
-  it("v1 returns a bare filtered array", async () => {
+  it("v1 always returns running sandboxes and ignores the v2-only state parameter", async () => {
     const res = await fetch(`${shim.url}/sandboxes?state=paused`, {
       headers: { "X-API-Key": TEST_API_KEY },
     });
     const body = await res.json();
-    expect(body.map((s: { sandboxID: string }) => s.sandboxID)).toEqual(["s2"]);
+    expect(body.map((s: { sandboxID: string }) => s.sandboxID)).toEqual(["s1", "s3"]);
+  });
+
+  it("v2 filters by start time and template, and sorts ascending", async () => {
+    const res = await fetch(
+      `${shim.url}/v2/sandboxes?template=tpl-a&startedAfter=2026-09-04T00%3A30%3A00Z&order=asc`,
+      { headers: { "X-API-Key": TEST_API_KEY } }
+    );
+    const body = await res.json();
+    expect(body.map((s: { sandboxID: string }) => s.sandboxID)).toEqual(["s3", "s1"]);
+  });
+
+  it("only emits X-Total-Running when running was explicitly requested", async () => {
+    const unfiltered = await fetch(`${shim.url}/v2/sandboxes`, {
+      headers: { "X-API-Key": TEST_API_KEY },
+    });
+    expect(unfiltered.headers.get("X-Total-Running")).toBeNull();
+
+    const filtered = await fetch(`${shim.url}/v2/sandboxes?state=running,paused`, {
+      headers: { "X-API-Key": TEST_API_KEY },
+    });
+    expect(filtered.headers.get("X-Total-Running")).toBe("2");
+  });
+});
+
+describe("Cube v0.7 standard passthrough routes", () => {
+  it("forwards network, refresh, snapshot, log and volume APIs", async () => {
+    const upstream = await startMockUpstream((req) => {
+      if (req.path === "/snapshots?limit=1") {
+        return { status: 200, body: [], headers: { "X-Next-Token": "next-snapshot" } };
+      }
+      if (req.path === "/volumes" && req.method === "POST") {
+        return { status: 201, body: { volumeID: "vol-1", token: "token" } };
+      }
+      if (req.path === "/volumes/vol-1" && req.method === "DELETE") return { status: 204 };
+      if (req.path.endsWith("/snapshots")) {
+        return { status: 201, body: { snapshotID: "snap-1:default", names: [] } };
+      }
+      if (req.path.endsWith("/logs")) return { status: 200, body: { logs: [] } };
+      return { status: 204 };
+    });
+    const shim = await startShim(upstream.url);
+    const headers = { "X-API-Key": TEST_API_KEY, "Content-Type": "application/json" };
+    try {
+      const network = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/network`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ allow_internet_access: false }),
+      });
+      expect(network.status).toBe(204);
+
+      const refresh = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/refreshes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ duration: 300 }),
+      });
+      expect(refresh.status).toBe(204);
+
+      const snapshot = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/snapshots`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "checkpoint" }),
+      });
+      expect(snapshot.status).toBe(201);
+      expect(await snapshot.json()).toMatchObject({ snapshotID: "snap-1:default" });
+
+      const snapshots = await fetch(`${shim.url}/snapshots?limit=1`, {
+        headers: { "X-API-Key": TEST_API_KEY },
+      });
+      expect(snapshots.headers.get("X-Next-Token")).toBe("next-snapshot");
+
+      const logs = await fetch(`${shim.url}/sandboxes/${SANDBOX_ID}/logs`, {
+        headers: { "X-API-Key": TEST_API_KEY },
+      });
+      expect(logs.status).toBe(200);
+
+      const volume = await fetch(`${shim.url}/volumes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "cache" }),
+      });
+      expect(volume.status).toBe(201);
+
+      const deleted = await fetch(`${shim.url}/volumes/vol-1`, {
+        method: "DELETE",
+        headers: { "X-API-Key": TEST_API_KEY },
+      });
+      expect(deleted.status).toBe(204);
+    } finally {
+      await shim.close();
+      await upstream.close();
+    }
+
+    expect(upstream.requests.map((req) => `${req.method} ${req.path}`)).toEqual([
+      `PUT /sandboxes/${SANDBOX_ID}/network`,
+      `POST /sandboxes/${SANDBOX_ID}/refreshes`,
+      `POST /sandboxes/${SANDBOX_ID}/snapshots`,
+      "GET /snapshots?limit=1",
+      `GET /sandboxes/${SANDBOX_ID}/logs`,
+      "POST /volumes",
+      "DELETE /volumes/vol-1",
+    ]);
   });
 });
 
@@ -450,6 +848,7 @@ describe("metrics transform", () => {
     });
     expect(transformEnvdMetrics(envd)).toEqual([
       {
+        timestamp: "2026-09-05T03:20:31.000Z",
         timestampUnix: 1788578431,
         cpuCount: 4,
         cpuUsedPct: 2.41,

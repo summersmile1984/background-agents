@@ -2,6 +2,7 @@ import { createKvCacheStore } from "@open-inspect/shared/cache-store";
 import { agentHarnessSchema, type AgentHarness } from "@open-inspect/shared/types/agent-harness";
 import {
   runtimeConfigFragmentSchema,
+  runtimeLaunchTargetSchema,
   type RuntimeConfigFragment,
 } from "@open-inspect/shared/types/runtime-launch";
 import { z } from "zod";
@@ -24,13 +25,16 @@ export interface FeishuConversationCoordinates {
 }
 
 export interface FeishuThreadSession {
-  version: 2;
+  version: 2 | 3;
   sessionId: string;
-  repositoryKey: string;
+  repositoryKey?: string;
+  target?: z.infer<typeof runtimeLaunchTargetSchema>;
   targetLabel: string;
   branch?: string;
   model: string;
   harness: AgentHarness | "inherit";
+  routeId?: string;
+  draftDigest?: string;
   reasoningEffort?: string;
   actorId: string;
   chatType: "p2p" | "group";
@@ -97,25 +101,40 @@ const legacyThreadSessionSchema = z.object({
   lastMessageId: z.string().min(1).optional(),
 });
 
-const threadSessionSchema: z.ZodType<FeishuThreadSession> = z.object({
-  version: z.literal(2),
-  sessionId: z.string().min(1),
-  repositoryKey: z.string().min(1),
-  targetLabel: z.string().min(1),
-  branch: z.string().min(1).optional(),
-  model: z.string().min(1),
-  harness: z.union([agentHarnessSchema, z.literal("inherit")]),
-  reasoningEffort: z.string().min(1).optional(),
-  actorId: z.string().min(1),
-  chatType: z.enum(["p2p", "group"]),
-  rootMessageId: z.string().min(1),
-  threadId: z.string().min(1).optional(),
-  replyMode: z.enum(["thread", "flat"]),
-  state: z.enum(["starting", "active", "delivery_failed", "completed", "failed", "stale"]),
-  createdAt: z.number().finite().nonnegative(),
-  updatedAt: z.number().finite().nonnegative(),
-  lastMessageId: z.string().min(1).optional(),
-});
+const threadSessionSchema: z.ZodType<FeishuThreadSession> = z
+  .object({
+    version: z.union([z.literal(2), z.literal(3)]),
+    sessionId: z.string().min(1),
+    repositoryKey: z.string().min(1).optional(),
+    target: runtimeLaunchTargetSchema.optional(),
+    targetLabel: z.string().min(1),
+    branch: z.string().min(1).optional(),
+    model: z.string().min(1),
+    harness: z.union([agentHarnessSchema, z.literal("inherit")]),
+    routeId: z.string().min(1).optional(),
+    draftDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    reasoningEffort: z.string().min(1).optional(),
+    actorId: z.string().min(1),
+    chatType: z.enum(["p2p", "group"]),
+    rootMessageId: z.string().min(1),
+    threadId: z.string().min(1).optional(),
+    replyMode: z.enum(["thread", "flat"]),
+    state: z.enum(["starting", "active", "delivery_failed", "completed", "failed", "stale"]),
+    createdAt: z.number().finite().nonnegative(),
+    updatedAt: z.number().finite().nonnegative(),
+    lastMessageId: z.string().min(1).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.version === 2 && !value.repositoryKey) {
+      context.addIssue({ code: "custom", path: ["repositoryKey"], message: "required for v2" });
+    }
+    if (value.version === 3 && !value.target) {
+      context.addIssue({ code: "custom", path: ["target"], message: "required for v3" });
+    }
+  });
 
 const pendingRequestSchema: z.ZodType<FeishuPendingRequest> = z.object({
   tenantKey: z.string().min(1),

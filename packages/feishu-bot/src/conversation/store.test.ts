@@ -38,6 +38,41 @@ class MemoryKv {
 }
 
 describe("Feishu conversation session index", () => {
+  it("round-trips a target-aware V3 session without model-prefix inference", async () => {
+    const env = { FEISHU_KV: new MemoryKv() as unknown as KVNamespace };
+    const coordinates = {
+      tenantKey: "tenant",
+      chatId: "chat",
+      chatType: "p2p" as const,
+      rootMessageId: "root-v3",
+      replyMode: "flat" as const,
+    };
+    await storeThreadSession(env, coordinates, {
+      version: 3,
+      sessionId: "session-v3",
+      target: { kind: "environment", environmentId: "env-1" },
+      targetLabel: "环境 · Production",
+      model: "provider-neutral-model",
+      harness: "codex",
+      routeId: "codex:host-relay",
+      draftDigest: "a".repeat(64),
+      actorId: "feishu:tenant:user",
+      chatType: "p2p",
+      rootMessageId: "root-v3",
+      replyMode: "flat",
+      state: "active",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    await expect(lookupThreadSession(env, coordinates)).resolves.toMatchObject({
+      version: 3,
+      target: { kind: "environment", environmentId: "env-1" },
+      harness: "codex",
+      model: "provider-neutral-model",
+    });
+  });
+
   it("keeps multiple root-task sessions for one chat", async () => {
     const env = { FEISHU_KV: new MemoryKv() as unknown as KVNamespace };
     const base = {

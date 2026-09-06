@@ -18,7 +18,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 import net from "node:net";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { ShimConfig } from "./config.js";
 import type { ShimStore } from "./store.js";
@@ -48,6 +48,7 @@ const ENVD_INTERNAL_PATHS = new Set([
   "/fsfreeze",
   "/fsthaw",
   "/collapse",
+  "/upgrade",
 ]);
 
 /** Parse `<port>-<sandboxID>.<shimDomain>`; sandbox IDs contain no dashes or dots. */
@@ -64,14 +65,32 @@ export function parseEdgeHost(host: string | undefined, shimDomain: string): Edg
   return { port: Number.parseInt(match[1], 10), sandboxId: match[2] };
 }
 
+/**
+ * Resolve the stable E2B_SANDBOX_URL form. Official SDKs attach these headers
+ * when a single gateway URL handles every sandbox and port, so the gateway may
+ * share a hostname with the control-plane API and does not require wildcard DNS.
+ */
+export function parseEdgeHeaders(headers: IncomingHttpHeaders): EdgeTarget | null {
+  const rawId = headers["e2b-sandbox-id"];
+  const rawPort = headers["e2b-sandbox-port"];
+  const sandboxId = Array.isArray(rawId) ? rawId[0] : rawId;
+  const port = Array.isArray(rawPort) ? rawPort[0] : rawPort;
+  if (
+    typeof sandboxId !== "string" ||
+    !/^[A-Za-z0-9]+$/.test(sandboxId) ||
+    typeof port !== "string" ||
+    !/^\d+$/.test(port)
+  ) {
+    return null;
+  }
+  const portNumber = Number.parseInt(port, 10);
+  if (portNumber < 1 || portNumber > 65_535) return null;
+  return { port: portNumber, sandboxId };
+}
+
 /** Resolve the stable `sandbox.<domain>` entry from its routing headers. */
 function resolveHeaderEntry(req: IncomingMessage): EdgeTarget | null {
-  const id = req.headers["e2b-sandbox-id"];
-  const port = req.headers["e2b-sandbox-port"];
-  if (typeof id !== "string" || typeof port !== "string") return null;
-  const portNum = Number.parseInt(port, 10);
-  if (!id || !Number.isFinite(portNum)) return null;
-  return { port: portNum, sandboxId: id };
+  return parseEdgeHeaders(req.headers);
 }
 
 function safeEqual(a: string, b: string): boolean {

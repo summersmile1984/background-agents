@@ -54,6 +54,7 @@ export default defineConfig({
             IMAGE_CALLBACK_TOKEN_PEPPER: "test-callback-pepper",
             SERVICE_AUTH_SECRET_WEB: "test-service-secret-web",
             SERVICE_AUTH_SECRET_SLACK_BOT: "test-service-secret-slack-bot",
+            SERVICE_AUTH_SECRET_FEISHU_BOT: "test-service-secret-feishu-bot",
             SERVICE_AUTH_SECRET_GITHUB_BOT: "test-service-secret-github-bot",
             SERVICE_AUTH_SECRET_LINEAR_BOT: "test-service-secret-linear-bot",
             BROWSER_AUTH_SECRET: "test-browser-auth-secret-with-at-least-32-characters",

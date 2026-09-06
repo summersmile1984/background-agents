@@ -14,6 +14,8 @@ export interface E2BRestConfig {
   apiUrl: string;
   apiKey: string;
   templateId: string;
+  /** Optional official E2B stable sandbox gateway (E2B_SANDBOX_URL semantics). */
+  sandboxUrl?: string;
 }
 
 const TIMEOUT_CREATE_MS = 90_000;
@@ -22,7 +24,18 @@ const TIMEOUT_PAUSE_MS = 30_000;
 const TIMEOUT_KILL_MS = 30_000;
 const TIMEOUT_GET_MS = 15_000;
 const TIMEOUT_SETTTL_MS = 15_000;
-const TIMEOUT_WRITE_FILE_MS = 30_000;
+const TIMEOUT_SNAPSHOT_MS = 180_000;
+const TIMEOUT_DELETE_TEMPLATE_MS = 30_000;
+const TIMEOUT_START_PROCESS_MS = 30_000;
+
+/** Connect envelope prefix: one flag byte plus a big-endian uint32 length. */
+const ENVELOPE_HEADER_BYTES = 5;
+/** Connect end-of-stream flag; that envelope carries `{}` or `{"error": ...}`. */
+const ENVELOPE_END_STREAM_FLAG = 0x02;
+
+const connectEndStreamSchema = z.object({
+  error: z.object({ message: z.string().optional() }).optional(),
+});
 
 const e2bSandboxDetailSchema = z.object({
   sandboxID: z.string(),
@@ -43,6 +56,13 @@ const e2bSandboxCreatedSchema = z.object({
 });
 
 export type E2BSandboxCreated = z.infer<typeof e2bSandboxCreatedSchema>;
+
+const e2bSnapshotInfoSchema = z.object({
+  snapshotID: z.string(),
+  names: z.array(z.string()).default([]),
+});
+
+export type E2BSnapshotInfo = z.infer<typeof e2bSnapshotInfoSchema>;
 
 /**
  * One entry in the list returned by `GET /sandboxes`. Deliberately lenient:
@@ -77,11 +97,6 @@ export type E2BErrorBody = z.infer<typeof e2bErrorBodySchema>;
 const ENVD_PORT = 49983;
 /** Default sandbox host suffix (overridden by the create response `domain`). */
 const DEFAULT_SANDBOX_DOMAIN = "e2b.app";
-/**
- * Path the per-session env file is written to. The template launcher
- * (packages/e2b-infra/oi-launch.py) polls this exact path — keep them in sync.
- */
-const SESSION_ENV_PATH = "/tmp/oi-session.env";
 
 export interface E2BCreateSandboxParams {
   templateID: string;
@@ -90,11 +105,13 @@ export interface E2BCreateSandboxParams {
   timeoutSeconds?: number;
   /** Pause (not kill) the sandbox when its timeout expires. */
   autoPause?: boolean;
+  /** Retain VM memory for timeout-driven auto-pause; false requests a cold-boot snapshot. */
+  autoPauseMemory?: boolean;
   /** Wake a paused sandbox on inbound activity (only meaningful with autoPause). */
   autoResume?: boolean;
   /**
    * Require an access token to reach envd (returned as `envdAccessToken`). Without it,
-   * envd accepts unauthenticated reads/writes of the uploaded session env.
+   * envd accepts unauthenticated process starts and filesystem access.
    */
   secure?: boolean;
 }
@@ -124,14 +141,110 @@ export class E2BApiError extends Error {
   }
 }
 
+function* decodeConnectEnvelopes(buffer: Uint8Array): Generator<{ flags: number; body: unknown }> {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  const decoder = new TextDecoder();
+  let offset = 0;
+  while (offset < buffer.length) {
+    if (offset + ENVELOPE_HEADER_BYTES > buffer.length) {
+      throw new Error("envd stream truncated mid-envelope");
+    }
+    const flags = buffer[offset]!;
+    const length = view.getUint32(offset + 1);
+    const start = offset + ENVELOPE_HEADER_BYTES;
+    const end = start + length;
+    if (end > buffer.length) throw new Error("envd stream truncated mid-envelope");
+    let body: unknown;
+    try {
+      body = JSON.parse(decoder.decode(buffer.subarray(start, end)));
+    } catch {
+      throw new Error("envd stream contained a malformed envelope");
+    }
+    yield { flags, body };
+    offset = end;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertProcessStarted(buffer: Uint8Array): void {
+  let started = false;
+  let exitedCleanly = false;
+  let endOfStream = false;
+  for (const { flags, body } of decodeConnectEnvelopes(buffer)) {
+    if (flags & ENVELOPE_END_STREAM_FLAG) {
+      const parsed = connectEndStreamSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new Error("envd process start stream contained a malformed end-of-stream envelope");
+      }
+      if (parsed.data.error) {
+        throw new Error(
+          `envd process start failed: ${parsed.data.error.message ?? "stream error"}`
+        );
+      }
+      endOfStream = true;
+      continue;
+    }
+    const event = isRecord(body) && isRecord(body.event) ? body.event : undefined;
+    if (event?.start) started = true;
+    const end = event && isRecord(event.end) ? event.end : undefined;
+    const status = end?.status;
+    if (status !== undefined) {
+      if (status !== "exit status 0") {
+        throw new Error(`envd process start exited non-zero: ${status}`);
+      }
+      exitedCleanly = true;
+    }
+  }
+  if (!started || !exitedCleanly || !endOfStream) {
+    throw new Error(
+      `envd process start stream incomplete ` +
+        `(start=${started} clean_exit=${exitedCleanly} end_of_stream=${endOfStream})`
+    );
+  }
+}
+
+function scrubEnvValues(text: string, envVars: Record<string, string>): string {
+  const needles = new Set<string>();
+  for (const value of Object.values(envVars)) {
+    if (!value) continue;
+    let form = value;
+    for (let i = 0; i < 3; i++) {
+      needles.add(form);
+      form = JSON.stringify(form).slice(1, -1);
+    }
+  }
+  let scrubbed = text;
+  for (const needle of [...needles].sort((a, b) => b.length - a.length)) {
+    scrubbed = scrubbed.split(needle).join("[redacted]");
+  }
+  return scrubbed;
+}
+
+function scrubbedCreateError(error: E2BApiError, envVars: Record<string, string>): E2BApiError {
+  const scrub = (text: string) => scrubEnvValues(text, envVars);
+  const body =
+    typeof error.body === "string"
+      ? scrub(error.body)
+      : error.body && {
+          ...error.body,
+          ...(error.body.message === undefined ? {} : { message: scrub(error.body.message) }),
+        };
+  return new E2BApiError(scrub(error.message), error.status, body);
+}
+
 export class E2BRestClient {
   private readonly baseUrl: string;
+  private readonly sandboxBaseUrl?: string;
 
   constructor(public readonly config: E2BRestConfig) {
     if (!config.apiUrl) throw new Error("E2BRestClient requires apiUrl");
     if (!config.apiKey) throw new Error("E2BRestClient requires apiKey");
     if (!config.templateId) throw new Error("E2BRestClient requires templateId");
     this.baseUrl = config.apiUrl.replace(/\/+$/, "");
+    this.sandboxBaseUrl = config.sandboxUrl?.replace(/\/+$/, "") || undefined;
   }
 
   async createSandbox(params: E2BCreateSandboxParams): Promise<E2BSandboxCreated> {
@@ -150,10 +263,18 @@ export class E2BRestClient {
             timeout: params.timeoutSeconds,
             secure: params.secure ?? false,
             autoPause: params.autoPause ?? false,
+            autoPauseMemory: params.autoPauseMemory,
             autoResume: { enabled: params.autoResume ?? false },
           },
         }
       );
+    } catch (error) {
+      // Create carries session secrets. Provider errors must not be able to
+      // echo their raw or JSON-escaped values into persisted failure reasons.
+      if (error instanceof E2BApiError && params.envVars) {
+        throw scrubbedCreateError(error, params.envVars);
+      }
+      throw error;
     } finally {
       log.info("e2b.create_sandbox", {
         duration_ms: Date.now() - startMs,
@@ -162,71 +283,59 @@ export class E2BRestClient {
     }
   }
 
-  /**
-   * Write the per-session env file into a sandbox via envd's filesystem API.
-   *
-   * E2B's template start command runs at build (not per create) and can't see
-   * create-time env vars, so the supervisor is launched by oi-launch.py, which
-   * reads this file. Writing it (rather than passing env to POST /sandboxes) is
-   * what delivers per-session config to the supervisor. The launcher polls
-   * SESSION_ENV_PATH, so this must target the same path.
-   */
-  async writeSessionEnv(
-    sandboxId: string,
-    env: Record<string, string>,
-    opts: { domain?: string | null; envdAccessToken: string }
+  /** Start a detached shell command through envd's Connect RPC stream. */
+  async startProcess(
+    id: string,
+    shellCommand: string,
+    opts: { domain?: string | null; envdAccessToken: string; signal?: AbortSignal }
   ): Promise<void> {
     const domain = opts.domain || DEFAULT_SANDBOX_DOMAIN;
-    // envd requires the in-sandbox user to write the file as. "user" is E2B's
-    // fixed non-root runtime user — the launcher that reads this file runs as it.
-    const url =
-      `https://${ENVD_PORT}-${sandboxId}.${domain}/files` +
-      `?path=${encodeURIComponent(SESSION_ENV_PATH)}&username=user`;
-
-    const form = new FormData();
-    form.append(
-      "file",
-      new Blob([JSON.stringify(env)], { type: "application/json" }),
-      SESSION_ENV_PATH
-    );
+    const url = this.sandboxBaseUrl
+      ? `${this.sandboxBaseUrl}/process.Process/Start`
+      : `https://${ENVD_PORT}-${id}.${domain}/process.Process/Start`;
+    const message = JSON.stringify({
+      process: { cmd: "/bin/sh", args: ["-c", shellCommand] },
+    });
+    const payload = new TextEncoder().encode(message);
+    const framed = new Uint8Array(ENVELOPE_HEADER_BYTES + payload.length);
+    new DataView(framed.buffer).setUint32(1, payload.length);
+    framed.set(payload, ENVELOPE_HEADER_BYTES);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_WRITE_FILE_MS);
-    const startMs = Date.now();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_START_PROCESS_MS);
     try {
-      // Do NOT set Content-Type — fetch derives the multipart boundary itself.
-      // envd requires the access token from create (secure:true); never write anonymously.
-      const headers: Record<string, string> = { "X-Access-Token": opts.envdAccessToken };
-
       const response = await fetch(url, {
         method: "POST",
-        body: form,
-        headers,
-        signal: controller.signal,
+        body: framed,
+        headers: {
+          "Content-Type": "application/connect+json",
+          "connect-protocol-version": "1",
+          "X-Access-Token": opts.envdAccessToken,
+          ...(this.sandboxBaseUrl
+            ? {
+                "E2b-Sandbox-Id": id,
+                "E2b-Sandbox-Port": String(ENVD_PORT),
+              }
+            : {}),
+        },
+        signal: opts.signal ? AbortSignal.any([controller.signal, opts.signal]) : controller.signal,
       });
-      if (response.status === 404) {
-        throw new E2BNotFoundError(`Sandbox ${sandboxId} envd not reachable`);
-      }
       if (!response.ok) {
         const text = await response.text();
         throw new E2BApiError(
-          text || `Failed to write session env (${response.status})`,
+          text || `envd process start failed (${response.status})`,
           response.status,
           text
         );
       }
+      assertProcessStarted(new Uint8Array(await response.arrayBuffer()));
     } catch (error) {
-      // Surface a write timeout as a transient error (see request()).
       if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`E2B writeSessionEnv timeout after ${TIMEOUT_WRITE_FILE_MS}ms`);
+        throw new Error(`E2B envd process start timeout after ${TIMEOUT_START_PROCESS_MS}ms`);
       }
       throw error;
     } finally {
       clearTimeout(timeoutId);
-      log.info("e2b.write_session_env", {
-        duration_ms: Date.now() - startMs,
-        var_count: Object.keys(env).length,
-      });
     }
   }
 
@@ -243,8 +352,11 @@ export class E2BRestClient {
     return this.requestJson("GET", "/sandboxes", TIMEOUT_GET_MS, z.array(e2bListedSandboxSchema));
   }
 
-  async pauseSandbox(id: string): Promise<void> {
-    await this.requestVoid("POST", `/sandboxes/${id}/pause`, TIMEOUT_PAUSE_MS);
+  async pauseSandbox(id: string, opts?: { memory?: boolean }, signal?: AbortSignal): Promise<void> {
+    await this.requestVoid("POST", `/sandboxes/${id}/pause`, TIMEOUT_PAUSE_MS, {
+      ...(opts?.memory === undefined ? {} : { body: { memory: opts.memory } }),
+      signal,
+    });
   }
 
   /**
@@ -255,10 +367,18 @@ export class E2BRestClient {
    * through getSandbox when they need it, so this is a command: the success body
    * carries nothing we act on and is discarded.
    */
-  async connectSandbox(id: string, timeoutSeconds: number): Promise<void> {
-    await this.requestVoid("POST", `/sandboxes/${id}/connect`, TIMEOUT_CONNECT_MS, {
-      body: { timeout: timeoutSeconds },
-    });
+  async connectSandbox(
+    id: string,
+    timeoutSeconds: number,
+    signal?: AbortSignal
+  ): Promise<E2BSandboxCreated> {
+    return this.requestJson(
+      "POST",
+      `/sandboxes/${id}/connect`,
+      TIMEOUT_CONNECT_MS,
+      e2bSandboxCreatedSchema,
+      { body: { timeout: timeoutSeconds }, signal }
+    );
   }
 
   async killSandbox(id: string, signal?: AbortSignal): Promise<void> {
@@ -269,6 +389,33 @@ export class E2BRestClient {
     await this.requestVoid("POST", `/sandboxes/${id}/timeout`, TIMEOUT_SETTTL_MS, {
       body: { timeout: timeoutSeconds },
     });
+  }
+
+  async createSnapshot(
+    id: string,
+    options?: { name?: string; signal?: AbortSignal }
+  ): Promise<E2BSnapshotInfo> {
+    const startMs = Date.now();
+    try {
+      return await this.requestJson(
+        "POST",
+        `/sandboxes/${id}/snapshots`,
+        TIMEOUT_SNAPSHOT_MS,
+        e2bSnapshotInfoSchema,
+        { body: options?.name ? { name: options.name } : {}, signal: options?.signal }
+      );
+    } finally {
+      log.info("e2b.create_snapshot", { duration_ms: Date.now() - startMs, sandbox_id: id });
+    }
+  }
+
+  async deleteTemplate(templateId: string, signal?: AbortSignal): Promise<void> {
+    await this.requestVoid(
+      "DELETE",
+      `/templates/${encodeURIComponent(templateId)}`,
+      TIMEOUT_DELETE_TEMPLATE_MS,
+      { signal }
+    );
   }
 
   getHostnameForPort(sandboxId: string, port: number, domain?: string | null): string {

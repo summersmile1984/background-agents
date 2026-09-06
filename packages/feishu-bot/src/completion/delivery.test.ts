@@ -1,17 +1,35 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractAgentResponse } from "@open-inspect/shared/completion/extractor";
-import { replySessionCard } from "../conversation/delivery";
+import { replySessionCard, updateSessionCard } from "../conversation/delivery";
+import { FeishuApiError } from "../feishu/client";
 import type { Env } from "../types";
 import { processFeishuCompletion } from "./delivery";
 import { deliverFeishuMediaArtifacts } from "./media-upload";
 import type { FeishuCompletionJob } from "./job";
 
 vi.mock("@open-inspect/shared/completion/extractor", () => ({ extractAgentResponse: vi.fn() }));
-vi.mock("../conversation/delivery", () => ({ replySessionCard: vi.fn() }));
+vi.mock("../conversation/delivery", () => ({
+  replySessionCard: vi.fn(),
+  updateSessionCard: vi.fn(),
+}));
 vi.mock("../conversation/store", () => ({
   updateThreadSession: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("./media-upload", () => ({ deliverFeishuMediaArtifacts: vi.fn() }));
+
+class MemoryKv {
+  readonly data = new Map<string, string>();
+
+  async get(key: string): Promise<string | null> {
+    return this.data.get(key) ?? null;
+  }
+
+  async put(key: string, value: string): Promise<void> {
+    this.data.set(key, value);
+  }
+}
+
+const completionKv = new MemoryKv();
 
 const job: FeishuCompletionJob = {
   version: 1,
@@ -31,6 +49,7 @@ const env = {
   FEISHU_MEDIA_DELIVERY_ENABLED: "true",
   WEB_APP_URL: "https://open-inspect.example",
   SERVICE_AUTH_SECRET: "service-secret-at-least-32-characters",
+  FEISHU_KV: completionKv as unknown as KVNamespace,
   CONTROL_PLANE: {
     fetch: vi.fn().mockResolvedValue(Response.json({ tunnelUrls: {} })),
   },
@@ -39,7 +58,9 @@ const env = {
 describe("Feishu completion delivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    completionKv.data.clear();
     vi.mocked(replySessionCard).mockResolvedValue({ messageId: "completion-1" });
+    vi.mocked(updateSessionCard).mockResolvedValue({ messageId: "working-1" });
     vi.mocked(deliverFeishuMediaArtifacts).mockResolvedValue({
       replied: 1,
       failed: 0,
@@ -233,5 +254,176 @@ describe("Feishu completion delivery", () => {
     expect(JSON.stringify(vi.mocked(replySessionCard).mock.calls[0]?.[2])).toContain(
       "https://gitea.example/huangdong/chatbi/pulls/3"
     );
+  });
+
+  it("patches a lifecycle card after the rollout flag has been disabled", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+
+    await processFeishuCompletion(
+      {
+        ...job,
+        workingMessageId: "working-1",
+        cardLifecycle: "single-card-v2",
+      },
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "false" }
+    );
+
+    expect(updateSessionCard).toHaveBeenCalledWith(
+      expect.any(Object),
+      "working-1",
+      expect.objectContaining({ schema: "2.0" })
+    );
+    expect(replySessionCard).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy reply delivery when the rollout flag is enabled", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+
+    const legacyJob = { ...job, workingMessageId: "legacy-working-1" };
+    const enabledEnv = { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" };
+    await processFeishuCompletion(legacyJob, enabledEnv);
+
+    expect(updateSessionCard).not.toHaveBeenCalled();
+    expect(replySessionCard).toHaveBeenCalledWith(
+      enabledEnv,
+      expect.any(Object),
+      expect.not.objectContaining({ schema: "2.0" }),
+      legacyJob.deliveryId
+    );
+  });
+
+  it("falls back to one idempotent reply only for a definite uneditable target", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    vi.mocked(updateSessionCard).mockRejectedValue(
+      new FeishuApiError("not_editable", "message expired", 400)
+    );
+    const singleCardEnv = { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" };
+
+    await processFeishuCompletion(
+      {
+        ...job,
+        workingMessageId: "working-1",
+        cardLifecycle: "single-card-v2",
+      },
+      singleCardEnv
+    );
+
+    expect(replySessionCard).toHaveBeenCalledOnce();
+    expect(replySessionCard).toHaveBeenCalledWith(
+      singleCardEnv,
+      expect.any(Object),
+      expect.objectContaining({ schema: "2.0" }),
+      expect.any(String)
+    );
+
+    await processFeishuCompletion(
+      {
+        ...job,
+        deliveryId: "00000000-0000-4000-8000-000000000002",
+        workingMessageId: "working-1",
+        cardLifecycle: "single-card-v2",
+      },
+      singleCardEnv
+    );
+    expect(updateSessionCard).toHaveBeenCalledOnce();
+    expect(replySessionCard).toHaveBeenCalledOnce();
+  });
+
+  it("downgrades an invalid V2 replacement to a legacy fallback card", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    vi.mocked(updateSessionCard).mockRejectedValue(
+      new FeishuApiError("invalid_card", "replacement card rejected", 400)
+    );
+
+    await processFeishuCompletion(
+      {
+        ...job,
+        workingMessageId: "working-invalid-v2",
+        cardLifecycle: "single-card-v2",
+      },
+      env
+    );
+
+    expect(replySessionCard).toHaveBeenCalledWith(
+      env,
+      expect.any(Object),
+      expect.not.objectContaining({ schema: "2.0" }),
+      expect.any(String)
+    );
+  });
+
+  it("never creates a fallback message for an ambiguous patch outcome", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    vi.mocked(updateSessionCard).mockRejectedValue(
+      new FeishuApiError("ambiguous", "update outcome unknown")
+    );
+
+    await expect(
+      processFeishuCompletion(
+        {
+          ...job,
+          workingMessageId: "working-1",
+          cardLifecycle: "single-card-v2",
+        },
+        { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" }
+      )
+    ).rejects.toMatchObject({ reason: "ambiguous" });
+
+    expect(replySessionCard).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates a replay after the completion card was patched", async () => {
+    vi.mocked(extractAgentResponse).mockResolvedValue({
+      textContent: "Done",
+      toolCalls: [],
+      artifacts: [],
+      mediaArtifacts: [],
+      success: true,
+    });
+    const singleCardEnv = { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" };
+    const singleCardJob = {
+      ...job,
+      workingMessageId: "working-1",
+      cardLifecycle: "single-card-v2" as const,
+    };
+
+    await processFeishuCompletion(singleCardJob, singleCardEnv);
+    await processFeishuCompletion(
+      { ...singleCardJob, deliveryId: "00000000-0000-4000-8000-000000000002" },
+      singleCardEnv
+    );
+
+    expect(updateSessionCard).toHaveBeenCalledOnce();
+    expect(replySessionCard).not.toHaveBeenCalled();
   });
 });

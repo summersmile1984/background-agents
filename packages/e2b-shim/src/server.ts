@@ -13,7 +13,12 @@ import type { ShimStore } from "./store.js";
 import type { CubeClient } from "./cube-client.js";
 import { isValidApiKey } from "./auth.js";
 import { handleApiRequest } from "./api-surface.js";
-import { handleEdgeRequest, handleEdgeUpgrade, parseEdgeHost } from "./edge-surface.js";
+import {
+  handleEdgeRequest,
+  handleEdgeUpgrade,
+  parseEdgeHeaders,
+  parseEdgeHost,
+} from "./edge-surface.js";
 
 export interface ServerDeps {
   config: ShimConfig;
@@ -39,7 +44,8 @@ export function createShimServer(deps: ServerDeps): http.Server | https.Server {
         return json(res, 200, { status: "ok" });
       }
 
-      const edgeTarget = parseEdgeHost(req.headers.host, config.shimDomain);
+      const edgeTarget =
+        parseEdgeHost(req.headers.host, config.shimDomain) ?? parseEdgeHeaders(req.headers);
       if (edgeTarget) {
         return handleEdgeRequest({ config, store }, req, res, edgeTarget);
       }
@@ -72,7 +78,8 @@ export function createShimServer(deps: ServerDeps): http.Server | https.Server {
     : http.createServer(requestListener);
 
   server.on("upgrade", (req, socket, head) => {
-    const edgeTarget = parseEdgeHost(req.headers.host, config.shimDomain);
+    const edgeTarget =
+      parseEdgeHost(req.headers.host, config.shimDomain) ?? parseEdgeHeaders(req.headers);
     if (!edgeTarget) {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       socket.destroy();

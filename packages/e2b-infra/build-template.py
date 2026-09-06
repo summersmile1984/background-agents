@@ -4,8 +4,8 @@ Build (and pre-warm) the Open-Inspect E2B sandbox template — programmatically,
 via the E2B Python SDK. Authenticates with the runtime API key (E2B_API_KEY).
 
 The base image layers live in e2b.Dockerfile (FROM + apt/npm/pip); this script
-adds the context-dependent steps the SDK owns: copying the staged sandbox_runtime
-and the oi-launch launcher, the workdir, and the start/ready commands.
+adds the context-dependent steps the SDK owns: copying the staged sandbox_runtime,
+the workdir, and the start/ready commands.
 
 Env:
   E2B_TEMPLATE_ID   (required) — template name to create/rebuild.
@@ -35,12 +35,9 @@ API_URL = os.environ.get("E2B_API_URL", "https://api.e2b.app").rstrip("/")
 CPU = int(os.environ.get("E2B_TEMPLATE_CPU", "2"))
 MEM = int(os.environ.get("E2B_TEMPLATE_MEM", "1024"))
 
-# Start command = the launcher. E2B runs the start command once at build,
-# snapshots it, and resumes it per create, so the launcher waits for the control
-# plane to drop the per-session env file then execs the supervisor. Ready command
-# just confirms the baked toolchain is present — real session readiness is tracked
-# by the control plane when the bridge phones home.
-START_CMD = "python /usr/local/bin/oi-launch"
+# Keep the template inert. The control plane delivers create-time envVars and
+# starts the supervisor through envd for every sandbox spawn.
+START_CMD = "sleep infinity"
 READY_CMD = (
     "command -v python && command -v node && command -v opencode "
     "&& command -v code-server "
@@ -95,8 +92,6 @@ template = (
     .copy("sandbox_runtime/bin/upload-media.js", "/usr/local/bin/upload-media", mode=0o755)
     .copy("sandbox_runtime/bin/oi-git-sign", "/usr/local/bin/oi-git-sign", mode=0o755)
     .copy("sandbox_runtime/bin/oi-visual-verify", "/usr/local/bin/oi-visual-verify", mode=0o755)
-    # The launcher = the template start command (see oi-launch.py).
-    .copy("oi-launch.py", "/usr/local/bin/oi-launch", mode=0o755)
     .set_workdir("/workspace")
     .set_start_cmd(START_CMD, READY_CMD)
 )

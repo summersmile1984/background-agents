@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { replyFeishuCard, replyFeishuImage, replyFeishuText } from "../feishu/client";
+import {
+  replyFeishuCard,
+  replyFeishuImage,
+  replyFeishuText,
+  updateFeishuCard,
+} from "../feishu/client";
 import type { Env } from "../types";
-import { replySessionCard, replySessionImage, replySessionText } from "./delivery";
+import {
+  replySessionCard,
+  replySessionImage,
+  replySessionText,
+  updateSessionCard,
+} from "./delivery";
 
 vi.mock("../feishu/client", () => ({
   replyFeishuCard: vi.fn(),
   replyFeishuImage: vi.fn(),
   replyFeishuText: vi.fn(),
+  updateFeishuCard: vi.fn(),
 }));
 vi.mock("./store", () => ({
   storeThreadMessageAlias: vi.fn().mockResolvedValue(undefined),
@@ -72,5 +83,16 @@ describe("Feishu session delivery", () => {
       topicCoordinates,
       "card-1"
     );
+  });
+
+  it("updates the existing lifecycle card without creating a new message alias", async () => {
+    vi.mocked(updateFeishuCard).mockResolvedValueOnce({ messageId: "card-1" });
+
+    await expect(updateSessionCard(env, "card-1", { schema: "2.0" })).resolves.toEqual({
+      messageId: "card-1",
+    });
+
+    expect(updateFeishuCard).toHaveBeenCalledWith(env, "card-1", { schema: "2.0" });
+    expect(replyFeishuCard).not.toHaveBeenCalled();
   });
 });

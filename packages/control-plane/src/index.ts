@@ -104,6 +104,7 @@ export default {
           apiUrl: env.E2B_API_URL || "https://api.e2b.app",
           apiKey: env.E2B_API_KEY,
           templateId: env.E2B_TEMPLATE_ID,
+          sandboxUrl: env.E2B_SANDBOX_URL,
         }),
         logger
       ).run(Date.now());

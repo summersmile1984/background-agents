@@ -4,6 +4,7 @@ import {
   runtimeConfigFragmentSchema,
   runtimeLaunchCallerChannelSchema,
   runtimeLaunchTargetSchema,
+  runtimeSettingDefinitionSchema,
 } from "./runtime-launch";
 
 describe("runtime launch contracts", () => {
@@ -44,5 +45,21 @@ describe("runtime launch contracts", () => {
 
   it("accepts Feishu as an immutable launch caller channel", () => {
     expect(runtimeLaunchCallerChannelSchema.parse("feishu")).toBe("feishu");
+  });
+
+  it("rejects sensitive settings at the shared runtime catalog boundary", () => {
+    expect(
+      runtimeSettingDefinitionSchema.safeParse({
+        key: "apiToken",
+        label: "API token",
+        description: "Must stay server-side",
+        type: "string",
+        defaultValue: "",
+        allowedScopes: ["session"],
+        mutability: "session-start",
+        visibility: "user",
+        sensitive: true,
+      }).success
+    ).toBe(false);
   });
 });

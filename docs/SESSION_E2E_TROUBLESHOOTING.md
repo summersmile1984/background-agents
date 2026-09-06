@@ -195,6 +195,33 @@ See [Debugging Playbook](DEBUGGING_PLAYBOOK.md) for event fields and cross-servi
 
 ## Regression Test Template
 
+Before opening the web UI, run the real-provider preflight against the exact API URL, key, template,
+and public sandbox domain used by the control plane:
+
+```sh
+E2B_API_URL=https://cubeapi.example.com \
+E2B_API_KEY="$E2B_API_KEY" \
+E2B_TEMPLATE_ID="$E2B_TEMPLATE_ID" \
+E2B_EXPECTED_DOMAIN=sb.example.com \
+npm run test:e2e -w @open-inspect/e2b-shim
+```
+
+This is a live, non-repository test. It requires the configured template to be `READY`, creates one
+five-minute sandbox with a harmless marker, checks that the request passed through the compatibility
+shim (`envdAccessToken`, rewritten domain, metadata, and running state), and deletes the sandbox
+even when a post-create assertion fails. A missing token detects an ingress route that still points
+directly at CubeAPI; a template error prevents a doomed browser session from being created.
+
+After the preflight passes, use the in-app browser to exercise the user-visible path:
+
+1. Open the deployed Web URL and wait for the authenticated session list and target picker.
+2. Submit the non-mutating prompt below and record the new session ID from `/session/<id>`.
+3. Require `Connection status: Connected`, then `Sandbox status: Ready` or `Running`; `Failed` with
+   the prompt still under **Queued prompts** is a provider-spawn failure, not a Harness failure.
+4. Wait for the final PASS/FAIL checklist, open the uploaded screenshot in the session, and confirm
+   the session leaves the **Running** group.
+5. Confirm no repository changes or pull request were produced.
+
 Use a disposable or harmless repository and ask the agent to perform a non-mutating smoke test:
 
 1. Confirm, without printing secrets, that `SANDBOX_AUTH_TOKEN` is absent from the harness shell.
