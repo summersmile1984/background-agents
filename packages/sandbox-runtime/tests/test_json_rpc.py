@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
@@ -23,7 +24,7 @@ async def test_close_allows_server_to_exit_on_stdin_eof(tmp_path: Path) -> None:
             "import sys; [None for _ in sys.stdin]",
         ],
         cwd=str(tmp_path),
-        env={},
+        env=os.environ.copy(),
         log=MagicMock(),
     )
 
@@ -49,7 +50,7 @@ for _line in sys.stdin:
     rpc = JsonRpcProcess(
         [sys.executable, "-c", script],
         cwd=str(tmp_path),
-        env={},
+        env=os.environ.copy(),
         log=MagicMock(),
     )
 
