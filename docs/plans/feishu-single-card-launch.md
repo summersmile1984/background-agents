@@ -1204,9 +1204,13 @@ ID，因此 FSC-01 的功能路径通过，但第 14.4 节八段证据仍不完�
    claim/alias，至少原卡提示“任务尚未启动，请先完成配置”，更理想的是把补充内容可靠排队到首个 prompt 之后。
 2. **仓库目录缺少体量与启动成本提示。** 私聊“最近使用”的 `summersmile1984/books` 实际约
    `1,037,005 KB`。选择后 session `6a3118b6a7bb1170f2b364fb6bf81928`
-   创建成功，但超过源码定义的 10 分钟 connecting timeout 后仍显示 Sandbox Connecting，D1 仍为
-   `active`、`message_count=0`；Web 归档也返回
-   `Failed to archive session`。应在仓库选项展示/限制体量，并修复连接超时告警和 starting/connecting 状态下的可取消清理路径。
+   创建成功，但超过源码定义的 10 分钟 connecting timeout 后仍显示 Sandbox
+   Connecting；运行到约 15 分钟的 prompt dispatch deadline 才以
+   `Sandbox did not become available before the dispatch deadline` 收敛为失败。D1 此时为
+   `failed`、`message_count=1`。connecting 期间 Web 归档返回
+   `Failed to archive session`；失败后再次归档成功，D1最终为
+   `archived`。应在仓库选项展示/限制体量，并统一 connecting timeout 与 dispatch
+   deadline，同时提供 starting/connecting 状态下可用的取消清理路径。
 
 ### 21.8 当前证据边界
 
