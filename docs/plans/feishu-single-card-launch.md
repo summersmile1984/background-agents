@@ -2,8 +2,9 @@
 
 ## 0. 文档状态
 
-- 状态：源码实现、自动化验证和生产灰度已通过；真实生产已覆盖群话题 repo-less、私聊 GitHub 小仓库、双顶层任务隔离、真实双击幂等、Runtime 覆盖、同 session
-  follow-up 和窄屏启动。完整 FSC-01～FSC-16 矩阵、八段 VM 可观测证据及负向/故障注入仍未齐全，因此尚未达到本文件的最终完成定义。
+- 状态：源码实现、自动化验证和生产灰度已通过；真实生产已覆盖群话题 repo-less、明确 GitHub
+  owner/repo 自动推断、私聊 GitHub 小仓库、双顶层任务隔离、真实双击幂等、Runtime 覆盖、同 session
+  follow-up、窄屏启动及截图上传/飞书同话题媒体投递。完整 FSC-01～FSC-16 矩阵、preview 端口、八段 VM 可观测证据及负向/故障注入仍未齐全，因此尚未达到本文件的最终完成定义。
 - 目标：把飞书入口从“逐步发送多张选择卡”升级为“每个用户回合一张、原位更新的交互卡”，并让飞书与 Web、其他入口共同使用 Control
   Plane 的目标感知 Runtime Resolver 和会话创建契约。
 - 实施边界：修改 Open-Inspect 的
@@ -1039,7 +1040,7 @@ ID、Worker、D1、sandbox/VM、Harness 和 PATCH结果的项目，在生产证�
 | ------ | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | FSC-01 | 歧义时直接打开 workspace；最近仓库、分页、单卡 PATCH、启动和完成路径已测                    | **功能通过**：真实私聊选择 GitHub 小仓库并完成；八段证据仍不完整 |
 | FSC-02 | 两个 root/topic 独立路由、原生话题与 flat fallback 已测                                     | **功能通过**：双顶层、双 session/VM 独立完成；八段证据仍不完整   |
-| FSC-03 | 明确仓库/唯一仓库自动 resolve，ready 后直接一次点击开始已测                                 | GitHub/Gitea 仓库路径已通过；明确 owner/repo 自动推断仍待实测    |
+| FSC-03 | 明确仓库/唯一仓库自动 resolve，ready 后直接一次点击开始已测                                 | **通过**：明确 GitHub owner/repo 自动推断并一次点击完成          |
 | FSC-04 | Harness → route/model → effort → Apply → Start 的完整 action 链及 disabled reason 已测      | **通过**：真实改为 MiMo V2.5 Pro + low，LaunchSpec 一致          |
 | FSC-05 | 飞书 `kind:none` 选择到 create client，以及 Control Plane repo-less create 已测             | **通过：真实 repo-less VM 完成任务**                             |
 | FSC-06 | 四种 target 的 create 映射、environment/connection 分页与 repository-set 同源限制已测       | 待真实高级目标；跨 connection 负向待实测                         |
@@ -1048,7 +1049,7 @@ ID、Worker、D1、sandbox/VM、Harness 和 PATCH结果的项目，在生产证�
 | FSC-09 | actor、tenant/chat、card message ID、revision 在 action claim 前校验已测                    | 待可用第二身份时做真实负向；非发布硬门禁                         |
 | FSC-10 | 明确不可编辑错误只发一次稳定 fallback，Queue 重放不重复已测                                 | 待 staging/真实不可编辑卡                                        |
 | FSC-11 | ambiguous PATCH 不 fallback、不 ACK，重试同一目标已测                                       | 待真实 timeout 后核对卡状态                                      |
-| FSC-12 | preview 选择/loopback 改写、同 topic completion/media 和媒体幂等已测                        | 待真实截图、对象存储和 VM 端口                                   |
+| FSC-12 | preview 选择/loopback 改写、同 topic completion/media 和媒体幂等已测                        | **部分通过**：真实截图、媒体对象与飞书投递通过；preview 待实测   |
 | FSC-13 | V3 follow-up 沿用 session/LaunchSpec，每回合固化一张 lifecycle card 已测                    | **通过**：repo-less 与 Gitea 会话均有真实同 session follow-up    |
 | FSC-14 | Gitea catalog、`owner/repo@branch` 与嵌套 owner 解析已测                                    | 普通 owner 的真实 Gitea clone 通过；嵌套 owner 仍待实测          |
 | FSC-15 | 仓库/环境单行、Harness/模型单行、全部目录分页、V2 `column_set/behaviors/form` renderer 已测 | **交互通过**：`390×844` 下配置、Apply、Start 均可见可操作        |
@@ -1196,7 +1197,38 @@ request `1`、repository row `1`。LaunchSpec 的 digest 前缀为 `83fe3c594954
 `target.kind=repository`、`provider=github`、`branch=master`、`caller.channel=feishu`，Runtime 与卡片一致。私聊 DOM 没有暴露卡片 message
 ID，因此 FSC-01 的功能路径通过，但第 14.4 节八段证据仍不完整。
 
-### 21.7 专项验证发现的生产缺陷
+### 21.7 FSC-03 与 FSC-12：明确仓库推断和真实媒体链路
+
+`2026-09-07 10:24+08:00` 在群聊中新建顶层话题，prompt 直接写明
+`summersmile1984/summersmile1984.github.io` 和
+`master`。Bot 无需打开仓库或 Runtime 目录，就把原卡解析为 GitHub
+`summersmile1984/summersmile1984.github.io@master`、OpenCode / MiMo V2.5 /
+high，并直接显示“开始任务”。一次点击后，session
+`13f62e6ff05296c4ffae21e000d5f6e8`（`#D4493E`）到达 Connected / Sandbox Ready；21 秒返回
+`FEISHU_FSC03_EXPLICIT_REPO_OK`，Web 显示无文件改动。
+
+同话题发送不带 `@` 的 FSC-12 follow-up，要求用 `agent-browser` 打开公开站点、截图并调用
+`upload_media`。同一 session 在 1 分 50 秒后返回 `FEISHU_FSC12_MEDIA_OK`；Web 显示 `Media (1)`
+和一张 Screenshot，媒体路由为
+`/api/sessions/13f62e6ff05296c4ffae21e000d5f6e8/media/b26259cc0db09a614c4e6ed7068d7eb1`。飞书同一话题随后实际渲染该图片，completion 卡也保持在同一话题。该样本证明截图生成、`upload_media`、Control
+Plane 媒体对象和飞书图片投递链路可用；卡片同时显示
+`视觉验证：blocked · 1 个场景`，且本次没有启动应用端口，因此不能把 FSC-12 的 preview/视觉语义验收记为通过。
+
+远端 D1 对该 session 的最终证据为 `status=completed`、`message_count=2`、
+`active_duration_ms=131511`、`total_cost=0.002016588`、create request `1`、repository row
+`1`。LaunchSpec 为 version/resolver version `1/1`、catalog `2026-08-21.3`、digest 前缀
+`83fe3c594954c9bb`、`target.kind=repository`、`provider=github`、owner/repo/branch 与卡片一致、
+`caller.channel=feishu`，Runtime 为 `opencode` / `opencode:any:configured-provider` /
+`xiaomi/mimo-v2.5` / `high`。
+
+另一个真实负向观察来自已绑定的 repo-less 话题：在 session `35b18b1a585ae273b1955d6905ac4317`
+的 follow-up 文本中写入新的明确 GitHub
+owner/repo 后，系统仍沿用原 session，而没有创建或切换到新仓库会话。D1 保持
+`target.kind=none`、仓库字段为空、create request
+`1`。这只证明“已绑定 session 的目标不会被普通 follow-up 漂移”，不能替代 FSC-08 的旧 revision
+action 专项。
+
+### 21.8 专项验证发现的生产缺陷
 
 1. **pending/starting 阶段的群话题普通跟帖会被静默忽略。** B 尚未绑定 session 时，同话题出现一条不带
    `@` 的普通跟帖；它没有 lifecycle card，也没有进入 D1 `message_count`。源码路径要求 `existing`
@@ -1211,15 +1243,19 @@ ID，因此 FSC-01 的功能路径通过，但第 14.4 节八段证据仍不完�
    `Failed to archive session`；失败后再次归档成功，D1最终为
    `archived`。应在仓库选项展示/限制体量，并统一 connecting timeout 与 dispatch
    deadline，同时提供 starting/connecting 状态下可用的取消清理路径。
+3. **截图任务首次启动浏览器依赖有明显冷启动成本。** FSC-12 中 `agent-browser open` 后实际执行了
+   `agent-browser install`；任务最终成功，但完整回合耗时 1 分 50 秒。应在 Cube 模板构建阶段预装并固定对应浏览器依赖，或在卡片/事件流中明确展示安装进度；这不要求修改 CubeSandbox 源码。
 
-### 21.8 当前证据边界
+### 21.9 当前证据边界
 
-- 已有真实群话题 repo-less、Gitea、私聊 GitHub、双顶层双 VM、真实双击、Runtime override、同 session
-  follow-up、窄屏配置/启动及 completion PATCH 证据；FSC-01、FSC-02 的功能路径已通过。
+- 已有真实群话题 repo-less、明确 GitHub
+  owner/repo、Gitea、私聊 GitHub、双顶层双 VM、真实双击、Runtime override、同 session
+  follow-up、窄屏配置/启动、completion
+  PATCH 及截图/媒体投递证据；FSC-01、FSC-02、FSC-03 的功能路径已通过，FSC-12 部分通过。
 - Cloudflare Observability 当前只采样约 1% 事件，本批 live
   tail 仍没有完整捕获对应 trace；Web/飞书 UI 与 D1 也不暴露 provider object ID。因此
   `traceId`、`pendingId`、provider object ID、completion `deliveryId`
   等八段证据尚未全部补齐，不能把功能通过写成第 14.4 节的完整通过。
 - 跨 actor、PATCH timeout/不可编辑、capability change、environment/repository-set、嵌套 owner
-  Gitea、VM screenshot/preview 和 flag
+  Gitea、VM preview/视觉语义验证和 flag
   rollback 仍待真实或 staging 专项。第 17 节总体状态保持未完成，不能把本批成功样本外推为 FSC-01～FSC-16 全量通过。
