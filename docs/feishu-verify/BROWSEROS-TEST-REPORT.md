@@ -101,3 +101,22 @@ session 上,follow-up 消息触发 `deliverSingleCardFollowUp` (V2 path),但因�
 - `packages/feishu-bot/src/events/dispatcher.test.ts` — 两个回归测试 (53/53 passed)
 - 253/253 feishu-bot 单测 + 2951/2951 control-plane + 945/945 sandbox-runtime + 200/200
   modal-infra 全过
+
+---
+
+## 后续进展 (2026-09-17 01:34)
+
+代码修复 + 单测 + BrowserOS 端到端验证完成后:
+
+- 修复了 **bug #2** (follow-up 静默): `deliverFollowUp` 和 `deliverSingleCardFollowUp` 里
+  `replySessionCard` 失败会 silent 吞掉错误,改用 try/catch + fallback text
+  receipt, 避免用户消息石沉大海
+- 同步给外层 V2 `try/catch` 加了 text fallback
+- 新增 `deliverFollowUp` 的 fallback 回归测试
+
+### PR
+
+- **PR #58** [fix(feishu-bot): align legacy and V2 follow-up paths with single-card-v2 lifecycle]
+  - URL: https://github.com/summersmile1984/background-agents/pull/58
+  - 分支: `codex/feishu-bot-in-place-patch`
+  - 状态: OPEN
