@@ -2,6 +2,7 @@ import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-a
 import type {
   ResolveRuntimeLaunchDraftResponse,
   RuntimeLaunchTarget,
+  SessionLaunchSpecV1,
 } from "@open-inspect/shared/types/runtime-launch";
 import { z } from "zod";
 import {
@@ -14,6 +15,7 @@ import {
   type LaunchCardCatalog,
 } from "../launch-cards";
 import { deliveryIdempotencyKey } from "../conversation/delivery-id";
+import { clearNextTurnOptions, getNextTurnOptions } from "../conversation/next-turn-options-store";
 import { replySessionCard, replySessionText, updateSessionCard } from "../conversation/delivery";
 import {
   createLaunchPending,
@@ -28,14 +30,22 @@ import {
   claimThreadSelection,
   listConversationSessions,
   lookupThreadSession,
+  replaceThreadSessionBinding,
   releaseThreadSelection,
+  storeSessionReplacementLink,
   storeThreadSession,
   updateThreadSession,
   type FeishuConversationCoordinates,
   type FeishuThreadSession,
 } from "../conversation/store";
 import { createLogger } from "../logger";
-import { createResolvedSession, sendPrompt } from "../sessions/control-plane-client";
+import {
+  createResolvedSession,
+  getSessionRuntime,
+  invokeRuntimeCommand,
+  sendPrompt,
+  validateNextTurnRuntimeOverride,
+} from "../sessions/control-plane-client";
 import { resolveFeishuRuntimeDraft } from "../sessions/runtime-draft";
 import {
   findRepositoryTarget,
@@ -71,6 +81,8 @@ const launchActionValueSchema = z.object({
     "cancel_editor",
     "retry_resolve",
     "start_session",
+    "set_running_turn_policy",
+    "reconfirm_switch",
   ]),
   pendingId: z.string().uuid(),
   selectionRevision: z.number().int().nonnegative(),
@@ -200,7 +212,12 @@ async function patchLaunchCard(
   await updateSessionCard(
     env,
     pending.cardMessageId,
-    buildLaunchLifecycleCard({ pending, catalog, webAppUrl: env.WEB_APP_URL })
+    buildLaunchLifecycleCard({
+      pending,
+      catalog,
+      webAppUrl: env.WEB_APP_URL,
+      sessionControlEnabled: env.FEISHU_SESSION_CONTROL_ENABLED === "true",
+    })
   );
   log.info("card.patch_succeeded", {
     pending_id: pending.pendingId,
@@ -305,7 +322,11 @@ export async function initializeSingleCardLaunch(input: {
   const sent = await replySessionCard(
     input.env,
     input.coordinates,
-    buildLaunchLifecycleCard({ pending, webAppUrl: input.env.WEB_APP_URL }),
+    buildLaunchLifecycleCard({
+      pending,
+      webAppUrl: input.env.WEB_APP_URL,
+      sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
+    }),
     replyId
   );
   if (!sent?.messageId) throw new Error("Feishu did not return a launch card message id");
@@ -502,6 +523,136 @@ function targetLabel(draft: ResolveRuntimeLaunchDraftResponse): string {
     : `${primary.owner}/${primary.name} 等 ${target.repositories.length} 个仓库`;
 }
 
+function launchIntentFromSpec(spec: SessionLaunchSpecV1): FeishuLaunchIntent {
+  const target: RuntimeLaunchTarget =
+    spec.target.kind === "none"
+      ? { kind: "none" }
+      : spec.target.kind === "environment" && spec.target.environmentId
+        ? { kind: "environment", environmentId: spec.target.environmentId }
+        : spec.target.kind === "repository-set"
+          ? {
+              kind: "repository-set",
+              repositoryKeys: spec.target.repositories.map(
+                (repository) => repository.repositoryKey
+              ),
+            }
+          : spec.target.repositories[0]
+            ? {
+                kind: "repository",
+                repositoryKey: spec.target.repositories[0].repositoryKey,
+                branch: spec.target.repositories[0].branch,
+              }
+            : { kind: "none" };
+  return {
+    target,
+    runtime: {
+      harness: spec.runtime.harness.value,
+      routeId: spec.runtime.routeId.value,
+      model: spec.runtime.model.value,
+      ...(spec.runtime.effort.value ? { effort: spec.runtime.effort.value } : {}),
+      settings: Object.fromEntries(
+        Object.entries(spec.runtime.settings).map(([key, value]) => [key, value.value])
+      ),
+    },
+  };
+}
+
+/** Open a replacement editor from the immutable LaunchSpec of an existing session. */
+export async function initializeReplacementLaunch(input: {
+  env: Env;
+  coordinates: FeishuConversationCoordinates;
+  origin: FeishuThreadSession;
+  actorId: string;
+  traceId: string;
+  /** An H5 editor may supply a preselected, still-untrusted replacement intent. */
+  intent?: FeishuLaunchIntent;
+}): Promise<void> {
+  const runtime = await getSessionRuntime({
+    env: input.env,
+    sessionId: input.origin.sessionId,
+    actorId: input.actorId,
+    traceId: input.traceId,
+  });
+  if (!runtime?.launchSpec) {
+    throw new Error("当前会话没有可用于替换的 LaunchSpec");
+  }
+  let pending = await createLaunchPending(input.env, {
+    ...input.coordinates,
+    incomingMessageId: `replacement:${input.origin.sessionId}`.slice(0, 128),
+    actorId: input.actorId,
+    mode: "replacement",
+    originSessionId: input.origin.sessionId,
+    expectedBindingRevision: input.origin.bindingRevision ?? 0,
+    onRunningTurn: "keep-running",
+    // This is deliberately display-only. A replacement does not replay an old task.
+    content: "新建并切换会话",
+    intent: input.intent ?? launchIntentFromSpec(runtime.launchSpec),
+  });
+  const replyId = await deliveryIdempotencyKey(
+    `replacement-launch:${pending.pendingId}`,
+    "launch-card"
+  );
+  const sent = await replySessionCard(
+    input.env,
+    input.coordinates,
+    buildLaunchLifecycleCard({
+      pending,
+      webAppUrl: input.env.WEB_APP_URL,
+      sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
+    }),
+    replyId
+  );
+  if (!sent?.messageId) throw new Error("Feishu did not return a replacement card message id");
+  pending =
+    (await updateLaunchPending(
+      input.env,
+      pending.pendingId,
+      (current) => ({
+        ...current,
+        cardMessageId: sent.messageId,
+        ...(sent.threadId ? { threadId: sent.threadId, replyMode: "thread" as const } : {}),
+      }),
+      { incrementRevision: false }
+    )) ?? pending;
+
+  let catalog: LaunchCardCatalog;
+  try {
+    catalog = await loadCatalog(input.env, input.traceId, recentContext(pending));
+  } catch {
+    const failed = await updateLaunchPending(input.env, pending.pendingId, (current) => ({
+      ...current,
+      phase: "stale",
+      error: "无法读取可用工作区，原会话保持不变。请稍后重试。",
+    }));
+    if (failed) await patchLaunchCard(input.env, failed).catch(() => undefined);
+    return;
+  }
+  const resolved = await resolveAndPersist({
+    env: input.env,
+    pendingId: pending.pendingId,
+    actorId: input.actorId,
+    intent: pending.intent,
+    traceId: input.traceId,
+    commitIntent: true,
+    clearEditor: true,
+    view: "summary",
+  });
+  await patchLaunchCard(input.env, resolved.pending, runtimeCatalog(catalog, resolved.resolved));
+  log.info("feishu.replacement.resolved", {
+    event: "feishu.replacement.resolved",
+    trace_id: input.traceId,
+    tenant_key: input.coordinates.tenantKey,
+    chat_id: input.coordinates.chatId,
+    root_message_id: input.coordinates.rootMessageId,
+    ...(input.coordinates.threadId ? { thread_id: input.coordinates.threadId } : {}),
+    actor_id: input.actorId,
+    origin_session_id: input.origin.sessionId,
+    pending_id: pending.pendingId,
+    selection_revision: resolved.pending.selectionRevision,
+    outcome: resolved.resolved?.launchable ? "launchable" : "needs_configuration",
+  });
+}
+
 async function startSession(
   env: Env,
   pending: FeishuLaunchPending,
@@ -545,7 +696,7 @@ async function startSession(
   }
   try {
     const existing = await lookupThreadSession(env, topic);
-    if (existing) {
+    if (pending.mode === "initial" && existing) {
       const expired = await updateLaunchPending(env, pending.pendingId, (current) => ({
         ...current,
         phase: "expired",
@@ -553,6 +704,21 @@ async function startSession(
       }));
       if (expired) await patchLaunchCard(env, expired).catch(() => undefined);
       return { ok: false, content: "本话题已经绑定会话。" };
+    }
+    if (pending.mode === "replacement") {
+      if (
+        !existing ||
+        existing.sessionId !== pending.originSessionId ||
+        (existing.bindingRevision ?? 0) !== pending.expectedBindingRevision
+      ) {
+        const conflict = await updateLaunchPending(env, pending.pendingId, (current) => ({
+          ...current,
+          phase: "replacement_conflict",
+          error: "话题绑定已变化，尚未创建或切换新会话。请确认当前绑定后重新操作。",
+        }));
+        if (conflict) await patchLaunchCard(env, conflict).catch(() => undefined);
+        return { ok: false, content: "话题绑定已变化，未创建替换会话。" };
+      }
     }
     const starting = await updateLaunchPending(env, pending.pendingId, (current) => ({
       ...current,
@@ -569,6 +735,7 @@ async function startSession(
       env,
       target,
       runtime: starting.intent.runtime,
+      skills: starting.intent.skills,
       runtimeDraftDigest: resolved.data.draftDigest,
       clientRequestId: `feishu-session:${pending.pendingId}`,
       actorId: pending.actorId,
@@ -588,6 +755,22 @@ async function startSession(
       if (failed) await patchLaunchCard(env, failed);
       return { ok: false, content: created.error };
     }
+    if (pending.mode === "replacement") {
+      log.info("feishu.replacement.created", {
+        event: "feishu.replacement.created",
+        trace_id: traceId,
+        tenant_key: topic.tenantKey,
+        chat_id: topic.chatId,
+        root_message_id: topic.rootMessageId,
+        ...(topic.threadId ? { thread_id: topic.threadId } : {}),
+        actor_id: pending.actorId,
+        origin_session_id: pending.originSessionId,
+        replacement_session_id: created.data.sessionId,
+        pending_id: pending.pendingId,
+        selection_revision: pending.selectionRevision,
+        outcome: "created",
+      });
+    }
     const effective = resolved.data.effective;
     if (!effective.harness || !effective.routeId || !effective.model || !effective.effort) {
       throw new Error("Launchable runtime draft is missing effective fields");
@@ -595,7 +778,7 @@ async function startSession(
     const label = targetLabel(resolved.data);
     const branch = effective.target.repositories[0]?.branch;
     const now = Date.now();
-    await storeThreadSession(env, topic, {
+    const replacementSession: FeishuThreadSession = {
       version: 3,
       sessionId: created.data.sessionId,
       target,
@@ -612,15 +795,97 @@ async function startSession(
       rootMessageId: topic.rootMessageId,
       ...(topic.threadId ? { threadId: topic.threadId } : {}),
       replyMode: topic.replyMode,
-      state: "starting",
+      state: pending.mode === "replacement" ? "active" : "starting",
       createdAt: now,
       updatedAt: now,
       lastMessageId: pending.incomingMessageId,
-    });
+    };
+    if (pending.mode === "initial") {
+      await storeThreadSession(env, topic, replacementSession);
+    } else {
+      const expectedBindingRevision = pending.expectedBindingRevision;
+      if (!pending.originSessionId || expectedBindingRevision === undefined) {
+        throw new Error("Replacement launch is missing binding coordinates");
+      }
+      const switched = await replaceThreadSessionBinding(
+        env,
+        topic,
+        { sessionId: pending.originSessionId, bindingRevision: expectedBindingRevision },
+        replacementSession
+      );
+      if (switched !== "switched") {
+        const conflict = await updateLaunchPending(env, pending.pendingId, (current) => ({
+          ...current,
+          sessionId: created.data.sessionId,
+          phase: "replacement_conflict",
+          error:
+            "新会话已创建，但话题绑定在切换前发生变化。当前绑定保持不变；请打开新会话或重新确认切换。",
+        }));
+        if (conflict) await patchLaunchCard(env, conflict).catch(() => undefined);
+        log.warn("feishu.replacement.binding_switched", {
+          event: "feishu.replacement.binding_switched",
+          trace_id: traceId,
+          tenant_key: topic.tenantKey,
+          chat_id: topic.chatId,
+          root_message_id: topic.rootMessageId,
+          ...(topic.threadId ? { thread_id: topic.threadId } : {}),
+          actor_id: pending.actorId,
+          origin_session_id: pending.originSessionId,
+          replacement_session_id: created.data.sessionId,
+          pending_id: pending.pendingId,
+          binding_revision: expectedBindingRevision,
+          outcome: "conflict",
+        });
+        return { ok: false, content: "新会话已创建，但未切换话题绑定。" };
+      }
+      await storeSessionReplacementLink(env, {
+        ...topic,
+        originSessionId: pending.originSessionId,
+        replacementSessionId: created.data.sessionId,
+        bindingRevision: expectedBindingRevision + 1,
+        onRunningTurn: pending.onRunningTurn,
+      });
+      log.info("feishu.replacement.binding_switched", {
+        event: "feishu.replacement.binding_switched",
+        trace_id: traceId,
+        tenant_key: topic.tenantKey,
+        chat_id: topic.chatId,
+        root_message_id: topic.rootMessageId,
+        ...(topic.threadId ? { thread_id: topic.threadId } : {}),
+        actor_id: pending.actorId,
+        origin_session_id: pending.originSessionId,
+        replacement_session_id: created.data.sessionId,
+        pending_id: pending.pendingId,
+        binding_revision: expectedBindingRevision + 1,
+        outcome: "switched",
+      });
+    }
     await updateLaunchPending(env, pending.pendingId, (current) => ({
       ...current,
       sessionId: created.data.sessionId,
     }));
+    if (pending.mode === "replacement") {
+      let stopNotice = "";
+      if (pending.onRunningTurn === "stop-after-switch" && existing) {
+        const stopped = await invokeRuntimeCommand({
+          env,
+          sessionId: existing.sessionId,
+          commandId: "product.stop",
+          clientInvocationId: `feishu-replacement-stop:${pending.pendingId}`.slice(0, 128),
+          actorId: pending.actorId,
+          traceId,
+        });
+        stopNotice = stopped.ok ? "已请求停止旧任务。" : "旧任务未能停止，请在原会话中确认。";
+      }
+      const active = await updateLaunchPending(env, pending.pendingId, (current) => ({
+        ...current,
+        sessionId: created.data.sessionId,
+        phase: "active",
+        error: `新会话已切换，等待下一条任务。${stopNotice}`,
+      }));
+      if (active) await patchLaunchCard(env, active);
+      return { ok: true, content: `已新建并切换会话。${stopNotice}` };
+    }
     const callbackContext: FeishuCallbackContext = {
       source: "feishu",
       tenantKey: topic.tenantKey,
@@ -712,6 +977,117 @@ async function startSession(
       target_kind: target.kind,
     });
     return { ok: true, content: "任务已开始。" };
+  } finally {
+    await releaseThreadSelection(env, topic, actionId);
+  }
+}
+
+function pendingReplacementSession(
+  pending: FeishuLaunchPending,
+  sessionId: string,
+  topic: FeishuConversationCoordinates
+): FeishuThreadSession | null {
+  const target = pending.intent.target;
+  const effective = pending.draft?.effective;
+  if (!target || !effective?.harness || !effective.routeId || !effective.model) return null;
+  const repositories = effective.target.repositories;
+  const label =
+    target.kind === "none"
+      ? "临时工作区（无仓库）"
+      : target.kind === "environment"
+        ? `环境 · ${target.environmentId}`
+        : repositories[0]
+          ? repositories.length === 1
+            ? `${repositories[0].owner}/${repositories[0].name}`
+            : `${repositories[0].owner}/${repositories[0].name} 等 ${repositories.length} 个仓库`
+          : "工作区";
+  const branch = repositories[0]?.branch;
+  const now = Date.now();
+  return {
+    version: 3,
+    sessionId,
+    target,
+    targetLabel: label,
+    ...(target.kind === "repository" ? { repositoryKey: target.repositoryKey } : {}),
+    ...(branch ? { branch } : {}),
+    model: effective.model.value,
+    harness: effective.harness.value,
+    routeId: effective.routeId.value,
+    ...(pending.draft ? { draftDigest: pending.draft.draftDigest } : {}),
+    ...(effective.effort?.value ? { reasoningEffort: effective.effort.value } : {}),
+    actorId: pending.actorId,
+    chatType: topic.chatType,
+    rootMessageId: topic.rootMessageId,
+    ...(topic.threadId ? { threadId: topic.threadId } : {}),
+    replyMode: topic.replyMode,
+    state: "active",
+    createdAt: now,
+    updatedAt: now,
+    lastMessageId: pending.incomingMessageId,
+  };
+}
+
+async function reconfirmReplacementSwitch(
+  env: Env,
+  pending: FeishuLaunchPending,
+  actionId: string,
+  traceId: string
+): Promise<{ ok: true; content: string } | { ok: false; content: string }> {
+  if (
+    pending.mode !== "replacement" ||
+    pending.phase !== "replacement_conflict" ||
+    !pending.sessionId
+  ) {
+    return { ok: false, content: "没有可重新确认的替换会话。" };
+  }
+  const topic = coordinates(pending);
+  if (!(await claimThreadSelection(env, topic, actionId))) {
+    return { ok: false, content: "本话题正在切换会话。" };
+  }
+  try {
+    const current = await lookupThreadSession(env, topic);
+    if (!current || current.actorId !== pending.actorId) {
+      return { ok: false, content: "当前话题绑定已不可用或无权切换。" };
+    }
+    const replacement = pendingReplacementSession(pending, pending.sessionId, topic);
+    if (!replacement) return { ok: false, content: "替换会话的配置已过期，请重新发起。" };
+    const switched = await replaceThreadSessionBinding(
+      env,
+      topic,
+      { sessionId: current.sessionId, bindingRevision: current.bindingRevision ?? 0 },
+      replacement
+    );
+    if (switched !== "switched") {
+      return { ok: false, content: "话题绑定再次变化，请刷新后重试。" };
+    }
+    await storeSessionReplacementLink(env, {
+      ...topic,
+      originSessionId: current.sessionId,
+      replacementSessionId: pending.sessionId,
+      bindingRevision: (current.bindingRevision ?? 0) + 1,
+      onRunningTurn: pending.onRunningTurn,
+    });
+    let stopNotice = "";
+    if (pending.onRunningTurn === "stop-after-switch") {
+      const stopped = await invokeRuntimeCommand({
+        env,
+        sessionId: current.sessionId,
+        commandId: "product.stop",
+        clientInvocationId: `feishu-replacement-reconfirm-stop:${pending.pendingId}`.slice(0, 128),
+        actorId: pending.actorId,
+        traceId,
+      });
+      stopNotice = stopped.ok ? "已请求停止此前任务。" : "此前任务未能停止，请在原会话确认。";
+    }
+    const active = await updateLaunchPending(env, pending.pendingId, (stored) => ({
+      ...stored,
+      originSessionId: current.sessionId,
+      expectedBindingRevision: current.bindingRevision ?? 0,
+      phase: "active",
+      error: `新会话已切换，等待下一条任务。${stopNotice}`,
+    }));
+    if (active) await patchLaunchCard(env, active);
+    return { ok: true, content: `已切换到新会话。${stopNotice}` };
   } finally {
     await releaseThreadSelection(env, topic, actionId);
   }
@@ -887,8 +1263,25 @@ export async function handleFeishuLaunchCardAction(
   if (action.value.action === "start_session") {
     return startSession(env, pending, action.actionId, traceId);
   }
+  if (action.value.action === "reconfirm_switch") {
+    return reconfirmReplacementSwitch(env, pending, action.actionId, traceId);
+  }
+  if (action.value.action === "set_running_turn_policy") {
+    if (
+      pending.mode !== "replacement" ||
+      (action.value.argument !== "keep-running" && action.value.argument !== "stop-after-switch")
+    ) {
+      return { ok: false, content: "旧任务处理选项无效。" };
+    }
+    const updated = await updateLaunchPending(env, pending.pendingId, (current) => ({
+      ...current,
+      onRunningTurn: action.value.argument as FeishuLaunchPending["onRunningTurn"],
+    }));
+    if (updated) await patchLaunchCard(env, updated);
+    return { ok: true, content: "旧任务处理策略已更新。" };
+  }
   const existing = await lookupThreadSession(env, coordinates(pending));
-  if (existing) {
+  if (existing && pending.mode === "initial") {
     const expired = await updateLaunchPending(env, pending.pendingId, (current) => ({
       ...current,
       phase: "expired",
@@ -1184,6 +1577,46 @@ export async function deliverSingleCardFollowUp(input: {
   content: string;
   traceId: string;
 }): Promise<boolean> {
+  const nextTurnOptions =
+    input.env.FEISHU_NEXT_TURN_OPTIONS_ENABLED === "true" && input.coordinates.chatType === "p2p"
+      ? await getNextTurnOptions(input.env, {
+          ...input.coordinates,
+          sessionId: input.existing.sessionId,
+          actorId: input.actorId,
+        })
+      : null;
+  if (nextTurnOptions && (nextTurnOptions.model || nextTurnOptions.reasoningEffort)) {
+    const runtime = await getSessionRuntime({
+      env: input.env,
+      sessionId: input.existing.sessionId,
+      actorId: input.actorId,
+      traceId: input.traceId,
+    });
+    const issue = runtime
+      ? validateNextTurnRuntimeOverride({
+          runtime,
+          pinnedModel: input.existing.model,
+          model: nextTurnOptions.model,
+          reasoningEffort: nextTurnOptions.reasoningEffort,
+        })
+      : "暂时无法读取 Runtime 能力";
+    if (issue) {
+      await replySessionText(
+        input.env,
+        input.coordinates,
+        `下一条任务设置已变化（${issue}），任务尚未发送。请重新打开会话控制卡选择后再发送原任务。`
+      );
+      return true;
+    }
+  }
+  const effectiveModel = nextTurnOptions?.model ?? input.existing.model;
+  const effectiveEffort = nextTurnOptions?.reasoningEffort ?? input.existing.reasoningEffort;
+  const selectedVisualVerification =
+    nextTurnOptions?.visualVerificationEnabled === true
+      ? {}
+      : nextTurnOptions?.visualVerificationEnabled === false
+        ? undefined
+        : visualVerificationForPrompt(input.content);
   const card = buildTurnWorkingCard({
     sessionId: input.existing.sessionId,
     targetLabel: input.existing.targetLabel,
@@ -1191,13 +1624,35 @@ export async function deliverSingleCardFollowUp(input: {
     ...(input.existing.branch ? { branch: input.existing.branch } : {}),
     ...(input.existing.harness ? { harness: input.existing.harness } : {}),
     ...(input.existing.routeId ? { routeId: input.existing.routeId } : {}),
-    model: input.existing.model,
-    ...(input.existing.reasoningEffort ? { reasoningEffort: input.existing.reasoningEffort } : {}),
+    model: effectiveModel,
+    ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
     task: input.content,
+    sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
   });
   const replyId = await deliveryIdempotencyKey(input.incomingMessageId, "turn-card");
-  const sent = await replySessionCard(input.env, input.coordinates, card, replyId);
-  if (!sent?.messageId) throw new Error("Feishu did not return a follow-up card message id");
+  let sent;
+  try {
+    sent = await replySessionCard(input.env, input.coordinates, card, replyId);
+  } catch (error) {
+    // Same fallback as the legacy path: post a plain text receipt and keep
+    // going. The completion will arrive as a separate text reply.
+    log.error("feishu.v2_followup.working_card_failed", {
+      trace_id: input.traceId,
+      incoming_message_id: input.incomingMessageId,
+      session_id: input.existing.sessionId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+    await replySessionText(input.env, input.coordinates, "已收到你的消息，正在处理。").catch(
+      () => undefined
+    );
+  }
+  if (!sent?.messageId) {
+    // Card reply path failed (either replySessionCard returned falsy because
+    // Feishu throttled, or we already sent the text fallback above). Bail out
+    // without calling sendPrompt so we do not enqueue a session update against
+    // a missing working card.
+    return true;
+  }
   const callbackContext: FeishuCallbackContext = {
     source: "feishu",
     tenantKey: input.coordinates.tenantKey,
@@ -1212,8 +1667,8 @@ export async function deliverSingleCardFollowUp(input: {
     cardLifecycle: "single-card-v2",
     targetLabel: input.existing.targetLabel,
     ...(input.existing.routeId ? { routeId: input.existing.routeId } : {}),
-    model: input.existing.model,
-    ...(input.existing.reasoningEffort ? { reasoningEffort: input.existing.reasoningEffort } : {}),
+    model: effectiveModel,
+    ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
   };
   const delivered = await sendPrompt({
     env: input.env,
@@ -1221,7 +1676,11 @@ export async function deliverSingleCardFollowUp(input: {
     content: input.content,
     actorId: input.actorId,
     callbackContext,
-    visualVerification: visualVerificationForPrompt(input.content),
+    ...(nextTurnOptions?.model ? { model: nextTurnOptions.model } : {}),
+    ...(nextTurnOptions?.reasoningEffort
+      ? { reasoningEffort: nextTurnOptions.reasoningEffort }
+      : {}),
+    ...(selectedVisualVerification ? { visualVerification: selectedVisualVerification } : {}),
     clientRequestId: `feishu-followup:${input.incomingMessageId}`.slice(0, 128),
     traceId: input.traceId,
   });
@@ -1245,13 +1704,36 @@ export async function deliverSingleCardFollowUp(input: {
         ...(input.existing.branch ? { branch: input.existing.branch } : {}),
         ...(input.existing.harness ? { harness: input.existing.harness } : {}),
         ...(input.existing.routeId ? { routeId: input.existing.routeId } : {}),
-        model: input.existing.model,
-        ...(input.existing.reasoningEffort
-          ? { reasoningEffort: input.existing.reasoningEffort }
-          : {}),
+        model: effectiveModel,
+        ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
+        sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
       })
     );
     return true;
+  }
+  if (nextTurnOptions) {
+    const cleared = await clearNextTurnOptions(
+      input.env,
+      {
+        ...input.coordinates,
+        sessionId: input.existing.sessionId,
+        actorId: input.actorId,
+      },
+      nextTurnOptions.revision
+    );
+    log.info("feishu.next_turn.claimed", {
+      event: "feishu.next_turn.claimed",
+      trace_id: input.traceId,
+      tenant_key: input.coordinates.tenantKey,
+      chat_id: input.coordinates.chatId,
+      root_message_id: input.coordinates.rootMessageId,
+      ...(input.coordinates.threadId ? { thread_id: input.coordinates.threadId } : {}),
+      actor_id: input.actorId,
+      session_id: input.existing.sessionId,
+      message_id: input.incomingMessageId,
+      selection_revision: nextTurnOptions.revision,
+      outcome: cleared ? "cleared" : "accepted_stale_option",
+    });
   }
   await updateThreadSession(input.env, input.coordinates, {
     state: "active",
