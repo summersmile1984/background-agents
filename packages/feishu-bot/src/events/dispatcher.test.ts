@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   updateThreadSession: vi.fn(),
   initializeSingleCardLaunch: vi.fn(),
   deliverSingleCardFollowUp: vi.fn(),
+  getNextTurnOptions: vi.fn(),
+  clearNextTurnOptions: vi.fn(),
+  getSessionRuntime: vi.fn(),
+  validateNextTurnRuntimeOverride: vi.fn(),
+  handleFeishuBotMenuEvent: vi.fn(),
 }));
 
 vi.mock("../conversation/delivery", () => ({
@@ -47,6 +52,11 @@ vi.mock("../conversation/store", () => ({
   updateThreadSession: mocks.updateThreadSession,
 }));
 
+vi.mock("../conversation/next-turn-options-store", () => ({
+  getNextTurnOptions: mocks.getNextTurnOptions,
+  clearNextTurnOptions: mocks.clearNextTurnOptions,
+}));
+
 vi.mock("../sessions/control-plane-client", () => ({
   createSession: vi.fn(),
   defaultHarnessForModel: (model: string) => {
@@ -57,6 +67,8 @@ vi.mock("../sessions/control-plane-client", () => ({
   },
   invokeRuntimeCommand: mocks.invokeRuntimeCommand,
   sendPrompt: mocks.sendPrompt,
+  getSessionRuntime: mocks.getSessionRuntime,
+  validateNextTurnRuntimeOverride: mocks.validateNextTurnRuntimeOverride,
 }));
 
 vi.mock("../sessions/runtime-catalog", () => ({
@@ -76,8 +88,13 @@ vi.mock("../interactions/launch-card-actions", () => ({
   deliverSingleCardFollowUp: mocks.deliverSingleCardFollowUp,
 }));
 
+vi.mock("./bot-menu", () => ({
+  handleFeishuBotMenuEvent: mocks.handleFeishuBotMenuEvent,
+}));
+
 import {
   canReuseThreadSession,
+  classifyFeishuInbound,
   handleFeishuEvent,
   parseRuntimeCommand,
   parseSessionReference,
@@ -162,6 +179,42 @@ describe("parseRuntimeCommand", () => {
   );
 });
 
+describe("classifyFeishuInbound", () => {
+  it("keeps ordinary slash-bearing text as a user prompt", () => {
+    expect(classifyFeishuInbound("修复 /api/v1 的鉴权")).toEqual({
+      kind: "user-prompt",
+      content: "修复 /api/v1 的鉴权",
+    });
+  });
+
+  it("classifies product, managed, and driver commands without prompt text", () => {
+    expect(classifyFeishuInbound("/status")).toMatchObject({
+      kind: "product-control",
+      actionId: "product.status",
+    });
+    expect(classifyFeishuInbound("/review")).toMatchObject({
+      kind: "managed-prompt",
+      workflowId: "product.review",
+      workflowVersion: 1,
+    });
+    expect(classifyFeishuInbound("/compact")).toMatchObject({
+      kind: "driver-command",
+      commandId: "product.compact",
+    });
+  });
+
+  it("makes session listing explicit and rejects unknown standalone slash aliases", () => {
+    expect(classifyFeishuInbound("/sessions")).toMatchObject({
+      kind: "product-control",
+      actionId: "product.sessions",
+    });
+    expect(classifyFeishuInbound("/not-a-command")).toEqual({
+      kind: "unknown-command",
+      slashName: "not-a-command",
+    });
+  });
+});
+
 describe("parseSessionReference", () => {
   it("parses an explicit six-character session id and prompt", () => {
     expect(parseSessionReference(" #a1b2c3 检查第二个仓库")).toEqual({
@@ -217,6 +270,10 @@ describe("handleFeishuEvent receipt", () => {
     mocks.inferRepositoryTarget.mockReturnValue(undefined);
     mocks.initializeSingleCardLaunch.mockResolvedValue(undefined);
     mocks.deliverSingleCardFollowUp.mockResolvedValue(true);
+    mocks.getNextTurnOptions.mockResolvedValue(null);
+    mocks.clearNextTurnOptions.mockResolvedValue(true);
+    mocks.getSessionRuntime.mockResolvedValue({});
+    mocks.validateNextTurnRuntimeOverride.mockReturnValue(null);
     mocks.listRepositoryCatalog.mockResolvedValue({
       connections: [
         {
@@ -239,6 +296,25 @@ describe("handleFeishuEvent receipt", () => {
         },
       ],
     });
+  });
+
+  it("routes a bot-menu event as a chat-independent product control event", async () => {
+    const menuEvent = {
+      header: { event_type: "application.bot.menu_v6", tenant_key: "tenant-1" },
+      event: {
+        event_key: "open_inspect_my_sessions",
+        operator: { operator_id: { open_id: "u-1" } },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(menuEvent, { ...env, FEISHU_BOT_MENU_ENABLED: "true" }, "trace-menu");
+
+    expect(mocks.handleFeishuBotMenuEvent).toHaveBeenCalledWith(
+      menuEvent,
+      expect.objectContaining({ FEISHU_BOT_MENU_ENABLED: "true" }),
+      "trace-menu"
+    );
+    expect(mocks.lookupThreadSession).not.toHaveBeenCalled();
   });
 
   it("hands a new top-level task directly to the single-card launch flow", async () => {
@@ -326,6 +402,32 @@ describe("handleFeishuEvent receipt", () => {
       expect.objectContaining({ rootMessageId: "stop-message" }),
       "已请求停止当前任务。",
       expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    );
+  });
+
+  it("keeps an unknown standalone slash outside the harness prompt path", async () => {
+    await handleFeishuEvent(
+      {
+        ...event,
+        event: {
+          ...event.event,
+          message: {
+            ...event.event.message,
+            message_id: "unknown-command-message",
+            content: JSON.stringify({ text: "/not-a-command" }),
+          },
+        },
+      },
+      env,
+      "trace-unknown-command"
+    );
+
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.initializeSingleCardLaunch).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ rootMessageId: "unknown-command-message" }),
+      expect.stringContaining("未知命令 /not-a-command")
     );
   });
 
@@ -1045,6 +1147,106 @@ describe("handleFeishuEvent receipt", () => {
     );
   });
 
+  it("applies p2p next-turn options once and clears only after the prompt is accepted", async () => {
+    const existing = {
+      ...thread,
+      version: 3 as const,
+      target: { kind: "none" as const },
+      harness: "opencode" as const,
+      actorId: "feishu:tenant-1:user-1",
+    };
+    mocks.lookupThreadSession.mockResolvedValue(existing);
+    mocks.getNextTurnOptions.mockResolvedValue({
+      version: 1,
+      tenantKey: "tenant-1",
+      chatId: "chat-1",
+      chatType: "p2p",
+      rootMessageId: "message-1",
+      replyMode: "flat",
+      sessionId: "session-1",
+      actorId: "feishu:tenant-1:user-1",
+      model: "openai/gpt-5.6-pro",
+      reasoningEffort: "high",
+      visualVerificationEnabled: false,
+      revision: 4,
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: Date.now() + 60_000,
+    });
+    const nextEvent = {
+      ...event,
+      event: {
+        ...event.event,
+        message: { ...event.event.message, content: JSON.stringify({ text: "修复登录按钮" }) },
+      },
+    } satisfies FeishuEventEnvelope;
+
+    await handleFeishuEvent(
+      nextEvent,
+      { ...env, FEISHU_NEXT_TURN_OPTIONS_ENABLED: "true" },
+      "trace-next-turn"
+    );
+
+    expect(mocks.sendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        model: "openai/gpt-5.6-pro",
+        reasoningEffort: "high",
+        callbackContext: expect.objectContaining({
+          model: "openai/gpt-5.6-pro",
+          reasoningEffort: "high",
+        }),
+      })
+    );
+    expect(mocks.sendPrompt.mock.calls[0]?.[0]).not.toHaveProperty("visualVerification");
+    expect(mocks.clearNextTurnOptions).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ sessionId: "session-1", actorId: "feishu:tenant-1:user-1" }),
+      4
+    );
+  });
+
+  it("does not send or consume a task when a saved Runtime option became unavailable", async () => {
+    const existing = {
+      ...thread,
+      version: 3 as const,
+      target: { kind: "none" as const },
+      harness: "opencode" as const,
+      actorId: "feishu:tenant-1:user-1",
+    };
+    mocks.lookupThreadSession.mockResolvedValue(existing);
+    mocks.getNextTurnOptions.mockResolvedValue({
+      version: 1,
+      tenantKey: "tenant-1",
+      chatId: "chat-1",
+      chatType: "p2p",
+      rootMessageId: "message-1",
+      replyMode: "flat",
+      sessionId: "session-1",
+      actorId: "feishu:tenant-1:user-1",
+      model: "openai/gpt-5.6-pro",
+      revision: 4,
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: Date.now() + 60_000,
+    });
+    mocks.validateNextTurnRuntimeOverride.mockReturnValue("模型选项已不可用");
+
+    await handleFeishuEvent(
+      event,
+      { ...env, FEISHU_NEXT_TURN_OPTIONS_ENABLED: "true" },
+      "trace-next-turn-stale"
+    );
+
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    expect(mocks.clearNextTurnOptions).not.toHaveBeenCalled();
+    expect(mocks.replySessionText).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.stringContaining("任务尚未发送")
+    );
+  });
+
   it("stages runtime selection even when the repository is inferred from the prompt", async () => {
     const inferredTarget = {
       repositoryKey: "gitea-default:huangdong/chatbi",
@@ -1151,5 +1353,161 @@ describe("handleFeishuEvent receipt", () => {
       expect.any(Object),
       expect.stringContaining("正在刷新")
     );
+  });
+});
+
+describe("legacy single-card-v2 lifecycle alignment", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.replySessionCard.mockResolvedValue({ messageId: "working-1", threadId: "thread-1" });
+    mocks.replySessionText.mockResolvedValue({ messageId: "receipt-1" });
+    mocks.resolveFeishuBotOpenId.mockResolvedValue("bot-1");
+    mocks.lookupThreadSession.mockResolvedValue(null);
+    mocks.lookupThreadMessageAlias.mockResolvedValue(null);
+    mocks.storeThreadMessageAlias.mockResolvedValue(undefined);
+    mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
+    mocks.updateThreadSession.mockResolvedValue(null);
+    mocks.storePendingRequest.mockResolvedValue("pending-1");
+    mocks.getRuntimeCatalog.mockResolvedValue(null);
+    mocks.inferRepositoryTarget.mockReturnValue({
+      connectionId: "gitea-default",
+      provider: "gitea",
+      repositoryKey: "gitea-default:huangdong/chatbi",
+      fullName: "huangdong/chatbi",
+      displayName: "chatbi",
+      connectionLabel: "Gitea",
+      defaultBranch: "main",
+    });
+    mocks.initializeSingleCardLaunch.mockResolvedValue(undefined);
+    mocks.deliverSingleCardFollowUp.mockResolvedValue(true);
+    mocks.getNextTurnOptions.mockResolvedValue(null);
+    mocks.clearNextTurnOptions.mockResolvedValue(true);
+    mocks.getSessionRuntime.mockResolvedValue({});
+    mocks.validateNextTurnRuntimeOverride.mockReturnValue(null);
+    mocks.listRepositoryCatalog.mockResolvedValue({
+      connections: [],
+      targets: [
+        {
+          connectionId: "gitea-default",
+          provider: "gitea",
+          repositoryKey: "gitea-default:huangdong/chatbi",
+          fullName: "huangdong/chatbi",
+          displayName: "chatbi",
+          connectionLabel: "Gitea",
+          defaultBranch: "main",
+        },
+      ],
+    });
+  });
+
+  it("attaches single-card-v2 lifecycle to the legacy startNewSession callback", async () => {
+    const { createSession } = await import("../sessions/control-plane-client");
+    const { findRepositoryTarget, inferRepositoryBranch } = await import("../targets");
+    vi.mocked(findRepositoryTarget).mockReturnValue({
+      connectionId: "gitea-default",
+      provider: "gitea",
+      repositoryKey: "gitea-default:huangdong/chatbi",
+      fullName: "huangdong/chatbi",
+      displayName: "chatbi",
+      connectionLabel: "Gitea",
+      defaultBranch: "main",
+    });
+    vi.mocked(inferRepositoryBranch).mockReturnValue(undefined);
+    vi.mocked(createSession).mockResolvedValue({
+      sessionId: "session-legacy-1",
+      status: "created",
+    });
+
+    await handleFeishuEvent(
+      event,
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "false" },
+      "trace-legacy-new"
+    );
+
+    expect(mocks.replySessionCard).toHaveBeenCalled();
+    expect(mocks.sendPrompt).toHaveBeenCalledTimes(1);
+    const sendPromptCall = mocks.sendPrompt.mock.calls[0]?.[0];
+    expect(sendPromptCall).toBeDefined();
+    expect(sendPromptCall.callbackContext.cardLifecycle).toBe("single-card-v2");
+    expect(sendPromptCall.callbackContext.workingMessageId).toBe("working-1");
+    expect(sendPromptCall.callbackContext.targetLabel).toBe("huangdong/chatbi");
+  });
+
+  it("falls back to a text receipt when the follow-up working card cannot be posted", async () => {
+    // Regression for bug #2: when FEISHU_SINGLE_CARD_LAUNCH_ENABLED=true and the
+    // follow-up working card fails to post (rate limit, network, etc.), the
+    // dispatcher used to silently swallow the error and leave the user with
+    // no bot response. The fix should reply with a plain text receipt so
+    // the conversation is not left hanging.
+    mocks.replySessionCard.mockRejectedValueOnce(new Error("feishu api down"));
+    mocks.updateThreadSession.mockResolvedValue(null);
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      version: 2,
+      harness: "codex",
+      model: "openai/gpt-5.6-luna",
+      actorId: "feishu:tenant:user",
+    });
+    mocks.sendPrompt.mockResolvedValue({ ok: true, data: {} });
+
+    const messageId = "evt-working-card-fail";
+    const text = JSON.stringify({ text: "still send my message" });
+    await handleFeishuEvent(
+      {
+        header: { event_type: "im.message.receive_v1", tenant_key: "tenant-1" },
+        event: {
+          sender: { sender_type: "user", sender_id: { open_id: "user" } },
+          message: {
+            chat_id: "chat-1",
+            chat_type: "p2p",
+            message_id: messageId,
+            message_type: "text",
+            content: text,
+          },
+        },
+      },
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "true" },
+      "trace-working-card-fail"
+    );
+
+    // The working card reply failed, so a text receipt should be sent.
+    expect(mocks.replySessionText).toHaveBeenCalled();
+    // The sendPrompt must NOT be invoked because there is no workingMessageId.
+    expect(mocks.sendPrompt).not.toHaveBeenCalled();
+    // Clear the one-shot reject so it does not leak into the next test.
+    mocks.replySessionCard.mockReset();
+    mocks.replySessionCard.mockResolvedValue({ messageId: "picker-1" });
+  });
+
+  it("attaches single-card-v2 lifecycle to the legacy deliverFollowUp callback", async () => {
+    mocks.replySessionCard.mockClear();
+    mocks.replySessionText.mockClear();
+    mocks.sendPrompt.mockClear();
+    mocks.replySessionCard.mockResolvedValue({ messageId: "working-1", threadId: "thread-1" });
+    mocks.lookupThreadSession.mockResolvedValue({
+      ...thread,
+      // canReuseThreadSession requires harness === defaultHarnessForModel(model).
+      // defaultHarnessForModel("openai/...") returns "codex".
+      harness: "codex" as const,
+      // deliverFollowUp rejects follow-ups from a different actor — the test
+      // event resolves to "feishu:tenant-1:user-1" via tenantKey + open_id.
+      actorId: "feishu:tenant-1:user-1",
+    });
+    const { createSession } = await import("../sessions/control-plane-client");
+    vi.mocked(createSession).mockResolvedValue(null);
+
+    await handleFeishuEvent(
+      event,
+      { ...env, FEISHU_SINGLE_CARD_LAUNCH_ENABLED: "false" },
+      "trace-legacy-followup"
+    );
+
+    expect(mocks.sendPrompt).toHaveBeenCalledTimes(1);
+    const sendPromptCall = mocks.sendPrompt.mock.calls[0]?.[0];
+    expect(sendPromptCall).toBeDefined();
+    expect(sendPromptCall.sessionId).toBe("session-1");
+    expect(sendPromptCall.callbackContext.cardLifecycle).toBe("single-card-v2");
+    expect(sendPromptCall.callbackContext.workingMessageId).toBe("working-1");
+    expect(sendPromptCall.callbackContext.targetLabel).toBe("huangdong/chatbi");
   });
 });

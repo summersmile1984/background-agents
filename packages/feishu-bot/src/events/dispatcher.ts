@@ -1,4 +1,5 @@
 import type { FeishuCallbackContext } from "@open-inspect/shared/types/session-api";
+import type { InboundInteraction } from "@open-inspect/shared/types/inbound-interaction";
 import type { RuntimeConfigFragment } from "@open-inspect/shared/types/runtime-launch";
 import { RUNTIME_COMMANDS } from "@open-inspect/shared/runtime-commands";
 import {
@@ -7,6 +8,7 @@ import {
   buildSessionListCard,
   buildWorkingCard,
 } from "../cards";
+import { buildTurnWorkingCard } from "../launch-cards";
 import {
   findConversationSessionByShortId,
   listConversationSessions,
@@ -25,8 +27,10 @@ import { createLogger } from "../logger";
 import {
   createSession,
   defaultHarnessForModel,
+  getSessionRuntime,
   invokeRuntimeCommand,
   sendPrompt,
+  validateNextTurnRuntimeOverride,
 } from "../sessions/control-plane-client";
 import { getRuntimeCatalog } from "../sessions/runtime-catalog";
 import {
@@ -39,7 +43,9 @@ import {
 import type { Env } from "../types";
 import { parseSessionReference } from "../conversation/session-short-id";
 import { deliveryIdempotencyKey } from "../conversation/delivery-id";
+import { clearNextTurnOptions, getNextTurnOptions } from "../conversation/next-turn-options-store";
 import { parseFeishuMessageText, type FeishuEventEnvelope } from "./payload";
+import { handleFeishuBotMenuEvent } from "./bot-menu";
 import { visualVerificationForPrompt } from "./visual-verification";
 import {
   deliverSingleCardFollowUp,
@@ -84,12 +90,6 @@ async function isGroupMentionForBot(event: FeishuEventEnvelope, env: Env): Promi
   return mentions.some((mention) => mention.id?.open_id === botOpenId);
 }
 
-function isSessionListRequest(content: string): boolean {
-  return ["会话", "会话列表", "我的会话", "sessions", "my sessions"].includes(
-    content.trim().toLowerCase()
-  );
-}
-
 export { visualVerificationForPrompt } from "./visual-verification";
 
 /**
@@ -100,6 +100,38 @@ export { visualVerificationForPrompt } from "./visual-verification";
 export function parseRuntimeCommand(content: string): string | undefined {
   const match = /^\/([a-z0-9-]+)$/i.exec(content.trim());
   return match?.[1]?.toLowerCase();
+}
+
+export type FeishuInboundClassification =
+  | InboundInteraction
+  | { kind: "unknown-command"; slashName: string };
+
+/**
+ * Classify exact slash aliases before any delivery path sees their text.
+ * Normal prose, paths, and source snippets remain user prompts; a standalone
+ * unknown slash is intentionally rejected instead of being sent to a harness.
+ */
+export function classifyFeishuInbound(content: string): FeishuInboundClassification {
+  const slashName = parseRuntimeCommand(content);
+  if (!slashName) return { kind: "user-prompt", content };
+  if (slashName === "sessions") {
+    return { kind: "product-control", actionId: "product.sessions", arguments: {} };
+  }
+  const definition = RUNTIME_COMMANDS.find((command) => command.slashName === slashName);
+  if (!definition) return { kind: "unknown-command", slashName };
+  switch (definition.execution) {
+    case "driver":
+      return { kind: "driver-command", commandId: definition.id, arguments: {} };
+    case "prompt-transform":
+      return {
+        kind: "managed-prompt",
+        workflowId: definition.id,
+        workflowVersion: 1,
+        arguments: {},
+      };
+    case "control-plane":
+      return { kind: "product-control", actionId: definition.id, arguments: {} };
+  }
 }
 
 export { parseSessionReference } from "../conversation/session-short-id";
@@ -136,6 +168,9 @@ function runtimeCommandResultText(input: {
   }
   if (input.slashName === "stop") return "已请求停止当前任务。";
   if (input.slashName === "review") return "代码审查任务已排队。";
+  if (input.slashName === "compact") {
+    return "已提交上下文整理；完成结果会记录到会话事件。";
+  }
   if (input.slashName === "new") {
     return "已记录。请发送新的顶层消息创建独立会话；当前话题仍绑定原仓库。";
   }
@@ -302,6 +337,84 @@ async function deliverFollowUp(input: {
     );
     return true;
   }
+  const nextTurnOptions =
+    input.env.FEISHU_NEXT_TURN_OPTIONS_ENABLED === "true" && input.coordinates.chatType === "p2p"
+      ? await getNextTurnOptions(input.env, {
+          ...input.coordinates,
+          sessionId: existing.sessionId,
+          actorId: input.actor,
+        })
+      : null;
+  if (nextTurnOptions && (nextTurnOptions.model || nextTurnOptions.reasoningEffort)) {
+    const runtime = await getSessionRuntime({
+      env: input.env,
+      sessionId: existing.sessionId,
+      actorId: input.actor,
+      traceId: input.traceId,
+    });
+    const issue = runtime
+      ? validateNextTurnRuntimeOverride({
+          runtime,
+          pinnedModel: existing.model,
+          model: nextTurnOptions.model,
+          reasoningEffort: nextTurnOptions.reasoningEffort,
+        })
+      : "暂时无法读取 Runtime 能力";
+    if (issue) {
+      await replySessionText(
+        input.env,
+        input.coordinates,
+        `下一条任务设置已变化（${issue}），任务尚未发送。请重新打开会话控制卡选择后再发送原任务。`
+      );
+      return true;
+    }
+  }
+  const selectedVisualVerification =
+    nextTurnOptions?.visualVerificationEnabled === true
+      ? {}
+      : nextTurnOptions?.visualVerificationEnabled === false
+        ? undefined
+        : visualVerificationForPrompt(input.content);
+  const effectiveModel = nextTurnOptions?.model ?? existing.model;
+  const effectiveEffort = nextTurnOptions?.reasoningEffort ?? existing.reasoningEffort;
+  // Mirror the V2 follow-up path: reply a working card before sending the
+  // prompt so completion can patch it in place rather than emitting a
+  // separate completion message.
+  const workingCard = buildTurnWorkingCard({
+    sessionId: existing.sessionId,
+    targetLabel: existing.targetLabel,
+    webAppUrl: input.env.WEB_APP_URL,
+    ...(existing.branch ? { branch: existing.branch } : {}),
+    ...(existing.harness ? { harness: existing.harness } : {}),
+    ...(existing.routeId ? { routeId: existing.routeId } : {}),
+    model: effectiveModel,
+    ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
+    task: input.content,
+    sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
+  });
+  const workingReplyId = await deliveryIdempotencyKey(input.messageId, "turn-card");
+  let workingMessage;
+  try {
+    workingMessage = await replySessionCard(
+      input.env,
+      input.coordinates,
+      workingCard,
+      workingReplyId
+    );
+  } catch (error) {
+    // Failure to post the working card should not silently drop the follow-up.
+    // Fall back to a plain text receipt so the user sees their message landed,
+    // and the completion will arrive as a normal text reply.
+    log.error("feishu.followup.working_card_failed", {
+      trace_id: input.traceId,
+      message_id: input.messageId,
+      session_id: existing.sessionId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
+    await replySessionText(input.env, input.coordinates, "已收到你的消息，正在处理。").catch(
+      () => undefined
+    );
+  }
   const callbackContext: FeishuCallbackContext = {
     source: "feishu",
     tenantKey: input.coordinates.tenantKey,
@@ -313,8 +426,10 @@ async function deliverFollowUp(input: {
     targetLabel: existing.targetLabel,
     ...(existing.branch ? { branch: existing.branch } : {}),
     harness: existing.harness,
-    model: existing.model,
-    reasoningEffort: existing.reasoningEffort,
+    model: effectiveModel,
+    ...(effectiveEffort ? { reasoningEffort: effectiveEffort } : {}),
+    ...(workingMessage?.messageId ? { workingMessageId: workingMessage.messageId } : {}),
+    ...(workingMessage?.messageId ? { cardLifecycle: "single-card-v2" as const } : {}),
   };
   const result = await sendPrompt({
     env: input.env,
@@ -322,7 +437,11 @@ async function deliverFollowUp(input: {
     content: input.content,
     actorId: input.actor,
     callbackContext,
-    visualVerification: visualVerificationForPrompt(input.content),
+    ...(nextTurnOptions?.model ? { model: nextTurnOptions.model } : {}),
+    ...(nextTurnOptions?.reasoningEffort
+      ? { reasoningEffort: nextTurnOptions.reasoningEffort }
+      : {}),
+    ...(selectedVisualVerification ? { visualVerification: selectedVisualVerification } : {}),
     clientRequestId: `feishu-followup:${input.messageId}`.slice(0, 128),
     traceId: input.traceId,
   });
@@ -338,6 +457,30 @@ async function deliverFollowUp(input: {
     }
     await replySessionText(input.env, input.coordinates, "暂时无法发送后续请求，请稍后重试。");
   } else {
+    if (nextTurnOptions) {
+      const cleared = await clearNextTurnOptions(
+        input.env,
+        {
+          ...input.coordinates,
+          sessionId: existing.sessionId,
+          actorId: input.actor,
+        },
+        nextTurnOptions.revision
+      );
+      log.info("feishu.next_turn.claimed", {
+        event: "feishu.next_turn.claimed",
+        trace_id: input.traceId,
+        tenant_key: input.coordinates.tenantKey,
+        chat_id: input.coordinates.chatId,
+        root_message_id: input.coordinates.rootMessageId,
+        ...(input.coordinates.threadId ? { thread_id: input.coordinates.threadId } : {}),
+        actor_id: input.actor,
+        session_id: existing.sessionId,
+        message_id: input.messageId,
+        selection_revision: nextTurnOptions.revision,
+        outcome: cleared ? "cleared" : "accepted_stale_option",
+      });
+    }
     await updateThreadSession(input.env, input.coordinates, {
       state: "active",
       lastMessageId: input.messageId,
@@ -351,6 +494,10 @@ export async function handleFeishuEvent(
   env: Env,
   traceId: string
 ): Promise<void> {
+  if (payload.header?.event_type === "application.bot.menu_v6") {
+    await handleFeishuBotMenuEvent(payload, env, traceId);
+    return;
+  }
   if (payload.header?.event_type !== "im.message.receive_v1") return;
   const sender = payload.event?.sender;
   const message = payload.event?.message;
@@ -524,29 +671,43 @@ export async function handleFeishuEvent(
     await storeThreadMessageAlias(env, coordinates, messageId).catch(() => undefined);
   }
 
-  const slashName = parseRuntimeCommand(content);
-  if (
-    slashName &&
-    (await handleRuntimeCommand({
-      env,
-      coordinates,
-      existing,
-      actor,
-      messageId,
-      slashName,
-      traceId,
-    }))
-  ) {
-    return;
-  }
-
-  if (!message.root_id && isSessionListRequest(content)) {
+  const inbound = classifyFeishuInbound(content);
+  if (inbound.kind === "product-control" && inbound.actionId === "product.sessions") {
     const sessions = await listConversationSessions(env, { ...coordinates, actorId: actor });
     await sendFeishuCard(
       env,
       coordinates.chatId,
       buildSessionListCard({ sessions, webAppUrl: env.WEB_APP_URL })
     );
+    return;
+  }
+  if (inbound.kind === "unknown-command") {
+    await replySessionText(
+      env,
+      coordinates,
+      `未知命令 /${inbound.slashName}。可用快捷命令：/help、/status、/stop、/review、/sessions。`
+    );
+    return;
+  }
+  if (inbound.kind !== "user-prompt") {
+    const slashName = parseRuntimeCommand(content);
+    if (
+      slashName &&
+      (await handleRuntimeCommand({
+        env,
+        coordinates,
+        existing,
+        actor,
+        messageId,
+        slashName,
+        traceId,
+      }))
+    ) {
+      return;
+    }
+    // A registered command must never fall through to the prompt path, even
+    // if an adapter and catalog deployment are briefly out of sync.
+    await replySessionText(env, coordinates, "该控制命令暂时不可用，请稍后重试。");
     return;
   }
 
@@ -591,6 +752,13 @@ export async function handleFeishuEvent(
         root_message_id: coordinates.rootMessageId,
         error: error instanceof Error ? error : new Error(String(error)),
       });
+      // The V2 path swallowed the follow-up without informing the user. Send
+      // a plain text receipt so the conversation is not left hanging.
+      await replySessionText(
+        env,
+        coordinates,
+        "已收到你的消息，处理过程中遇到异常，请稍后重试。"
+      ).catch(() => undefined);
     }
     return;
   }
@@ -791,6 +959,7 @@ export async function startNewSession(input: {
       chatType: input.coordinates.chatType,
       replyMode: input.coordinates.replyMode,
       sessionId: session.sessionId,
+      sessionControlEnabled: input.env.FEISHU_SESSION_CONTROL_ENABLED === "true",
       webAppUrl: input.env.WEB_APP_URL,
     })
   ).catch(() => undefined);
@@ -813,6 +982,10 @@ export async function startNewSession(input: {
     ...(branch ? { branch } : {}),
     harness,
     ...(workingMessage?.messageId ? { workingMessageId: workingMessage.messageId } : {}),
+    // Align the legacy text-message path with the card-driven V2 lifecycle
+    // so completion messages patch the working card in place instead of
+    // leaving an orphan "working" card and emitting a separate reply.
+    ...(workingMessage?.messageId ? { cardLifecycle: "single-card-v2" as const } : {}),
     targetLabel: target.fullName,
     model,
     ...(reasoningEffort ? { reasoningEffort } : {}),
